@@ -60,7 +60,7 @@ Every milestone, commit, UX item, verification check, and test maps to a consist
 | **M1** | Project Setup + Domain Models | **DONE** | IC01, IC02 | UX-72–74, UX-76–79 |
 | **M2** | Core Data + Secure Storage | **DONE** | IC02, IC03 | UX-07, UX-22 |
 | **M3** | Networking + Login Flow | **DONE** | IC03, IC04 | UX-01–09 |
-| **M4** | Biometric + PIN Auth Gate | PLANNED | IC05, IC06 | UX-10–24 |
+| **M4** | Biometric + PIN Auth Gate | **DONE** | IC05, IC06 | UX-10–24 |
 | **M5** | WKWebView + Main Screen | PLANNED | IC07, IC08 | UX-25–34 |
 | **M6** | Push Notifications (FCM+APNs) | PLANNED | IC09, IC10 | UX-35–46, UX-71–75 |
 | **M7** | Config + Settings + Theme | PLANNED | IC11, IC12, IC13 | UX-47–57, UX-67–70 |

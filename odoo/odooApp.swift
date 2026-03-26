@@ -17,16 +17,49 @@ struct odooApp: App {
     }
 }
 
-/// Root view — login or main screen.
-/// Auth gate (biometric/PIN) will be added in M4.
+/// Root view — login → auth gate → main screen.
+/// Monitors scenePhase for bg→fg auth re-prompt (UX-20).
 struct AppRootView: View {
+    @StateObject private var authViewModel = AuthViewModel()
     @State private var isLoggedIn = false
+    @State private var showPin = false
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        if isLoggedIn {
-            MainPlaceholderView(onLogout: { isLoggedIn = false })
-        } else {
-            LoginView(onLoginSuccess: { isLoggedIn = true })
+        Group {
+            if !isLoggedIn {
+                LoginView(onLoginSuccess: {
+                    isLoggedIn = true
+                    if !authViewModel.requiresAuth {
+                        authViewModel.setAuthenticated(true)
+                    }
+                })
+            } else if authViewModel.requiresAuth && !authViewModel.isAuthenticated {
+                if showPin {
+                    PinView(
+                        authViewModel: authViewModel,
+                        onPinVerified: { showPin = false },
+                        onBackClick: { showPin = false }
+                    )
+                } else {
+                    BiometricView(
+                        authViewModel: authViewModel,
+                        onAuthSuccess: {},
+                        onUsePinClick: { showPin = true }
+                    )
+                }
+            } else {
+                MainPlaceholderView(onLogout: {
+                    isLoggedIn = false
+                    authViewModel.setAuthenticated(false)
+                })
+            }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .background {
+                authViewModel.onAppBackgrounded()
+                showPin = false
+            }
         }
     }
 }

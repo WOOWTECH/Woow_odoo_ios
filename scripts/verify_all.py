@@ -324,6 +324,43 @@ check("iV16b-M3", "AccountRepository deactivates all before activating", "isActi
 
 
 # ═══════════════════════════════════════════════════════════
+# iV19-M4: Biometric + PIN Auth Gate
+# ═══════════════════════════════════════════════════════════
+section("iV19-M4: Biometric + PIN Auth Gate")
+
+auth_files = [
+    "odoo/UI/Auth/AuthViewModel.swift",
+    "odoo/UI/Auth/BiometricView.swift",
+    "odoo/UI/Auth/PinView.swift",
+    "odoo/Data/Repository/SettingsRepository.swift",
+]
+for f in auth_files:
+    check("iV19-M4", f"{os.path.basename(f)} exists", os.path.exists(os.path.join(repo_dir, f)))
+
+# Check test classes ran
+check("iV20a-M4", "AuthViewModelTests executed", "AuthViewModelTests" in test_output)
+check("iV20b-M4", "SettingsRepositoryTests executed", "SettingsRepositoryTests" in test_output)
+
+# Check no skip button (UX-14)
+with open(os.path.join(repo_dir, "odoo/UI/Auth/BiometricView.swift")) as f:
+    bv = f.read()
+check("iV21-M4", "BiometricView has NO skip button (UX-14)",
+      "skip" not in bv.lower() or "NO skip" in bv)
+
+# Check scenePhase monitoring
+with open(os.path.join(repo_dir, "odoo/odooApp.swift")) as f:
+    app = f.read()
+check("iV22a-M4", "AppRootView monitors scenePhase", "scenePhase" in app)
+check("iV22b-M4", "onAppBackgrounded called on .background", "onAppBackgrounded" in app)
+
+# Check PIN exponential lockout wired
+with open(os.path.join(repo_dir, "odoo/Data/Repository/SettingsRepository.swift")) as f:
+    sr = f.read()
+check("iV23-M4", "SettingsRepository uses PinHasher.lockoutDuration", "lockoutDuration" in sr)
+check("iV24-M4", "SettingsRepository uses systemUptime (not wall clock)", "systemUptime" in sr)
+
+
+# ═══════════════════════════════════════════════════════════
 # SUMMARY
 # ═══════════════════════════════════════════════════════════
 section("VERIFICATION SUMMARY")

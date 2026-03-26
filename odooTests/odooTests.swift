@@ -467,3 +467,120 @@ final class ErrorMappingTests: XCTestCase {
         XCTAssertEqual(types.count, 8)
     }
 }
+
+// MARK: - M4: AuthViewModel Tests
+
+@MainActor
+final class AuthViewModelTests: XCTestCase {
+
+    func test_initialState_isNotAuthenticated() {
+        let vm = AuthViewModel()
+        XCTAssertFalse(vm.isAuthenticated)
+    }
+
+    func test_setAuthenticated_givenTrue_updatesState() {
+        let vm = AuthViewModel()
+        vm.setAuthenticated(true)
+        XCTAssertTrue(vm.isAuthenticated)
+    }
+
+    func test_onAppBackgrounded_givenLockOn_resetsAuth() {
+        let settings = SettingsRepository()
+        settings.setAppLock(true)
+        let vm = AuthViewModel(settingsRepository: settings)
+        vm.setAuthenticated(true)
+        XCTAssertTrue(vm.isAuthenticated)
+
+        vm.onAppBackgrounded()
+        XCTAssertFalse(vm.isAuthenticated)
+
+        // Cleanup
+        settings.setAppLock(false)
+    }
+
+    func test_onAppBackgrounded_givenLockOff_keepsAuth() {
+        let settings = SettingsRepository()
+        settings.setAppLock(false)
+        let vm = AuthViewModel(settingsRepository: settings)
+        vm.setAuthenticated(true)
+
+        vm.onAppBackgrounded()
+        XCTAssertTrue(vm.isAuthenticated)
+    }
+
+    func test_requiresAuth_givenLockEnabled_returnsTrue() {
+        let settings = SettingsRepository()
+        settings.setAppLock(true)
+        let vm = AuthViewModel(settingsRepository: settings)
+        XCTAssertTrue(vm.requiresAuth)
+
+        settings.setAppLock(false)
+    }
+
+    func test_requiresAuth_givenLockDisabled_returnsFalse() {
+        let settings = SettingsRepository()
+        settings.setAppLock(false)
+        let vm = AuthViewModel(settingsRepository: settings)
+        XCTAssertFalse(vm.requiresAuth)
+    }
+}
+
+// MARK: - M4: SettingsRepository Tests
+
+final class SettingsRepositoryTests: XCTestCase {
+
+    private var repo: SettingsRepository!
+
+    override func setUp() {
+        super.setUp()
+        repo = SettingsRepository()
+    }
+
+    override func tearDown() {
+        super.tearDown()
+        repo.setAppLock(false)
+        repo.setBiometric(false)
+        repo.removePin()
+        repo.resetFailedAttempts()
+    }
+
+    func test_setPin_givenValidPin_returnsTrue() {
+        XCTAssertTrue(repo.setPin("1234"))
+    }
+
+    func test_setPin_givenTooShort_returnsFalse() {
+        XCTAssertFalse(repo.setPin("12"))
+    }
+
+    func test_verifyPin_givenCorrectPin_returnsTrue() {
+        repo.setPin("5678")
+        XCTAssertTrue(repo.verifyPin("5678"))
+    }
+
+    func test_verifyPin_givenWrongPin_returnsFalse() {
+        repo.setPin("5678")
+        XCTAssertFalse(repo.verifyPin("0000"))
+    }
+
+    func test_removePin_clearsPinHash() {
+        repo.setPin("1234")
+        repo.removePin()
+        XCTAssertFalse(repo.verifyPin("1234"))
+    }
+
+    func test_failedAttempts_incrementsCorrectly() {
+        let count = repo.incrementFailedAttempts()
+        XCTAssertEqual(count, 1)
+        let count2 = repo.incrementFailedAttempts()
+        XCTAssertEqual(count2, 2)
+        repo.resetFailedAttempts()
+        XCTAssertEqual(repo.getFailedAttempts(), 0)
+    }
+
+    func test_appLock_toggleWorks() {
+        repo.setAppLock(true)
+        XCTAssertTrue(repo.isAppLockEnabled())
+        repo.setAppLock(false)
+        XCTAssertFalse(repo.isAppLockEnabled())
+    }
+}
