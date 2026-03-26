@@ -136,60 +136,103 @@ To verify "user enters wrong PIN and gets locked out":
 
 ## Milestone Workflow (MANDATORY for every milestone)
 
-Every milestone MUST follow these steps in order. Do NOT skip any step. Do NOT commit until ALL steps pass.
+Every milestone MUST follow these steps in order. Do NOT skip any step. Do NOT commit until ALL steps pass. This pipeline is designed to be self-executing — Claude Code can run it autonomously.
 
 ```
-Step 1: READ milestone from docs/2026-03-25-ios-implementation-milestones.md
-        → Understand deliverables, work items, verification criteria
-        → Cross-reference UX items from docs/functional-equivalence-matrix.md
-
-Step 2: IMPLEMENT the code
-        → Follow directory structure and naming conventions
-        → All types must be Sendable if crossing actor boundaries
-        → No Any types in public API
-
-Step 3: ARCHITECT REVIEW (code-review-ai:architect-review agent)
-        → Review for Swift best practices, SOLID, concurrency safety
-        → Fix ALL critical and high findings before proceeding
-        → Document any accepted medium/low findings
-
-Step 4: BUILD + UNIT TEST
-        → xcodebuild build must succeed
-        → xcodebuild test -only-testing:odooTests must pass (0 failures)
-        → Add new tests for new code — never ship untested code
-
-Step 5: SIMULATOR VERIFICATION (scripts/verify_all.py)
-        → Add new iV checks for the milestone's features
-        → Run full verify_all.py — ALL checks must pass (not just new ones)
-        → Install app on simulator, test lifecycle
-
-Step 6: BUG FIX LOOP
-        → If any test or verification fails, fix and go back to Step 4
-        → Repeat until 0 failures
-
-Step 7: REVIEW TEST SCRIPTS
-        → Ensure verify_all.py has checks for every UX item in this milestone
-        → Ensure unit tests cover happy path + error cases + edge cases
-        → Test names follow convention: test_{method}_given{Condition}_returns{Expected}
-
-Step 8: SYNC DOCS
-        → Update milestone status in CLAUDE.md (PLANNED → DONE)
-        → Update docs/ios-verification-log.md with test results
-        → Verify UX items in functional-equivalence-matrix.md are covered
-        → Ensure commit IDs match the plan
-
-Step 9: COMMIT (only after ALL above pass)
-        → Commit message: feat(M{n}): description
-        → Include verification summary in commit message
-        → Include Co-Authored-By line
+┌─────────────────────────────────────────────────────────────────┐
+│  SELF-DEVELOPING PIPELINE (runs for every milestone)            │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Step 0: CHECK DEPENDENCIES                                     │
+│          → Verify all dependent milestones are DONE             │
+│          → e.g., M5 requires M3 + M4 both DONE                 │
+│          → If not DONE, STOP — implement dependencies first     │
+│                                                                 │
+│  Step 1: READ PLAN                                              │
+│          → Read milestone from ios-implementation-milestones.md │
+│          → Understand deliverables, work items, verification    │
+│          → Cross-reference UX items from functional-equiv.md    │
+│          → List all files to create/modify                      │
+│                                                                 │
+│  Step 2: IMPLEMENT                                              │
+│          → Follow directory structure and naming conventions     │
+│          → All types Sendable if crossing actor boundaries      │
+│          → No Any types in public API                           │
+│          → Write unit tests alongside code (not after)          │
+│                                                                 │
+│  Step 3: ARCHITECT REVIEW                                       │
+│          → Launch code-review-ai:architect-review agent         │
+│          → Fix ALL critical and high findings                   │
+│          → Document accepted medium/low findings                │
+│          ┌─ If architect says "wrong approach" ──→ BACK TO 1   │
+│          └─ If fixes needed ──→ fix then continue               │
+│                                                                 │
+│  Step 4: BUILD + UNIT TEST                                      │
+│          → xcodebuild build must succeed                        │
+│          → xcodebuild test must pass (0 failures)               │
+│          → New code must have tests (never ship untested)       │
+│          → ALL previous milestone tests must still pass         │
+│          ┌─ If fails ──→ fix and re-run Step 4                 │
+│          └─ If pass ──→ continue                                │
+│                                                                 │
+│  Step 5: SIMULATOR VERIFICATION                                 │
+│          → Add new iV checks to scripts/verify_all.py           │
+│          → Run full verify_all.py (ALL milestones, not just new)│
+│          → Install app, test launch, lifecycle, UI              │
+│          → Previous milestone checks must still pass (regression)│
+│          ┌─ If fails ──→ fix and go back to Step 4             │
+│          └─ If pass ──→ continue                                │
+│                                                                 │
+│  Step 6: BUG FIX LOOP                                           │
+│          → If ANY test or verification failed in Steps 4-5      │
+│          → Fix the bug                                          │
+│          → Go back to Step 4 (re-run ALL tests, not just fixed) │
+│          → Repeat until 0 failures across everything            │
+│          → Max 5 iterations — if still failing, ask user        │
+│                                                                 │
+│  Step 7: REVIEW TEST QUALITY                                    │
+│          → verify_all.py has checks for EVERY UX item           │
+│          → Unit tests cover: happy path + errors + edge cases   │
+│          → Test names: test_{method}_given{X}_returns{Y}        │
+│          → No lazy tests (assert true, assert not null)         │
+│          → Tests verify behavior, not implementation            │
+│                                                                 │
+│  Step 8: SYNC ALL DOCS                                          │
+│          → CLAUDE.md: milestone status PLANNED → DONE           │
+│          → ios-verification-log.md: append test results         │
+│          → functional-equivalence-matrix.md: mark UX items done │
+│          → Commit IDs match the plan                            │
+│          → Code matches docs, docs match code                   │
+│                                                                 │
+│  Step 9: COMMIT                                                 │
+│          → Only after ALL Steps 0-8 pass                        │
+│          → Message: feat(M{n}): description                     │
+│          → Include: build result, test count, iV count          │
+│          → Include: Co-Authored-By line                         │
+│                                                                 │
+│  Step 10: POST-COMMIT SANITY CHECK                              │
+│          → git log — verify commit is clean                     │
+│          → Re-run verify_all.py one more time                   │
+│          → If fails, revert and go back to Step 6               │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
+
+### Pipeline Guardrails
 
 **Never commit with:**
-- ❌ Failing tests
-- ❌ Unreviewed code (skip architect review)
-- ❌ Missing verification checks in verify_all.py
+- ❌ Failing tests (unit or simulator)
+- ❌ Unreviewed code (skipped architect review)
+- ❌ Missing iV checks in verify_all.py for this milestone's UX items
 - ❌ Docs out of sync with code
 - ❌ UX items not covered by tests
+- ❌ Regression — previous milestones broken
+
+**Escalate to user when:**
+- ⚠️ Architect review says "wrong approach" (Step 3)
+- ⚠️ Bug fix loop exceeds 5 iterations (Step 6)
+- ⚠️ Platform limitation blocks a UX item (document in functional-equiv.md)
+- ⚠️ Dependency on user action (Apple Developer account, Firebase setup, etc.)
 
 ---
 
