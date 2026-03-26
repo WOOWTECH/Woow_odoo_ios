@@ -54,9 +54,10 @@ docs/                    # Plans, verification logs
 - **All types:** `Sendable` conformance required for types crossing actor boundaries
 - **Models:** Immutable (`let` properties), use copy methods for mutation
 - **Naming:** `UpperCamelCase` types, `lowerCamelCase` methods, `test_methodName_givenCondition_expectedResult` for tests
-- **Test files:** Named `{Milestone}_{Component}Tests.swift` (e.g., `M1_DomainModelTests.swift`)
+- **Test files:** Named by component (e.g., `DomainModelTests.swift`, `OdooAPIClientTests.swift`). All in `odooTests/`.
+- **Verification script:** `scripts/verify_all.py` — cumulative, adds sections per milestone (iV01-M1, iV08-M2, etc.)
 - **Verification IDs:** `iV{nn}-M{n}` format matching milestones
-- **Commits:** Verify (build + test + simulator) before committing
+- **Commits:** Verify (build + test + `verify_all.py`) before committing
 - **Security:** PIN hash in Keychain only, session ID in Keychain, HTTPS enforced, allowlist URL validation
 - **No `Any` types** in public API — use `JsonValue` enum for heterogeneous JSON
 
