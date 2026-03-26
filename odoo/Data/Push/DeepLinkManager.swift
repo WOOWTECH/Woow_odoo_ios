@@ -6,6 +6,8 @@ import Combine
 @MainActor
 final class DeepLinkManager: ObservableObject {
 
+    static let shared = DeepLinkManager()
+
     @Published private(set) var pendingUrl: String?
 
     /// Stores a URL to be navigated to after authentication completes.

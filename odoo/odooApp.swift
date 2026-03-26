@@ -49,10 +49,15 @@ struct AppRootView: View {
                     )
                 }
             } else {
-                MainPlaceholderView(onLogout: {
-                    isLoggedIn = false
-                    authViewModel.setAuthenticated(false)
-                })
+                MainView(
+                    onMenuClick: {
+                        // Will navigate to Config in M7
+                    },
+                    onSessionExpired: {
+                        isLoggedIn = false
+                        authViewModel.setAuthenticated(false)
+                    }
+                )
             }
         }
         .onChange(of: scenePhase) { _, newPhase in

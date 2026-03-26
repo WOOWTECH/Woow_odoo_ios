@@ -361,6 +361,30 @@ check("iV24-M4", "SettingsRepository uses systemUptime (not wall clock)", "syste
 
 
 # ═══════════════════════════════════════════════════════════
+# iV25-M5: WKWebView + Main Screen
+# ═══════════════════════════════════════════════════════════
+section("iV25-M5: WKWebView + Main Screen")
+
+m5_files = [
+    "odoo/UI/Main/OdooWebView.swift",
+    "odoo/UI/Main/MainView.swift",
+    "odoo/UI/Main/MainViewModel.swift",
+]
+for f in m5_files:
+    check("iV25-M5", f"{os.path.basename(f)} exists", os.path.exists(os.path.join(repo_dir, f)))
+
+with open(os.path.join(repo_dir, "odoo/UI/Main/OdooWebView.swift")) as f:
+    wv = f.read()
+check("iV26a-M5", "WKWebView has same-host enforcement", "caseInsensitiveCompare(serverHost)" in wv)
+check("iV26b-M5", "External URLs open in Safari", "UIApplication.shared.open" in wv)
+check("iV26c-M5", "Session expiry detection (/web/login)", "/web/login" in wv)
+check("iV27-M5", "OWL layout fix JavaScript injected", "o_action_manager" in wv)
+check("iV28-M5", "Popup windows blocked (return nil)", "return nil" in wv)
+
+check("iV29-M5", "MainViewModelDeepLinkTests executed", "MainViewModelDeepLinkTests" in test_output)
+
+
+# ═══════════════════════════════════════════════════════════
 # SUMMARY
 # ═══════════════════════════════════════════════════════════
 section("VERIFICATION SUMMARY")

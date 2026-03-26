@@ -584,3 +584,35 @@ final class SettingsRepositoryTests: XCTestCase {
         XCTAssertFalse(repo.isAppLockEnabled())
     }
 }
+
+// MARK: - M5: MainViewModel + DeepLinkManager Tests
+
+@MainActor
+final class MainViewModelDeepLinkTests: XCTestCase {
+
+    func test_deepLinkManager_consumeReturnsNilWhenEmpty() {
+        let manager = DeepLinkManager()
+        XCTAssertNil(manager.consume())
+    }
+
+    func test_deepLinkManager_setAndConsumeReturnsUrlThenClears() {
+        let manager = DeepLinkManager()
+        manager.setPending("/web#id=42")
+        XCTAssertEqual(manager.consume(), "/web#id=42")
+        XCTAssertNil(manager.consume())
+    }
+
+    func test_deepLinkManager_overwriteKeepsLatest() {
+        let manager = DeepLinkManager()
+        manager.setPending("/web#id=1")
+        manager.setPending("/web#id=2")
+        XCTAssertEqual(manager.consume(), "/web#id=2")
+    }
+
+    func test_deepLinkManager_setNilClears() {
+        let manager = DeepLinkManager()
+        manager.setPending("/web#action=contacts")
+        manager.setPending(nil)
+        XCTAssertNil(manager.consume())
+    }
+}
