@@ -134,6 +134,65 @@ To verify "user enters wrong PIN and gets locked out":
 - **Simulator check:** iV22-M4
 - **Functional equiv:** Row 17-19 in functional-equivalence-matrix.md
 
+## Milestone Workflow (MANDATORY for every milestone)
+
+Every milestone MUST follow these steps in order. Do NOT skip any step. Do NOT commit until ALL steps pass.
+
+```
+Step 1: READ milestone from docs/2026-03-25-ios-implementation-milestones.md
+        → Understand deliverables, work items, verification criteria
+        → Cross-reference UX items from docs/functional-equivalence-matrix.md
+
+Step 2: IMPLEMENT the code
+        → Follow directory structure and naming conventions
+        → All types must be Sendable if crossing actor boundaries
+        → No Any types in public API
+
+Step 3: ARCHITECT REVIEW (code-review-ai:architect-review agent)
+        → Review for Swift best practices, SOLID, concurrency safety
+        → Fix ALL critical and high findings before proceeding
+        → Document any accepted medium/low findings
+
+Step 4: BUILD + UNIT TEST
+        → xcodebuild build must succeed
+        → xcodebuild test -only-testing:odooTests must pass (0 failures)
+        → Add new tests for new code — never ship untested code
+
+Step 5: SIMULATOR VERIFICATION (scripts/verify_all.py)
+        → Add new iV checks for the milestone's features
+        → Run full verify_all.py — ALL checks must pass (not just new ones)
+        → Install app on simulator, test lifecycle
+
+Step 6: BUG FIX LOOP
+        → If any test or verification fails, fix and go back to Step 4
+        → Repeat until 0 failures
+
+Step 7: REVIEW TEST SCRIPTS
+        → Ensure verify_all.py has checks for every UX item in this milestone
+        → Ensure unit tests cover happy path + error cases + edge cases
+        → Test names follow convention: test_{method}_given{Condition}_returns{Expected}
+
+Step 8: SYNC DOCS
+        → Update milestone status in CLAUDE.md (PLANNED → DONE)
+        → Update docs/ios-verification-log.md with test results
+        → Verify UX items in functional-equivalence-matrix.md are covered
+        → Ensure commit IDs match the plan
+
+Step 9: COMMIT (only after ALL above pass)
+        → Commit message: feat(M{n}): description
+        → Include verification summary in commit message
+        → Include Co-Authored-By line
+```
+
+**Never commit with:**
+- ❌ Failing tests
+- ❌ Unreviewed code (skip architect review)
+- ❌ Missing verification checks in verify_all.py
+- ❌ Docs out of sync with code
+- ❌ UX items not covered by tests
+
+---
+
 ## Conventions
 
 - **All types:** `Sendable` conformance required for types crossing actor boundaries
