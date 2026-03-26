@@ -10,6 +10,8 @@ import SwiftUI
 @main
 struct odooApp: App {
 
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
     var body: some Scene {
         WindowGroup {
             AppRootView()

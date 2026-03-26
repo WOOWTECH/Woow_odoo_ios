@@ -385,6 +385,39 @@ check("iV29-M5", "MainViewModelDeepLinkTests executed", "MainViewModelDeepLinkTe
 
 
 # ═══════════════════════════════════════════════════════════
+# iV31-M6: Push Notifications (FCM + APNs)
+# ═══════════════════════════════════════════════════════════
+section("iV31-M6: Push Notifications")
+
+m6_files = [
+    "odoo/Data/Push/NotificationService.swift",
+    "odoo/Data/Push/PushTokenRepository.swift",
+    "odoo/App/AppDelegate.swift",
+]
+for f in m6_files:
+    check("iV31-M6", f"{os.path.basename(f)} exists", os.path.exists(os.path.join(repo_dir, f)))
+
+check("iV32a-M6", "NotificationServiceTests executed", "NotificationServiceTests" in test_output)
+check("iV32b-M6", "PushTokenRepositoryTests executed", "PushTokenRepositoryTests" in test_output)
+
+with open(os.path.join(repo_dir, "odoo/Data/Push/NotificationService.swift")) as f:
+    ns = f.read()
+check("iV33a-M6", "Notification grouped by threadIdentifier", "threadIdentifier" in ns)
+check("iV33b-M6", "Missing title returns nil (no crash)", 'guard let title = data["title"]' in ns)
+
+with open(os.path.join(repo_dir, "odoo/App/AppDelegate.swift")) as f:
+    ad = f.read()
+check("iV34a-M6", "AppDelegate handles notification tap → deep link", "odoo_action_url" in ad)
+check("iV34b-M6", "AppDelegate shows banner in foreground (UX-46)", ".banner" in ad)
+check("iV35-M6", "PushTokenRepository registers with platform=ios",
+      '"ios"' in open(os.path.join(repo_dir, "odoo/Data/Push/PushTokenRepository.swift")).read())
+
+# Check GoogleService-Info.plist exists
+plist = os.path.join(repo_dir, "odoo", "GoogleService-Info.plist")
+check("iV36-M6", "GoogleService-Info.plist exists", os.path.exists(plist))
+
+
+# ═══════════════════════════════════════════════════════════
 # SUMMARY
 # ═══════════════════════════════════════════════════════════
 section("VERIFICATION SUMMARY")
