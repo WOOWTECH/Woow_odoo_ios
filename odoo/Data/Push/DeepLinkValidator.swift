@@ -1,10 +1,16 @@
 import Foundation
 
 /// Validates deep link URLs to prevent injection attacks.
-/// Direct port from Android: DeepLinkValidator.kt (same logic, same tests).
+/// Uses allowlist approach — only permits relative /web paths and https same-host URLs.
+/// Ported from Android: DeepLinkValidator.kt (hardened per architect review).
 enum DeepLinkValidator {
 
     /// Validates that an action URL is safe to load in WKWebView.
+    ///
+    /// Allowlist approach:
+    /// - Relative paths starting with `/web` are always allowed
+    /// - Absolute URLs must be `https` scheme AND same host
+    /// - Everything else is rejected (javascript:, data:, blob:, file:, ftp:, etc.)
     ///
     /// - Parameters:
     ///   - url: The URL from a notification deep link
@@ -14,20 +20,15 @@ enum DeepLinkValidator {
         let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
 
-        let lower = trimmed.lowercased()
-
-        // Reject dangerous schemes
-        if lower.hasPrefix("javascript:") || lower.hasPrefix("data:") {
-            return false
-        }
-
         // Allow relative paths starting with /web
         if trimmed.hasPrefix("/web") {
             return true
         }
 
-        // For absolute URLs, verify same host
+        // For absolute URLs: only allow https with same host
         guard let parsed = URL(string: trimmed),
+              let scheme = parsed.scheme?.lowercased(),
+              scheme == "https",
               let urlHost = parsed.host else {
             return false
         }

@@ -2,16 +2,16 @@ import Foundation
 
 /// Represents a connected Odoo server account.
 /// Ported from Android: OdooAccount.kt
-struct OdooAccount: Identifiable, Codable, Equatable {
+struct OdooAccount: Identifiable, Codable, Equatable, Hashable, Sendable {
     let id: String
-    var serverUrl: String
-    var database: String
-    var username: String
-    var displayName: String
-    var userId: Int?
-    var avatarBase64: String?
-    var lastLogin: Date
-    var isActive: Bool
+    let serverUrl: String
+    let database: String
+    let username: String
+    let displayName: String
+    let userId: Int?
+    let avatarBase64: String?
+    let lastLogin: Date
+    let isActive: Bool
 
     init(
         id: String = UUID().uuidString,
@@ -36,7 +36,14 @@ struct OdooAccount: Identifiable, Codable, Equatable {
     }
 
     /// Returns server URL with https:// prefix guaranteed.
+    /// Returns server URL with https:// prefix guaranteed.
+    /// Handles bare domains, http:// → https://, and preserves existing https://.
     var fullServerUrl: String {
-        serverUrl.hasPrefix("https://") ? serverUrl : "https://\(serverUrl)"
+        if serverUrl.hasPrefix("https://") { return serverUrl }
+        if serverUrl.hasPrefix("http://") {
+            return "https://" + serverUrl.dropFirst("http://".count)
+        }
+        if serverUrl.contains("://") { return serverUrl }
+        return "https://\(serverUrl)"
     }
 }

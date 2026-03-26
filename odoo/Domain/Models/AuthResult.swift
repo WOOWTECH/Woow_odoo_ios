@@ -2,18 +2,18 @@ import Foundation
 
 /// Result of an Odoo authentication attempt.
 /// Ported from Android: AuthResult.kt
-enum AuthResult {
+enum AuthResult: Sendable, Equatable {
     case success(AuthSuccess)
     case error(String, ErrorType)
 
-    struct AuthSuccess {
+    struct AuthSuccess: Sendable, Equatable {
         let userId: Int
         let sessionId: String
         let username: String
         let displayName: String
     }
 
-    enum ErrorType {
+    enum ErrorType: Sendable, Equatable {
         case networkError
         case invalidUrl
         case databaseNotFound
