@@ -255,6 +255,43 @@ else:
 
 
 # ═══════════════════════════════════════════════════════════
+# iV08-M2: Core Data stack
+# ═══════════════════════════════════════════════════════════
+section("iV08-M2: Core Data + Secure Storage")
+
+# Check source files exist
+storage_dir = os.path.join(sys.path[0], "..", "odoo", "Data", "Storage")
+files_m2 = ["PersistenceController.swift", "OdooAccountEntity.swift", "SecureStorage.swift", "PinHasher.swift"]
+for fname in files_m2:
+    fpath = os.path.join(storage_dir, fname)
+    check(f"iV08-M2", f"{fname} exists", os.path.exists(fpath))
+
+# iV09-M2: PinHasher tests pass (verified by unit tests in iV05)
+# Check specific M2 test classes ran
+check("iV09a-M2", "PinHasherTests executed", "PinHasherTests" in test_output)
+check("iV09b-M2", "PersistenceControllerTests executed", "PersistenceControllerTests" in test_output)
+check("iV09c-M2", "SecureStorageTests executed", "SecureStorageTests" in test_output)
+
+# iV10-M2: Verify architect review fixes
+with open(os.path.join(storage_dir, "PersistenceController.swift")) as f:
+    pc_content = f.read()
+check("iV10a-M2", "PersistenceController uses @unchecked Sendable (not false Sendable)",
+      "@unchecked Sendable" in pc_content)
+
+with open(os.path.join(storage_dir, "SecureStorage.swift")) as f:
+    ss_content = f.read()
+check("iV10b-M2", "SecureStorage uses atomic SecItemUpdate pattern",
+      "SecItemUpdate" in ss_content)
+
+with open(os.path.join(storage_dir, "PinHasher.swift")) as f:
+    ph_content = f.read()
+check("iV10c-M2", "PinHasher uses constant-time comparison",
+      "constantTimeEqual" in ph_content)
+check("iV10d-M2", "PinHasher lockout returns 0 for under-threshold",
+      "guard failedAttempts >= maxAttemptsPerTier else { return 0 }" in ph_content)
+
+
+# ═══════════════════════════════════════════════════════════
 # SUMMARY
 # ═══════════════════════════════════════════════════════════
 section("VERIFICATION SUMMARY")

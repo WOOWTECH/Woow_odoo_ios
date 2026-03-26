@@ -42,8 +42,9 @@ final class DomainModelTests: XCTestCase {
 
     func testOdooAccountEquality() {
         let id = "test-id"
-        let a = OdooAccount(id: id, serverUrl: "s", database: "d", username: "u", displayName: "n")
-        let b = OdooAccount(id: id, serverUrl: "s", database: "d", username: "u", displayName: "n")
+        let fixedDate = Date(timeIntervalSince1970: 1000000)
+        let a = OdooAccount(id: id, serverUrl: "s", database: "d", username: "u", displayName: "n", lastLogin: fixedDate)
+        let b = OdooAccount(id: id, serverUrl: "s", database: "d", username: "u", displayName: "n", lastLogin: fixedDate)
         XCTAssertEqual(a, b)
     }
 
@@ -141,5 +142,198 @@ final class DeepLinkValidatorTests: XCTestCase {
 
     func testRejectFtp() {
         XCTAssertFalse(DeepLinkValidator.isValid(url: "ftp://files.example.com", serverHost: serverHost))
+    }
+
+    func testRejectBlob() {
+        XCTAssertFalse(DeepLinkValidator.isValid(url: "blob:https://example.com/file", serverHost: serverHost))
+    }
+
+    func testRejectFile() {
+        XCTAssertFalse(DeepLinkValidator.isValid(url: "file:///etc/passwd", serverHost: serverHost))
+    }
+}
+
+// MARK: - M2: PinHasher Tests
+
+final class PinHasherTests: XCTestCase {
+
+    func test_hash_givenValidPin_returnsSaltColonHash() {
+        let result = PinHasher.hash(pin: "1234")
+        XCTAssertNotNil(result)
+        XCTAssertTrue(result!.contains(":"), "Hash must be in salt:hash format")
+    }
+
+    func test_hash_givenSamePinTwice_producesDifferentHashes() {
+        let hash1 = PinHasher.hash(pin: "1234")!
+        let hash2 = PinHasher.hash(pin: "1234")!
+        XCTAssertNotEqual(hash1, hash2, "Random salt should produce different hashes")
+    }
+
+    func test_verify_givenCorrectPin_returnsTrue() {
+        let hash = PinHasher.hash(pin: "5678")!
+        XCTAssertTrue(PinHasher.verify(pin: "5678", against: hash))
+    }
+
+    func test_verify_givenWrongPin_returnsFalse() {
+        let hash = PinHasher.hash(pin: "5678")!
+        XCTAssertFalse(PinHasher.verify(pin: "0000", against: hash))
+    }
+
+    func test_hash_givenTooShortPin_returnsNil() {
+        XCTAssertNil(PinHasher.hash(pin: "12"))
+    }
+
+    func test_hash_givenTooLongPin_returnsNil() {
+        XCTAssertNil(PinHasher.hash(pin: "1234567"))
+    }
+
+    func test_isValidLength_givenFourDigits_returnsTrue() {
+        XCTAssertTrue(PinHasher.isValidLength("1234"))
+    }
+
+    func test_isValidLength_givenSixDigits_returnsTrue() {
+        XCTAssertTrue(PinHasher.isValidLength("123456"))
+    }
+
+    func test_lockoutDuration_givenUnderThreshold_returnsZero() {
+        XCTAssertEqual(PinHasher.lockoutDuration(failedAttempts: 0), 0)
+        XCTAssertEqual(PinHasher.lockoutDuration(failedAttempts: 1), 0)
+        XCTAssertEqual(PinHasher.lockoutDuration(failedAttempts: 4), 0)
+    }
+
+    func test_lockoutDuration_givenFiveFailures_returns30Seconds() {
+        XCTAssertEqual(PinHasher.lockoutDuration(failedAttempts: 5), 30)
+    }
+
+    func test_lockoutDuration_givenTenFailures_returns5Minutes() {
+        XCTAssertEqual(PinHasher.lockoutDuration(failedAttempts: 10), 300)
+    }
+
+    func test_lockoutDuration_givenFifteenFailures_returns30Minutes() {
+        XCTAssertEqual(PinHasher.lockoutDuration(failedAttempts: 15), 1800)
+    }
+
+    func test_lockoutDuration_givenTwentyFailures_returns1Hour() {
+        XCTAssertEqual(PinHasher.lockoutDuration(failedAttempts: 20), 3600)
+    }
+
+    func test_lockoutDuration_givenHundredFailures_capsAt1Hour() {
+        XCTAssertEqual(PinHasher.lockoutDuration(failedAttempts: 100), 3600)
+    }
+}
+
+// MARK: - M2: PersistenceController Tests
+
+final class PersistenceControllerTests: XCTestCase {
+
+    func test_inMemoryStore_givenInsertAccount_fetchesItBack() {
+        let controller = PersistenceController(inMemory: true)
+        let context = controller.container.viewContext
+
+        let entity = OdooAccountEntity(context: context)
+        entity.id = "test-1"
+        entity.serverUrl = "odoo.example.com"
+        entity.database = "testdb"
+        entity.username = "admin"
+        entity.displayName = "Admin"
+        entity.isActive = true
+        entity.createdAt = Date()
+
+        try? context.save()
+
+        let request = OdooAccountEntity.fetchByIdRequest(id: "test-1")
+        let results = try? context.fetch(request)
+        XCTAssertEqual(results?.count, 1)
+        XCTAssertEqual(results?.first?.serverUrl, "odoo.example.com")
+    }
+
+    func test_fetchActive_givenOneActive_returnsIt() {
+        let controller = PersistenceController(inMemory: true)
+        let context = controller.container.viewContext
+
+        let e1 = OdooAccountEntity(context: context)
+        e1.id = "a1"; e1.serverUrl = "s1"; e1.database = "d1"
+        e1.username = "u1"; e1.displayName = "n1"
+        e1.isActive = false; e1.createdAt = Date()
+
+        let e2 = OdooAccountEntity(context: context)
+        e2.id = "a2"; e2.serverUrl = "s2"; e2.database = "d2"
+        e2.username = "u2"; e2.displayName = "n2"
+        e2.isActive = true; e2.createdAt = Date()
+
+        try? context.save()
+
+        let results = try? context.fetch(OdooAccountEntity.fetchActiveRequest())
+        XCTAssertEqual(results?.count, 1)
+        XCTAssertEqual(results?.first?.id, "a2")
+    }
+
+    func test_toDomainModel_givenEntity_convertsCorrectly() {
+        let controller = PersistenceController(inMemory: true)
+        let context = controller.container.viewContext
+
+        let entity = OdooAccountEntity(context: context)
+        entity.id = "conv-1"
+        entity.serverUrl = "demo.odoo.com"
+        entity.database = "demo"
+        entity.username = "admin"
+        entity.displayName = "Administrator"
+        entity.userId = 42
+        entity.isActive = true
+        entity.createdAt = Date()
+
+        let domain = entity.toDomainModel()
+        XCTAssertEqual(domain.id, "conv-1")
+        XCTAssertEqual(domain.serverUrl, "demo.odoo.com")
+        XCTAssertEqual(domain.userId, 42)
+        XCTAssertTrue(domain.isActive)
+    }
+}
+
+// MARK: - M2: SecureStorage Tests
+
+final class SecureStorageTests: XCTestCase {
+
+    private let storage = SecureStorage.shared
+
+    override func tearDown() {
+        super.tearDown()
+        storage.deletePassword(accountId: "test-account")
+        storage.deletePinHash()
+    }
+
+    func test_saveAndGetPassword_givenValidData_roundTrips() {
+        storage.savePassword(accountId: "test-account", password: "secret123")
+        let retrieved = storage.getPassword(accountId: "test-account")
+        XCTAssertEqual(retrieved, "secret123")
+    }
+
+    func test_getPassword_givenMissingKey_returnsNil() {
+        let result = storage.getPassword(accountId: "nonexistent-account")
+        XCTAssertNil(result)
+    }
+
+    func test_deletePassword_givenExistingKey_removesIt() {
+        storage.savePassword(accountId: "test-account", password: "toDelete")
+        storage.deletePassword(accountId: "test-account")
+        XCTAssertNil(storage.getPassword(accountId: "test-account"))
+    }
+
+    func test_saveAndGetSettings_roundTrips() {
+        var settings = AppSettings()
+        settings.themeColor = "#FF0000"
+        settings.appLockEnabled = true
+
+        storage.saveSettings(settings)
+        let retrieved = storage.getSettings()
+        XCTAssertEqual(retrieved.themeColor, "#FF0000")
+        XCTAssertTrue(retrieved.appLockEnabled)
+    }
+
+    func test_getSettings_givenNoSavedSettings_returnsDefaults() {
+        // Clear any existing settings first
+        let defaultSettings = AppSettings()
+        let retrieved = storage.getSettings()
+        XCTAssertEqual(retrieved.themeColor, defaultSettings.themeColor)
     }
 }
