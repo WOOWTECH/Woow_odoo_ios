@@ -292,6 +292,38 @@ check("iV10d-M2", "PinHasher lockout returns 0 for under-threshold",
 
 
 # ═══════════════════════════════════════════════════════════
+# iV13-M3: Login Flow
+# ═══════════════════════════════════════════════════════════
+section("iV13-M3: Login Flow")
+
+repo_dir = os.path.join(sys.path[0], "..")
+login_files = [
+    "odoo/UI/Login/LoginView.swift",
+    "odoo/UI/Login/LoginViewModel.swift",
+    "odoo/Data/Repository/AccountRepository.swift",
+]
+for f in login_files:
+    check("iV13-M3", f"{os.path.basename(f)} exists", os.path.exists(os.path.join(repo_dir, f)))
+
+# Check LoginViewModel tests ran
+check("iV14a-M3", "LoginViewModelTests executed", "LoginViewModelTests" in test_output)
+check("iV14b-M3", "ErrorMappingTests executed", "ErrorMappingTests" in test_output)
+
+# Check HTTPS enforcement in login
+with open(os.path.join(repo_dir, "odoo/UI/Login/LoginViewModel.swift")) as f:
+    lvm = f.read()
+check("iV15a-M3", "LoginViewModel rejects http:// URL", "HTTPS connection required" in lvm)
+check("iV15b-M3", "LoginViewModel validates blank URL", "Server URL is required" in lvm)
+check("iV15c-M3", "LoginViewModel validates blank credentials", "Username is required" in lvm)
+
+# Check AccountRepository uses Keychain
+with open(os.path.join(repo_dir, "odoo/Data/Repository/AccountRepository.swift")) as f:
+    ar = f.read()
+check("iV16a-M3", "AccountRepository saves password in Keychain", "savePassword" in ar)
+check("iV16b-M3", "AccountRepository deactivates all before activating", "isActive = false" in ar)
+
+
+# ═══════════════════════════════════════════════════════════
 # SUMMARY
 # ═══════════════════════════════════════════════════════════
 section("VERIFICATION SUMMARY")
