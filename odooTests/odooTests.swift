@@ -759,3 +759,163 @@ final class SettingsViewModelTests: XCTestCase {
         XCTAssertEqual(CacheService.formatSize(1024 * 1024 * 3), "3 MB")
     }
 }
+
+// MARK: - M11: OdooAPIClient HTTP Tests (with URLProtocol mock)
+
+final class MockURLProtocol: URLProtocol {
+    static var mockHandler: ((URLRequest) -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let handler = MockURLProtocol.mockHandler else { return }
+        let (response, data) = handler(request)
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+final class OdooAPIClientHTTPTests: XCTestCase {
+
+    private func makeClient() -> OdooAPIClient {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        return OdooAPIClient(session: URLSession(configuration: config))
+    }
+
+    func test_authenticate_givenHttpUrl_returnsHttpsRequired() async {
+        let client = makeClient()
+        let result = await client.authenticate(
+            serverUrl: "http://odoo.example.com",
+            database: "db", username: "admin", password: "pass"
+        )
+        if case .error(_, .httpsRequired) = result {
+            // Pass
+        } else {
+            XCTFail("Expected httpsRequired, got \(result)")
+        }
+    }
+
+    func test_authenticate_givenValidResponse_returnsSuccess() async {
+        MockURLProtocol.mockHandler = { request in
+            let json = """
+            {"jsonrpc":"2.0","id":"1","result":{"uid":42,"name":"Admin","username":"admin","session_id":"abc123","db":"testdb"}}
+            """
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, json.data(using: .utf8)!)
+        }
+
+        let client = makeClient()
+        let result = await client.authenticate(
+            serverUrl: "https://odoo.example.com",
+            database: "db", username: "admin", password: "pass"
+        )
+        if case .success(let auth) = result {
+            XCTAssertEqual(auth.userId, 42)
+            XCTAssertEqual(auth.displayName, "Admin")
+        } else {
+            XCTFail("Expected success, got \(result)")
+        }
+    }
+
+    func test_authenticate_givenUidZero_returnsInvalidCredentials() async {
+        MockURLProtocol.mockHandler = { request in
+            let json = """
+            {"jsonrpc":"2.0","id":"1","result":{"uid":0,"name":null}}
+            """
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, json.data(using: .utf8)!)
+        }
+
+        let client = makeClient()
+        let result = await client.authenticate(
+            serverUrl: "https://odoo.example.com",
+            database: "db", username: "admin", password: "wrong"
+        )
+        if case .error(_, .invalidCredentials) = result {
+            // Pass
+        } else {
+            XCTFail("Expected invalidCredentials, got \(result)")
+        }
+    }
+
+    func test_authenticate_givenDatabaseError_mapsToDatabaseNotFound() async {
+        MockURLProtocol.mockHandler = { request in
+            let json = """
+            {"jsonrpc":"2.0","id":"1","result":null,"error":{"message":"Database error","code":200,"data":{"message":"database 'xyz' does not exist","name":"DatabaseError"}}}
+            """
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, json.data(using: .utf8)!)
+        }
+
+        let client = makeClient()
+        let result = await client.authenticate(
+            serverUrl: "https://odoo.example.com",
+            database: "xyz", username: "admin", password: "pass"
+        )
+        if case .error(_, .databaseNotFound) = result {
+            // Pass
+        } else {
+            XCTFail("Expected databaseNotFound, got \(result)")
+        }
+    }
+
+    func test_authenticate_givenMalformedJson_returnsUnknown() async {
+        MockURLProtocol.mockHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, "not json".data(using: .utf8)!)
+        }
+
+        let client = makeClient()
+        let result = await client.authenticate(
+            serverUrl: "https://odoo.example.com",
+            database: "db", username: "admin", password: "pass"
+        )
+        if case .error(_, .unknown) = result {
+            // Pass
+        } else {
+            XCTFail("Expected unknown error, got \(result)")
+        }
+    }
+}
+
+// MARK: - M11: AppDelegate Notification Tap Tests
+
+@MainActor
+final class AppDelegateHandleNotificationTapTests: XCTestCase {
+
+    func test_handleNotificationTap_givenValidWebPath_storesPendingDeepLink() {
+        let delegate = AppDelegate()
+        let userInfo: [AnyHashable: Any] = ["odoo_action_url": "/web#id=42&model=sale.order"]
+
+        delegate.handleNotificationTap(userInfo: userInfo)
+        XCTAssertEqual(DeepLinkManager.shared.consume(), "/web#id=42&model=sale.order")
+    }
+
+    func test_handleNotificationTap_givenNoActionUrl_doesNothing() {
+        let delegate = AppDelegate()
+        delegate.handleNotificationTap(userInfo: [:])
+        XCTAssertNil(DeepLinkManager.shared.consume())
+    }
+
+    func test_handleNotificationTap_givenExternalUrl_doesNotStore() {
+        let delegate = AppDelegate()
+        let userInfo: [AnyHashable: Any] = ["odoo_action_url": "https://evil.com/phish"]
+
+        delegate.handleNotificationTap(userInfo: userInfo)
+        // External URL should not be stored (validator rejects non-/web without matching host)
+        XCTAssertNil(DeepLinkManager.shared.consume())
+    }
+
+    func test_handleNotificationTap_givenJavascriptUrl_doesNotStore() {
+        let delegate = AppDelegate()
+        let userInfo: [AnyHashable: Any] = ["odoo_action_url": "javascript:alert(1)"]
+
+        delegate.handleNotificationTap(userInfo: userInfo)
+        XCTAssertNil(DeepLinkManager.shared.consume())
+    }
+}

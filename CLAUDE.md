@@ -67,6 +67,7 @@ Every milestone, commit, UX item, verification check, and test maps to a consist
 | **M8** | Localization + Cache + iPad | **DONE** | IC14, IC15 | UX-58–66 |
 | **M9** | Unit + UI Tests | **DONE** | IC16, IC17 | — |
 | **M10** | App Store Prep + TestFlight | **DONE** | IC18 | — |
+| **M11** | Code Quality Improvement | **DONE** | IC19, IC20 | — |
 
 ### Commit IDs (IC01–IC18)
 
@@ -90,6 +91,8 @@ Every milestone, commit, UX item, verification check, and test maps to a consist
 | IC16 | Unit tests: all ViewModels, repositories, validators | M9 |
 | IC17 | UI tests: login flow, auth, navigation, settings | M9 |
 | IC18 | TestFlight build, App Store metadata prep | M10 |
+| IC19 | Refactor OdooAPIClient for testability (URLProtocol injection) | M11 |
+| IC20 | Extract AppDelegate.handleNotificationTap for testability | M11 |
 
 ### UX Items (UX-01–UX-82)
 

@@ -55,16 +55,19 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
         let userInfo = response.notification.request.content.userInfo
-
-        // Extract deep link URL from notification data
-        if let actionUrl = userInfo["odoo_action_url"] as? String {
-            let serverHost = "" // Will be set from active account
-            if DeepLinkValidator.isValid(url: actionUrl, serverHost: serverHost) || actionUrl.hasPrefix("/web") {
-                DeepLinkManager.shared.setPending(actionUrl)
-            }
-        }
-
+        handleNotificationTap(userInfo: userInfo)
         completionHandler()
+    }
+
+    /// Extracted for testability — processes notification tap deep link.
+    /// IC20: Previously inline in delegate method, now separately testable.
+    @MainActor
+    func handleNotificationTap(userInfo: [AnyHashable: Any]) {
+        guard let actionUrl = userInfo["odoo_action_url"] as? String else { return }
+        // Allow relative /web paths; for absolute URLs, validate host
+        if actionUrl.hasPrefix("/web") || DeepLinkValidator.isValid(url: actionUrl, serverHost: "") {
+            DeepLinkManager.shared.setPending(actionUrl)
+        }
     }
 }
 

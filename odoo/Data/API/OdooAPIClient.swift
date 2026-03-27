@@ -15,6 +15,7 @@ actor OdooAPIClient {
     private let logger = Logger(subsystem: "io.woowtech.odoo", category: "API")
     private var requestId: Int = 0
 
+    /// Default init with standard URLSession configuration.
     init() {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
@@ -23,6 +24,11 @@ actor OdooAPIClient {
         config.httpCookieAcceptPolicy = .always
         config.httpCookieStorage = .shared
         self.session = URLSession(configuration: config)
+    }
+
+    /// Testable init — inject custom URLSession with MockURLProtocol.
+    init(session: URLSession) {
+        self.session = session
     }
 
     // MARK: - Request ID Generation
