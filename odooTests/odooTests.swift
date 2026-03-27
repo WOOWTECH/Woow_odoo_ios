@@ -705,3 +705,57 @@ final class PushTokenRepositoryTests: XCTestCase {
         XCTAssertTrue(token == nil || !token!.isEmpty)
     }
 }
+
+// MARK: - M7: SettingsViewModel Tests
+
+@MainActor
+final class SettingsViewModelTests: XCTestCase {
+
+    func test_initialState_loadsSettings() {
+        let vm = SettingsViewModel()
+        XCTAssertEqual(vm.settings.themeColor, "#6183FC") // default
+    }
+
+    func test_updateThemeColor_setsColorString() {
+        let vm = SettingsViewModel()
+        vm.updateThemeColor("#FF0000")
+        XCTAssertEqual(vm.settings.themeColor, "#FF0000")
+        // Restore
+        vm.updateThemeColor("#6183FC")
+    }
+
+    func test_updateThemeMode_allValues() {
+        let vm = SettingsViewModel()
+        for mode in ThemeMode.allCases {
+            vm.updateThemeMode(mode)
+            XCTAssertEqual(vm.settings.themeMode, mode)
+        }
+        vm.updateThemeMode(.system)
+    }
+
+    func test_toggleAppLock_enables() {
+        let vm = SettingsViewModel()
+        vm.toggleAppLock(true)
+        XCTAssertTrue(vm.settings.appLockEnabled)
+        vm.toggleAppLock(false) // cleanup
+    }
+
+    func test_setPin_givenValidPin_returnsTrue() {
+        let vm = SettingsViewModel()
+        XCTAssertTrue(vm.setPin("1234"))
+        vm.removePin()
+    }
+
+    func test_setPin_givenTooShort_returnsFalse() {
+        let vm = SettingsViewModel()
+        XCTAssertFalse(vm.setPin("12"))
+    }
+
+    func test_cacheFormatSize_variousValues() {
+        XCTAssertEqual(CacheService.formatSize(0), "0 B")
+        XCTAssertEqual(CacheService.formatSize(512), "512 B")
+        XCTAssertEqual(CacheService.formatSize(1024), "1 KB")
+        XCTAssertEqual(CacheService.formatSize(2048), "2 KB")
+        XCTAssertEqual(CacheService.formatSize(1024 * 1024 * 3), "3 MB")
+    }
+}

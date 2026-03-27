@@ -418,6 +418,36 @@ check("iV36-M6", "GoogleService-Info.plist exists", os.path.exists(plist))
 
 
 # ═══════════════════════════════════════════════════════════
+# iV37-M7: Config + Settings + Theme
+# ═══════════════════════════════════════════════════════════
+section("iV37-M7: Config + Settings + Theme")
+
+m7_files = [
+    "odoo/UI/Config/ConfigView.swift", "odoo/UI/Config/ConfigViewModel.swift",
+    "odoo/UI/Settings/SettingsView.swift", "odoo/UI/Settings/SettingsViewModel.swift",
+    "odoo/UI/Settings/ColorPickerView.swift", "odoo/UI/Theme/WoowTheme.swift",
+    "odoo/Data/Repository/CacheService.swift",
+]
+for f in m7_files:
+    check("iV37-M7", f"{os.path.basename(f)} exists", os.path.exists(os.path.join(repo_dir, f)))
+
+check("iV38-M7", "SettingsViewModelTests executed", "SettingsViewModelTests" in test_output)
+
+with open(os.path.join(repo_dir, "odoo/UI/Settings/ColorPickerView.swift")) as f:
+    cp = f.read()
+check("iV39a-M7", "Color picker has brand preset colors", "brandColors" in cp)
+check("iV39b-M7", "Color picker has accent colors", "accentColors" in cp)
+check("iV39c-M7", "Color picker has HEX input (#RRGGBB)", "RRGGBB" in cp)
+
+with open(os.path.join(repo_dir, "odoo/UI/Settings/SettingsView.swift")) as f:
+    sv = f.read()
+check("iV40a-M7", "Settings has Appearance section", '"Appearance"' in sv)
+check("iV40b-M7", "Settings has Security section", '"Security"' in sv)
+check("iV40c-M7", "Settings has Data & Storage section", '"Data & Storage"' in sv)
+check("iV40d-M7", "Settings has About section", '"About"' in sv)
+
+
+# ═══════════════════════════════════════════════════════════
 # SUMMARY
 # ═══════════════════════════════════════════════════════════
 section("VERIFICATION SUMMARY")
