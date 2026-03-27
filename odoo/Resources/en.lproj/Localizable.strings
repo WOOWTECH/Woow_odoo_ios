@@ -1,0 +1,51 @@
+/* Login */
+"login_title" = "Add New Account";
+"server_url" = "Server URL";
+"database_name" = "Database";
+"username" = "Username";
+"password" = "Password";
+"login_button" = "Login";
+"next_button" = "Next";
+
+/* Main */
+"app_name" = "WoowTech Odoo";
+
+/* Settings */
+"settings" = "Settings";
+"appearance" = "Appearance";
+"theme_color" = "Theme Color";
+"theme_mode" = "Theme Mode";
+"security" = "Security";
+"app_lock" = "App Lock";
+"biometric_unlock" = "Biometric Unlock";
+"pin_code" = "PIN Code";
+"data_storage" = "Data & Storage";
+"clear_cache" = "Clear Cache";
+"about" = "About";
+"app_version" = "App Version";
+
+/* Auth */
+"biometric_title" = "Biometric Login";
+"biometric_subtitle" = "Use Face ID or Touch ID to unlock";
+"use_pin" = "Use PIN";
+"enter_pin" = "Enter PIN";
+
+/* Config */
+"configuration" = "Configuration";
+"switch_accounts" = "Switch Account";
+"add_account" = "Add Account";
+"logout" = "Logout";
+"cancel" = "Cancel";
+"confirm" = "Confirm";
+
+/* Color Picker */
+"select_color" = "Select Color";
+"preset_colors" = "Preset Colors";
+"custom_color" = "Custom Color";
+"apply" = "Apply";
+
+/* Cache */
+"cache_cleared" = "Cache cleared";
+
+/* Notifications */
+"notification_channel_messages" = "Odoo Messages";

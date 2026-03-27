@@ -1,0 +1,51 @@
+/* Login */
+"login_title" = "添加账号";
+"server_url" = "服务器网址";
+"database_name" = "数据库";
+"username" = "用户名";
+"password" = "密码";
+"login_button" = "登录";
+"next_button" = "下一步";
+
+/* Main */
+"app_name" = "WoowTech Odoo";
+
+/* Settings */
+"settings" = "设置";
+"appearance" = "外观";
+"theme_color" = "主题颜色";
+"theme_mode" = "主题模式";
+"security" = "安全性";
+"app_lock" = "应用程序锁定";
+"biometric_unlock" = "生物识别解锁";
+"pin_code" = "PIN 码";
+"data_storage" = "数据与存储";
+"clear_cache" = "清除缓存";
+"about" = "关于";
+"app_version" = "应用程序版本";
+
+/* Auth */
+"biometric_title" = "生物识别登录";
+"biometric_subtitle" = "使用指纹或面部登录";
+"use_pin" = "使用 PIN 码";
+"enter_pin" = "输入 PIN 码";
+
+/* Config */
+"configuration" = "设置";
+"switch_accounts" = "切换账号";
+"add_account" = "添加账号";
+"logout" = "退出登录";
+"cancel" = "取消";
+"confirm" = "确认";
+
+/* Color Picker */
+"select_color" = "选择颜色";
+"preset_colors" = "预设颜色";
+"custom_color" = "自定义颜色";
+"apply" = "应用";
+
+/* Cache */
+"cache_cleared" = "缓存已清除";
+
+/* Notifications */
+"notification_channel_messages" = "Odoo 消息";

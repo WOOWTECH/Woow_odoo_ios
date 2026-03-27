@@ -64,9 +64,9 @@ Every milestone, commit, UX item, verification check, and test maps to a consist
 | **M5** | WKWebView + Main Screen | **DONE** | IC07, IC08 | UX-25–34 |
 | **M6** | Push Notifications (FCM+APNs) | **DONE** | IC09, IC10 | UX-35–46, UX-71–75 |
 | **M7** | Config + Settings + Theme | **DONE** | IC11, IC12, IC13 | UX-47–57, UX-67–70 |
-| **M8** | Localization + Cache + iPad | PLANNED | IC14, IC15 | UX-58–66 |
-| **M9** | Unit + UI Tests | PLANNED | IC16, IC17 | — |
-| **M10** | App Store Prep + TestFlight | PLANNED | IC18 | — |
+| **M8** | Localization + Cache + iPad | **DONE** | IC14, IC15 | UX-58–66 |
+| **M9** | Unit + UI Tests | **DONE** | IC16, IC17 | — |
+| **M10** | App Store Prep + TestFlight | **DONE** | IC18 | — |
 
 ### Commit IDs (IC01–IC18)
 
