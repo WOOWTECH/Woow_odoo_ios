@@ -20,6 +20,11 @@ enum DeepLinkValidator {
         let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
 
+        // Reject URLs containing control characters (newline injection, header injection)
+        if trimmed.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) {
+            return false
+        }
+
         // Allow relative paths starting with /web
         if trimmed.hasPrefix("/web") {
             return true
