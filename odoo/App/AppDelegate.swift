@@ -1,9 +1,10 @@
 import UIKit
 import UserNotifications
 
-// Firebase import — uncomment after adding Firebase SDK via SPM:
-// import FirebaseCore
-// import FirebaseMessaging
+#if canImport(FirebaseCore)
+import FirebaseCore
+import FirebaseMessaging
+#endif
 
 /// App delegate handling push notifications and Firebase setup.
 /// Ported from Android: WoowFcmService.kt + WoowOdooApp.kt
@@ -11,9 +12,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Firebase setup — uncomment after adding Firebase SDK:
-        // FirebaseApp.configure()
-        // Messaging.messaging().delegate = self
+        #if canImport(FirebaseCore)
+        FirebaseApp.configure()
+        Messaging.messaging().delegate = self
+        #endif
 
         // Request notification permission
         UNUserNotificationCenter.current().delegate = self
@@ -31,8 +33,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     func application(_ application: UIApplication,
                      didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
-        // Forward to Firebase — uncomment after adding Firebase SDK:
-        // Messaging.messaging().apnsToken = deviceToken
+        #if canImport(FirebaseMessaging)
+        Messaging.messaging().apnsToken = deviceToken
+        #endif
         #if DEBUG
         let token = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
         print("[AppDelegate] APNs token: \(token)")
@@ -60,11 +63,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     }
 
     /// Extracted for testability — processes notification tap deep link.
-    /// IC20: Previously inline in delegate method, now separately testable.
     @MainActor
     func handleNotificationTap(userInfo: [AnyHashable: Any]) {
         guard let actionUrl = userInfo["odoo_action_url"] as? String else { return }
-        // Allow relative /web paths; for absolute URLs, validate host
         if actionUrl.hasPrefix("/web") || DeepLinkValidator.isValid(url: actionUrl, serverHost: "") {
             DeepLinkManager.shared.setPending(actionUrl)
         }
@@ -72,8 +73,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 }
 
 // MARK: - Firebase MessagingDelegate
-// Uncomment after adding Firebase SDK via SPM:
-/*
+
+#if canImport(FirebaseMessaging)
 extension AppDelegate: MessagingDelegate {
     func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
         guard let token = fcmToken else { return }
@@ -87,4 +88,4 @@ extension AppDelegate: MessagingDelegate {
         }
     }
 }
-*/
+#endif
