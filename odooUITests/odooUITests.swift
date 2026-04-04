@@ -567,9 +567,12 @@ final class FCM_EndToEndTests: XCTestCase {
         }
         print("=== END ===")
 
-        // ── Step 6: Verify our notification ──
+        // ── Step 6: Verify notification — app name + sender title ──
+        // Label format: "ODOO, 現在, Test User, XCUITest FCM verification"
+        // Assert: app name "ODOO" (stable) + sender "Test User" (from chatter author)
+        // Body and timestamp are variable — not asserted.
         let notifPredicate = NSPredicate(format:
-            "label CONTAINS[c] 'odoo' AND (label CONTAINS[c] 'test user' OR label CONTAINS[c] 'xcuitest' OR label CONTAINS[c] 'verification')"
+            "label CONTAINS[c] 'odoo' AND label CONTAINS[c] 'test user'"
         )
         let matched = springboard.buttons.matching(notifPredicate)
         let found = matched.count > 0
@@ -577,16 +580,13 @@ final class FCM_EndToEndTests: XCTestCase {
         if found {
             let label = matched.firstMatch.label
             print("VERIFIED notification: \(label)")
+            XCTAssertTrue(label.contains("ODOO"), "Notification app name should be ODOO")
+            XCTAssertTrue(label.contains("Test User"), "Notification sender should be Test User")
         } else {
-            // Fallback: any button with "odoo"
-            if groups.count > 0 {
-                print("Fallback — found group with 'odoo': \(groups.firstMatch.label)")
-            } else {
-                print("NO notification containing 'odoo' found")
-            }
+            print("NO notification with app='ODOO' sender='Test User' found")
         }
 
-        XCTAssertTrue(found, "Notification with ODOO + sender/body should appear")
+        XCTAssertTrue(found, "Notification with app name ODOO and sender Test User should appear")
 
         XCUIDevice.shared.press(.home)
         sleep(1)
