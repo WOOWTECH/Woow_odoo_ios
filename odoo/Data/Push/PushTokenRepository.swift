@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// Manages FCM token registration with Odoo servers.
 /// Ported from Android: FcmTokenRepository.kt

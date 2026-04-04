@@ -37,7 +37,7 @@ struct ColorPickerView: View {
                         TextField("#RRGGBB", text: $customHex)
                             .textFieldStyle(.roundedBorder)
                             .autocapitalization(.allCharacters)
-                            .onChange(of: customHex) { _, newValue in
+                            .onChange(of: customHex) { newValue in
                                 let filtered = newValue.filter { "0123456789ABCDEFabcdef#".contains($0) }
                                 if filtered != newValue { customHex = filtered }
                             }

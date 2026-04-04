@@ -42,6 +42,51 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         #endif
     }
 
+    // MARK: - Remote Notification Handler
+    // Handles both data-only and notification+data messages from FCM.
+    // When server sends notification+apns payload (iOS), the system displays it
+    // automatically. This handler only creates a local notification for data-only
+    // messages (fallback for Android-style payloads).
+
+    func application(_ application: UIApplication,
+                     didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+                     fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        #if canImport(FirebaseMessaging)
+        Messaging.messaging().appDidReceiveMessage(userInfo)
+        #endif
+
+        // If aps.alert exists, iOS already displayed this notification — skip local
+        // notification to prevent duplicates. See docs/2026-04-04-ios-notification-fix.md
+        let aps = userInfo["aps"] as? [String: Any]
+        let hasSystemAlert = aps?["alert"] != nil
+
+        #if DEBUG
+        let dataKeys = userInfo.keys.compactMap { $0 as? String }.sorted()
+        print("[AppDelegate] Received remote notification (keys: \(dataKeys), systemAlert: \(hasSystemAlert))")
+        #endif
+
+        if hasSystemAlert {
+            // System already showed the notification — just acknowledge
+            completionHandler(.newData)
+            return
+        }
+
+        // Data-only message — create local notification ourselves
+        var data: [String: String] = [:]
+        for (key, value) in userInfo {
+            if let k = key as? String {
+                data[k] = "\(value)"
+            }
+        }
+
+        if data["title"] != nil || data["body"] != nil {
+            NotificationService.showNotification(data: data)
+            completionHandler(.newData)
+        } else {
+            completionHandler(.noData)
+        }
+    }
+
     // MARK: - Notification Display (Foreground)
 
     func userNotificationCenter(_ center: UNUserNotificationCenter,

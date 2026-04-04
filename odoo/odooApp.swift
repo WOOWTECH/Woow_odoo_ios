@@ -62,7 +62,7 @@ struct AppRootView: View {
                 )
             }
         }
-        .onChange(of: scenePhase) { _, newPhase in
+        .onChange(of: scenePhase) { newPhase in
             if newPhase == .background {
                 authViewModel.onAppBackgrounded()
                 showPin = false
