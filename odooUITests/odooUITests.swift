@@ -475,10 +475,10 @@ final class FCM_EndToEndTests: XCTestCase {
         XCTAssertTrue(anyElement.exists, "App is still running after 10 seconds (FCM token should be registered)")
     }
 
-    /// FCM.4: Send Odoo chatter notification and verify it appears in notification center
+    /// FCM.4: Clear notifications → send chatter → verify notification content
     @MainActor
     func test_FCM_4_notificationAppearsInCenter() {
-        // Login if needed
+        // Login if needed — this also re-registers FCM token with Odoo
         let menuButton = app.buttons["line.3.horizontal"]
         if !menuButton.waitForExistence(timeout: 5) {
             let serverField = app.textFields["example.odoo.com"]
@@ -487,82 +487,107 @@ final class FCM_EndToEndTests: XCTestCase {
             }
         }
 
-        // Wait for FCM token registration
-        sleep(5)
-
-        // Go to Home screen so notification banner is visible
-        XCUIDevice.shared.press(.home)
-        sleep(2)
+        // Wait for FCM token to register with Odoo server
+        sleep(10)
 
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
 
-        // Clear existing notifications: open NC, look for clear buttons
-        let topCoord = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01))
-        let midCoord = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
-        topCoord.press(forDuration: 0.1, thenDragTo: midCoord)
-        sleep(2)
-        // Tap "Clear" or "X" button if visible
-        let clearButton = springboard.buttons["Clear All"]
-        if clearButton.waitForExistence(timeout: 2) {
-            clearButton.tap()
-            sleep(1)
-        }
-        // Dismiss NC by pressing Home
+        // ── Step 1: Clear ALL existing notifications ──
         XCUIDevice.shared.press(.home)
         sleep(2)
-
-        // Send notification via Odoo chatter (server-side HTTP call)
-        sendOdooChatterMessage()
-
-        // Wait for notification to arrive (FCM → APNs takes a few seconds)
-        sleep(10)
-
-        // Take screenshot of home screen (may show banner)
-        let bannerScreenshot = XCUIScreen.main.screenshot()
-        let bannerAttachment = XCTAttachment(screenshot: bannerScreenshot)
-        bannerAttachment.name = "after_notification_sent"
-        bannerAttachment.lifetime = .keepAlways
-        add(bannerAttachment)
-
-        // Open Notification Center — swipe from top-LEFT to avoid Control Center
+        // Open lock screen
         let topLeft = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.01))
         let midLeft = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.6))
         topLeft.press(forDuration: 0.1, thenDragTo: midLeft)
         sleep(2)
+        // Swipe up to reveal notifications
+        let swipeFrom = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9))
+        let swipeTo = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+        swipeFrom.press(forDuration: 0.1, thenDragTo: swipeTo)
+        sleep(2)
+        // Tap clear button (清除 in zh-TW, "Clear" in en)
+        let clearPredicate = NSPredicate(format: "label == '清除' OR label == 'Clear' OR identifier == 'clear-button'")
+        let clearBtn = springboard.buttons.matching(clearPredicate).firstMatch
+        if clearBtn.waitForExistence(timeout: 3) {
+            clearBtn.tap()
+            sleep(1)
+            // Confirm if prompted
+            let confirmBtn = springboard.buttons.matching(clearPredicate).firstMatch
+            if confirmBtn.waitForExistence(timeout: 2) {
+                confirmBtn.tap()
+                sleep(1)
+            }
+        }
+        XCUIDevice.shared.press(.home)
+        sleep(2)
 
-        // On modern iOS, lock screen shows zero notifications by default.
-        // Swipe UP from bottom half to reveal the notification list.
-        let bottomCoord = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9))
-        let upperCoord = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
-        bottomCoord.press(forDuration: 0.1, thenDragTo: upperCoord)
+        let cleanScreenshot = XCUIScreen.main.screenshot()
+        do {
+            let a = XCTAttachment(screenshot: cleanScreenshot)
+            a.name = "01_clean_state"; a.lifetime = .keepAlways; add(a)
+        }
+
+        // ── Step 2: Send notification via Odoo chatter ──
+        sendOdooChatterMessage()
+        sleep(10)
+
+        let bannerScreenshot = XCUIScreen.main.screenshot()
+        do {
+            let a = XCTAttachment(screenshot: bannerScreenshot)
+            a.name = "02_after_send"; a.lifetime = .keepAlways; add(a)
+        }
+
+        // ── Step 3: Open notification center and reveal notifications ──
+        topLeft.press(forDuration: 0.1, thenDragTo: midLeft)
+        sleep(2)
+        swipeFrom.press(forDuration: 0.1, thenDragTo: swipeTo)
         sleep(3)
 
-        // Take screenshot of notification center
+        // ── Step 4: Expand grouped notifications ──
+        let groupPredicate = NSPredicate(format: "label CONTAINS[c] 'odoo'")
+        let groups = springboard.buttons.matching(groupPredicate)
+        if groups.count > 0 {
+            print("Expanding notification group: \(groups.firstMatch.label)")
+            groups.firstMatch.tap()
+            sleep(2)
+        }
+
+        // ── Step 5: Take screenshot + dump all notification buttons ──
         let ncScreenshot = XCUIScreen.main.screenshot()
         let ncAttachment = XCTAttachment(screenshot: ncScreenshot)
-        ncAttachment.name = "notification_center"
+        ncAttachment.name = "03_notification_center"
         ncAttachment.lifetime = .keepAlways
         add(ncAttachment)
 
-        // Notifications appear as Buttons with identifier 'ListCell' or
-        // as BannerNotification elements. The label format is:
-        // "ODOO, 8分鐘前, Manual Test, Direct push 20:23:55"
-        // Search buttons which is the reliable element type for notifications.
-        let notificationPredicate = NSPredicate(format:
-            "label CONTAINS[c] 'odoo' OR label CONTAINS[c] 'test user' OR label CONTAINS[c] 'xcuitest' OR label CONTAINS[c] 'verification'"
-        )
-        let matchingButtons = springboard.buttons.matching(notificationPredicate)
-        let notificationFound = matchingButtons.count > 0
+        // Log notification buttons (use predicate to avoid out-of-bounds crash on Springboard)
+        let odooButtons = springboard.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'odoo'"))
+        print("=== ODOO NOTIFICATION BUTTONS (\(odooButtons.count)) ===")
+        for i in 0..<odooButtons.count {
+            print("  [\(i)] \(odooButtons.element(boundBy: i).label)")
+        }
+        print("=== END ===")
 
-        if notificationFound {
-            print("FOUND notification: \(matchingButtons.firstMatch.label)")
+        // ── Step 6: Verify our notification ──
+        let notifPredicate = NSPredicate(format:
+            "label CONTAINS[c] 'odoo' AND (label CONTAINS[c] 'test user' OR label CONTAINS[c] 'xcuitest' OR label CONTAINS[c] 'verification')"
+        )
+        let matched = springboard.buttons.matching(notifPredicate)
+        let found = matched.count > 0
+
+        if found {
+            let label = matched.firstMatch.label
+            print("VERIFIED notification: \(label)")
         } else {
-            print("NO notification found matching predicate")
+            // Fallback: any button with "odoo"
+            if groups.count > 0 {
+                print("Fallback — found group with 'odoo': \(groups.firstMatch.label)")
+            } else {
+                print("NO notification containing 'odoo' found")
+            }
         }
 
-        XCTAssertTrue(notificationFound, "Push notification should appear in notification center")
+        XCTAssertTrue(found, "Notification with ODOO + sender/body should appear")
 
-        // Return to app
         XCUIDevice.shared.press(.home)
         sleep(1)
         app.activate()
