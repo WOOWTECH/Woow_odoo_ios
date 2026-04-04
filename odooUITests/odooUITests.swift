@@ -407,6 +407,14 @@ final class F15_PerformanceTests: XCTestCase {
 
 final class FCM_EndToEndTests: XCTestCase {
 
+    // Test database fixture IDs (odoo18_ecpay)
+    // Query Odoo res.users/res.partner to find these for a new database
+    private static let testPartnerID = 1567
+    private static let adminPartnerID = 3
+    private static let adminUserID = 2
+    private static let generalChannelID = 1
+    private static let todoActivityTypeID = 4
+
     let app = XCUIApplication()
 
     override func setUp() {
@@ -445,14 +453,19 @@ final class FCM_EndToEndTests: XCTestCase {
         }
     }
 
-    /// FCM.2: After login, verify app has notification permission
+    /// FCM.2: Placeholder confirming notification permission is expected to be granted.
+    ///
+    /// XCUITest cannot programmatically query UNAuthorizationStatus from Springboard.
+    /// Permission is granted once at first install via the system prompt.
+    /// The real verification is implicit: FCM.4, FCM.5, and FCM.6 can only pass if
+    /// notification permission is granted — no notification arrives without it.
     @MainActor
     func test_FCM_2_notificationPermissionGranted() {
         sleep(3)
-        // We can't directly check notification permission from XCUITest,
-        // but we verify the app launched without errors
-        // The Xcode console log shows: [AppDelegate] Notification permission: true
-        XCTAssertTrue(true, "Notification permission verified via Xcode console log")
+        // Notification permission is granted at first install via the system prompt.
+        // XCUITest cannot programmatically verify UNAuthorizationStatus.
+        // This is validated by FCM.4-6 succeeding (no notification without permission).
+        XCTAssertTrue(true, "Notification permission validated indirectly by FCM.4-6 passing")
     }
 
     /// FCM.3: Verify app stays alive long enough for FCM token registration
@@ -478,7 +491,150 @@ final class FCM_EndToEndTests: XCTestCase {
     /// FCM.4: Clear notifications → send chatter → verify notification content
     @MainActor
     func test_FCM_4_notificationAppearsInCenter() {
-        // Login if needed — this also re-registers FCM token with Odoo
+        ensureLoggedIn()
+        clearAndSendNotification { cookies in
+            // Send a chatter message on the test partner record
+            // Label format received: "ODOO, 現在, Test User, XCUITest FCM verification"
+            // Verified by FCM.4-6 succeeding: no notification arrives without notification permission
+            self.odooRPC(cookies: cookies, model: "res.partner", method: "message_post",
+                         args: [FCM_EndToEndTests.testPartnerID],
+                         kwargs: ["body": "<p>XCUITest FCM verification</p>",
+                                  "message_type": "comment",
+                                  "subtype_xmlid": "mail.mt_comment"])
+        }
+        verifyNotification(appName: "ODOO", sender: "Test User")
+    }
+
+    // ── V14: @mention notification ──
+
+    /// FCM.5: @mention admin in a chatter message → notification with sender name
+    @MainActor
+    func test_FCM_5_mentionNotification() {
+        ensureLoggedIn()
+        clearAndSendNotification { cookies in
+            self.odooRPC(cookies: cookies, model: "res.partner", method: "message_post",
+                         args: [FCM_EndToEndTests.testPartnerID],
+                         kwargs: ["body": "<p>@Admin please review</p>",
+                                  "message_type": "comment",
+                                  "subtype_xmlid": "mail.mt_comment",
+                                  "partner_ids": [FCM_EndToEndTests.adminPartnerID]])
+        }
+        verifyNotification(appName: "ODOO", sender: "Test User")
+    }
+
+    // ── V15: Discuss DM notification ──
+
+    /// FCM.6: Send Discuss channel message → notification with sender name
+    @MainActor
+    func test_FCM_6_discussNotification() {
+        ensureLoggedIn()
+        clearAndSendNotification { cookies in
+            // Post to "general" channel which admin is a member of
+            self.odooRPC(cookies: cookies, model: "discuss.channel", method: "message_post",
+                         args: [FCM_EndToEndTests.generalChannelID],
+                         kwargs: ["body": "Discuss DM test from XCUITest",
+                                  "message_type": "comment",
+                                  "subtype_xmlid": "mail.mt_comment"])
+        }
+        verifyNotification(appName: "ODOO", sender: "Test User")
+    }
+
+    // ── V16: Activity assigned notification ──
+
+    /// FCM.7: Assign activity to admin → notification with assigner name
+    @MainActor
+    func test_FCM_7_activityNotification() {
+        ensureLoggedIn()
+
+        // Look up res.partner model ID via admin (test user lacks ir.model access)
+        let adminCookies = odooLogin(email: TestConfig.adminUser, password: TestConfig.adminPass)
+        guard !adminCookies.isEmpty else {
+            XCTFail("Admin login failed — check TEST_ADMIN_USER and TEST_ADMIN_PASS credentials")
+            return
+        }
+        let modelId = getModelId(cookies: adminCookies, model: "res.partner")
+        print("res.partner model_id: \(modelId)")
+        guard modelId != 0 else {
+            XCTFail("getModelId returned 0 for res.partner — check admin access to ir.model")
+            return
+        }
+
+        clearAndSendNotification { cookies in
+            // Create a To-Do activity assigned to admin
+            self.odooRPC(cookies: cookies, model: "mail.activity", method: "create",
+                         args: [["activity_type_id": FCM_EndToEndTests.todoActivityTypeID,
+                                 "res_model_id": modelId,
+                                 "res_id": FCM_EndToEndTests.testPartnerID,
+                                 "user_id": FCM_EndToEndTests.adminUserID,
+                                 "summary": "Review partner record"]],
+                         kwargs: [:])
+        }
+        verifyNotification(appName: "ODOO", sender: "Test User")
+    }
+
+    // ── V8: Deep link tap ──
+
+    /// FCM.8: Tap notification → app opens (deep link verification)
+    @MainActor
+    func test_FCM_8_tapNotificationOpensApp() {
+        ensureLoggedIn()
+        clearAndSendNotification { cookies in
+            self.odooRPC(cookies: cookies, model: "res.partner", method: "message_post",
+                         args: [FCM_EndToEndTests.testPartnerID],
+                         kwargs: ["body": "Deep link tap test",
+                                  "message_type": "comment",
+                                  "subtype_xmlid": "mail.mt_comment"])
+        }
+
+        // Open notification center and find the notification
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let topLeft = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.01))
+        let midLeft = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.6))
+        topLeft.press(forDuration: 0.1, thenDragTo: midLeft)
+        sleep(2)
+        let swipeFrom = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9))
+        let swipeTo = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+        swipeFrom.press(forDuration: 0.1, thenDragTo: swipeTo)
+        sleep(3)
+
+        // Expand groups
+        let groupPredicate = NSPredicate(format: "label CONTAINS[c] %@", "odoo")
+        let groups = springboard.buttons.matching(groupPredicate)
+        if groups.count > 0 { groups.firstMatch.tap(); sleep(2) }
+
+        // Find and tap notification
+        let notifPredicate = NSPredicate(format: "label CONTAINS[c] %@ AND label CONTAINS[c] %@", "odoo", "test user")
+        let notification = springboard.buttons.matching(notifPredicate).firstMatch
+        if notification.waitForExistence(timeout: 5) {
+            print("Tapping notification: \(notification.label)")
+            notification.tap()
+            sleep(5)
+
+            let appCameToForeground = app.wait(for: .runningForeground, timeout: 20)
+            XCTAssertTrue(appCameToForeground,
+                "App must reach foreground after notification tap. " +
+                "Precondition: test device has no passcode (Settings > Face ID & Passcode > Turn Passcode Off)")
+            if appCameToForeground {
+                XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 15),
+                    "WebView should load after deep link navigation")
+            }
+
+            let screenshot = XCUIScreen.main.screenshot()
+            let attachment = XCTAttachment(screenshot: screenshot)
+            attachment.name = "after_notification_tap"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        } else {
+            XCTFail("No notification found to tap")
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // MARK: - Reusable Helpers
+    // ═══════════════════════════════════════════════════════════
+
+    /// Ensure app is logged in before notification tests
+    private func ensureLoggedIn() {
         let menuButton = app.buttons["line.3.horizontal"]
         if !menuButton.waitForExistence(timeout: 5) {
             let serverField = app.textFields["example.odoo.com"]
@@ -486,15 +642,53 @@ final class FCM_EndToEndTests: XCTestCase {
                 app.loginWithTestCredentials()
             }
         }
+        sleep(10) // Wait for FCM token registration
+    }
 
-        // Wait for FCM token to register with Odoo server
-        sleep(10)
+    /// Clear notifications → execute action → wait for delivery
+    private func clearAndSendNotification(action: ([HTTPCookie]) -> Void) {
+        XCUIDevice.shared.press(.home)
+        sleep(2)
 
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
 
-        // ── Step 1: Clear ALL existing notifications ──
+        // Open lock screen + reveal notifications
+        let topLeft = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.01))
+        let midLeft = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.6))
+        topLeft.press(forDuration: 0.1, thenDragTo: midLeft)
+        sleep(2)
+        let swipeFrom = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9))
+        let swipeTo = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+        swipeFrom.press(forDuration: 0.1, thenDragTo: swipeTo)
+        sleep(2)
+
+        // Clear
+        let clearBtn = springboard.buttons.matching(
+            NSPredicate(format: "label == '清除' OR label == 'Clear' OR identifier == 'clear-button'")
+        ).firstMatch
+        if clearBtn.waitForExistence(timeout: 3) {
+            clearBtn.tap()
+            sleep(1)
+            let confirm = springboard.buttons.matching(
+                NSPredicate(format: "label CONTAINS '清除' OR label CONTAINS 'Clear'")
+            ).firstMatch
+            if confirm.waitForExistence(timeout: 2) { confirm.tap(); sleep(1) }
+        }
         XCUIDevice.shared.press(.home)
         sleep(2)
+
+        // Login as test sender and execute the action
+        let cookies = odooLogin(email: TestConfig.senderEmail, password: TestConfig.senderPass)
+        action(cookies)
+
+        // Wait for FCM delivery
+        sleep(10)
+    }
+
+    /// Open notification center, expand groups, verify notification content
+    private func verifyNotification(appName: String, sender: String) {
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+
         // Open lock screen
         let topLeft = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.01))
         let midLeft = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.6))
@@ -504,153 +698,129 @@ final class FCM_EndToEndTests: XCTestCase {
         let swipeFrom = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9))
         let swipeTo = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
         swipeFrom.press(forDuration: 0.1, thenDragTo: swipeTo)
-        sleep(2)
-        // Tap clear button (清除 in zh-TW, "Clear" in en)
-        let clearPredicate = NSPredicate(format: "label == '清除' OR label == 'Clear' OR identifier == 'clear-button'")
-        let clearBtn = springboard.buttons.matching(clearPredicate).firstMatch
-        if clearBtn.waitForExistence(timeout: 3) {
-            clearBtn.tap()
-            sleep(1)
-            // Confirm if prompted
-            let confirmBtn = springboard.buttons.matching(clearPredicate).firstMatch
-            if confirmBtn.waitForExistence(timeout: 2) {
-                confirmBtn.tap()
-                sleep(1)
-            }
-        }
-        XCUIDevice.shared.press(.home)
-        sleep(2)
-
-        let cleanScreenshot = XCUIScreen.main.screenshot()
-        do {
-            let a = XCTAttachment(screenshot: cleanScreenshot)
-            a.name = "01_clean_state"; a.lifetime = .keepAlways; add(a)
-        }
-
-        // ── Step 2: Send notification via Odoo chatter ──
-        sendOdooChatterMessage()
-        sleep(10)
-
-        let bannerScreenshot = XCUIScreen.main.screenshot()
-        do {
-            let a = XCTAttachment(screenshot: bannerScreenshot)
-            a.name = "02_after_send"; a.lifetime = .keepAlways; add(a)
-        }
-
-        // ── Step 3: Open notification center and reveal notifications ──
-        topLeft.press(forDuration: 0.1, thenDragTo: midLeft)
-        sleep(2)
-        swipeFrom.press(forDuration: 0.1, thenDragTo: swipeTo)
         sleep(3)
 
-        // ── Step 4: Expand grouped notifications ──
-        let groupPredicate = NSPredicate(format: "label CONTAINS[c] 'odoo'")
+        // Expand groups
+        let groupPredicate = NSPredicate(format: "label CONTAINS[c] %@", appName.lowercased())
         let groups = springboard.buttons.matching(groupPredicate)
         if groups.count > 0 {
-            print("Expanding notification group: \(groups.firstMatch.label)")
             groups.firstMatch.tap()
             sleep(2)
         }
 
-        // ── Step 5: Take screenshot + dump all notification buttons ──
-        let ncScreenshot = XCUIScreen.main.screenshot()
-        let ncAttachment = XCTAttachment(screenshot: ncScreenshot)
-        ncAttachment.name = "03_notification_center"
-        ncAttachment.lifetime = .keepAlways
-        add(ncAttachment)
+        // Screenshot
+        let screenshot = XCUIScreen.main.screenshot()
+        let attachment = XCTAttachment(screenshot: screenshot)
+        attachment.name = "notification_center"
+        attachment.lifetime = .keepAlways
+        add(attachment)
 
-        // Log notification buttons (use predicate to avoid out-of-bounds crash on Springboard)
-        let odooButtons = springboard.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'odoo'"))
-        print("=== ODOO NOTIFICATION BUTTONS (\(odooButtons.count)) ===")
-        for i in 0..<odooButtons.count {
-            print("  [\(i)] \(odooButtons.element(boundBy: i).label)")
-        }
-        print("=== END ===")
-
-        // ── Step 6: Verify notification — app name + sender title ──
-        // Label format: "ODOO, 現在, Test User, XCUITest FCM verification"
-        // Assert: app name "ODOO" (stable) + sender "Test User" (from chatter author)
-        // Body and timestamp are variable — not asserted.
-        let notifPredicate = NSPredicate(format:
-            "label CONTAINS[c] 'odoo' AND label CONTAINS[c] 'test user'"
-        )
-        let matched = springboard.buttons.matching(notifPredicate)
+        // Verify
+        let predicate = NSPredicate(format: "label CONTAINS[c] %@ AND label CONTAINS[c] %@", appName, sender)
+        let matched = springboard.buttons.matching(predicate)
         let found = matched.count > 0
 
         if found {
-            let label = matched.firstMatch.label
-            print("VERIFIED notification: \(label)")
-            XCTAssertTrue(label.contains("ODOO"), "Notification app name should be ODOO")
-            XCTAssertTrue(label.contains("Test User"), "Notification sender should be Test User")
+            print("VERIFIED: \(matched.firstMatch.label)")
+            XCTAssertTrue(matched.firstMatch.label.contains(appName), "App name should be \(appName)")
+            XCTAssertTrue(matched.firstMatch.label.contains(sender), "Sender should be \(sender)")
         } else {
-            print("NO notification with app='ODOO' sender='Test User' found")
+            print("NOT FOUND: appName=\(appName) sender=\(sender)")
         }
 
-        XCTAssertTrue(found, "Notification with app name ODOO and sender Test User should appear")
+        XCTAssertTrue(found, "Notification with \(appName) + \(sender) should appear")
 
         XCUIDevice.shared.press(.home)
         sleep(1)
         app.activate()
     }
 
-    /// Helper: Send Odoo chatter message via HTTP (triggers FCM push).
-    /// Uses XCTestExpectation instead of DispatchSemaphore to avoid main-thread deadlock.
-    /// Server URL and credentials read from TestConfig (env vars or defaults).
-    /// NOTE: Partner ID 1567 is specific to the odoo18_ecpay test database.
-    private func sendOdooChatterMessage() {
+    // ═══════════════════════════════════════════════════════════
+    // MARK: - Odoo HTTP Helpers
+    // ═══════════════════════════════════════════════════════════
+
+    /// Login to Odoo and return session cookies
+    private func odooLogin(email: String, password: String) -> [HTTPCookie] {
         let baseURL = "https://\(TestConfig.serverURL)"
-        let session = URLSession.shared
+        let expectation = XCTestExpectation(description: "Odoo login")
+        var cookies: [HTTPCookie] = []
 
-        // Step 1: Login as test sender (not admin — sender is excluded from notifications)
-        let loginExpectation = XCTestExpectation(description: "Odoo login")
-        var loginCookies: [HTTPCookie] = []
-
-        var loginRequest = URLRequest(url: URL(string: "\(baseURL)/web/session/authenticate")!)
-        loginRequest.httpMethod = "POST"
-        loginRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        loginRequest.httpBody = try? JSONSerialization.data(withJSONObject: [
+        guard let loginURL = URL(string: "\(baseURL)/web/session/authenticate") else {
+            XCTFail("Invalid server URL for login: \(baseURL)/web/session/authenticate")
+            return cookies
+        }
+        var request = URLRequest(url: loginURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
             "jsonrpc": "2.0", "method": "call",
-            "params": ["db": TestConfig.database,
-                       "login": TestConfig.senderEmail,
-                       "password": TestConfig.senderPass],
+            "params": ["db": TestConfig.database, "login": email, "password": password],
             "id": 1
         ] as [String: Any])
 
-        session.dataTask(with: loginRequest) { _, response, _ in
-            if let httpResp = response as? HTTPURLResponse,
-               let headers = httpResp.allHeaderFields as? [String: String],
-               let url = response?.url {
-                loginCookies = HTTPCookie.cookies(withResponseHeaderFields: headers, for: url)
+        URLSession.shared.dataTask(with: request) { _, response, _ in
+            if let r = response as? HTTPURLResponse,
+               let h = r.allHeaderFields as? [String: String],
+               let u = response?.url {
+                cookies = HTTPCookie.cookies(withResponseHeaderFields: h, for: u)
             }
-            loginExpectation.fulfill()
+            expectation.fulfill()
         }.resume()
 
-        _ = XCTWaiter.wait(for: [loginExpectation], timeout: 30.0)
+        _ = XCTWaiter.wait(for: [expectation], timeout: 30.0)
+        if cookies.isEmpty { print("odooLogin FAILED for \(email)") }
+        return cookies
+    }
 
-        // Step 2: Post chatter message
-        let postExpectation = XCTestExpectation(description: "Chatter post")
+    /// Call Odoo JSON-RPC with authenticated session
+    @discardableResult
+    private func odooRPC(cookies: [HTTPCookie], model: String, method: String,
+                         args: [Any], kwargs: [String: Any]) -> Any? {
+        let baseURL = "https://\(TestConfig.serverURL)"
+        let expectation = XCTestExpectation(description: "Odoo RPC \(model).\(method)")
+        var result: Any?
 
-        var postRequest = URLRequest(url: URL(string: "\(baseURL)/web/dataset/call_kw")!)
-        postRequest.httpMethod = "POST"
-        postRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let cookieHeader = loginCookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
-        postRequest.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
-        postRequest.httpBody = try? JSONSerialization.data(withJSONObject: [
+        guard let rpcURL = URL(string: "\(baseURL)/web/dataset/call_kw") else {
+            XCTFail("Invalid server URL for RPC: \(baseURL)/web/dataset/call_kw")
+            return nil
+        }
+        var request = URLRequest(url: rpcURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let cookieHeader = cookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
+        request.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
             "jsonrpc": "2.0", "method": "call",
-            "params": [
-                "model": "res.partner", "method": "message_post",
-                "args": [1567],
-                "kwargs": ["body": "<p>XCUITest FCM verification</p>",
-                           "message_type": "comment",
-                           "subtype_xmlid": "mail.mt_comment"]
-            ] as [String: Any],
+            "params": ["model": model, "method": method, "args": args, "kwargs": kwargs],
             "id": 2
         ] as [String: Any])
 
-        session.dataTask(with: postRequest) { _, _, _ in
-            postExpectation.fulfill()
+        URLSession.shared.dataTask(with: request) { data, _, _ in
+            if let data = data,
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                if let errorBlock = json["error"] as? [String: Any] {
+                    let errorData = errorBlock["data"] as? [String: Any]
+                    let msg = errorData?["message"] ?? errorBlock["message"] ?? "unknown"
+                    print("odooRPC ERROR [\(model).\(method)]: \(msg)")
+                }
+                result = json["result"]
+            }
+            expectation.fulfill()
         }.resume()
 
-        _ = XCTWaiter.wait(for: [postExpectation], timeout: 30.0)
+        _ = XCTWaiter.wait(for: [expectation], timeout: 30.0)
+        return result
     }
+
+    /// Get ir.model ID for a model name (needed for mail.activity.create)
+    private func getModelId(cookies: [HTTPCookie], model: String) -> Int {
+        let result = odooRPC(cookies: cookies, model: "ir.model", method: "search_read",
+                             args: [[["model", "=", model]]],
+                             kwargs: ["fields": ["id"], "limit": 1])
+        if let records = result as? [[String: Any]],
+           let first = records.first,
+           let id = first["id"] as? Int { return id }
+        return 0
+    }
+
 }
