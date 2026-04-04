@@ -494,26 +494,48 @@ final class FCM_EndToEndTests: XCTestCase {
         XCUIDevice.shared.press(.home)
         sleep(2)
 
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+
+        // Clear existing notifications: open NC, look for clear buttons
+        let topCoord = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01))
+        let midCoord = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
+        topCoord.press(forDuration: 0.1, thenDragTo: midCoord)
+        sleep(2)
+        // Tap "Clear" or "X" button if visible
+        let clearButton = springboard.buttons["Clear All"]
+        if clearButton.waitForExistence(timeout: 2) {
+            clearButton.tap()
+            sleep(1)
+        }
+        // Dismiss NC by pressing Home
+        XCUIDevice.shared.press(.home)
+        sleep(2)
+
         // Send notification via Odoo chatter (server-side HTTP call)
         sendOdooChatterMessage()
 
         // Wait for notification to arrive (FCM → APNs takes a few seconds)
-        sleep(8)
+        sleep(10)
 
-        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-
-        // Take screenshot of current screen (may show banner)
+        // Take screenshot of home screen (may show banner)
         let bannerScreenshot = XCUIScreen.main.screenshot()
         let bannerAttachment = XCTAttachment(screenshot: bannerScreenshot)
         bannerAttachment.name = "after_notification_sent"
         bannerAttachment.lifetime = .keepAlways
         add(bannerAttachment)
 
-        // Open Notification Center by swiping down from top-center
-        let topCoordinate = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01))
-        let midCoordinate = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
-        topCoordinate.press(forDuration: 0.1, thenDragTo: midCoordinate)
-        sleep(4)
+        // Open Notification Center — swipe from top-LEFT to avoid Control Center
+        let topLeft = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.01))
+        let midLeft = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.6))
+        topLeft.press(forDuration: 0.1, thenDragTo: midLeft)
+        sleep(2)
+
+        // On modern iOS, lock screen shows zero notifications by default.
+        // Swipe UP from bottom half to reveal the notification list.
+        let bottomCoord = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9))
+        let upperCoord = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+        bottomCoord.press(forDuration: 0.1, thenDragTo: upperCoord)
+        sleep(3)
 
         // Take screenshot of notification center
         let ncScreenshot = XCUIScreen.main.screenshot()
@@ -522,28 +544,20 @@ final class FCM_EndToEndTests: XCTestCase {
         ncAttachment.lifetime = .keepAlways
         add(ncAttachment)
 
-        // Search all text elements for notification content
-        // Match: sender name, message body, or app name
-        var notificationFound = false
-        for element in springboard.staticTexts.allElementsBoundByIndex {
-            let label = element.label.lowercased()
-            if label.contains("test user") || label.contains("xcuitest")
-                || label.contains("verification") || label.contains("odoo") {
-                notificationFound = true
-                break
-            }
-        }
+        // Notifications appear as Buttons with identifier 'ListCell' or
+        // as BannerNotification elements. The label format is:
+        // "ODOO, 8分鐘前, Manual Test, Direct push 20:23:55"
+        // Search buttons which is the reliable element type for notifications.
+        let notificationPredicate = NSPredicate(format:
+            "label CONTAINS[c] 'odoo' OR label CONTAINS[c] 'test user' OR label CONTAINS[c] 'xcuitest' OR label CONTAINS[c] 'verification'"
+        )
+        let matchingButtons = springboard.buttons.matching(notificationPredicate)
+        let notificationFound = matchingButtons.count > 0
 
-        // Also check otherElements (notifications may be grouped)
-        if !notificationFound {
-            for element in springboard.otherElements.allElementsBoundByIndex {
-                let label = element.label.lowercased()
-                if label.contains("test user") || label.contains("notification")
-                    || label.contains("odoo") {
-                    notificationFound = true
-                    break
-                }
-            }
+        if notificationFound {
+            print("FOUND notification: \(matchingButtons.firstMatch.label)")
+        } else {
+            print("NO notification found matching predicate")
         }
 
         XCTAssertTrue(notificationFound, "Push notification should appear in notification center")
