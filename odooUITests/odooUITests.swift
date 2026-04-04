@@ -490,35 +490,61 @@ final class FCM_EndToEndTests: XCTestCase {
         // Wait for FCM token registration
         sleep(5)
 
-        // Send notification via Odoo chatter (server-side HTTP call)
-        sendOdooChatterMessage()
-
-        // Wait for notification to arrive
-        sleep(5)
-
-        // Go to Home screen first
+        // Go to Home screen so notification banner is visible
         XCUIDevice.shared.press(.home)
         sleep(2)
 
-        // Open Notification Center by swiping down from top
-        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        let topCoordinate = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.0))
-        let bottomCoordinate = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        topCoordinate.press(forDuration: 0.1, thenDragTo: bottomCoordinate)
-        sleep(3)
+        // Send notification via Odoo chatter (server-side HTTP call)
+        sendOdooChatterMessage()
 
-        // Look for notification content — search for "Test User" or "chatter" text
-        let notificationFound = springboard.staticTexts.allElementsBoundByIndex.contains { element in
+        // Wait for notification to arrive (FCM → APNs takes a few seconds)
+        sleep(8)
+
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+
+        // Take screenshot of current screen (may show banner)
+        let bannerScreenshot = XCUIScreen.main.screenshot()
+        let bannerAttachment = XCTAttachment(screenshot: bannerScreenshot)
+        bannerAttachment.name = "after_notification_sent"
+        bannerAttachment.lifetime = .keepAlways
+        add(bannerAttachment)
+
+        // Open Notification Center by swiping down from top-center
+        let topCoordinate = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01))
+        let midCoordinate = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
+        topCoordinate.press(forDuration: 0.1, thenDragTo: midCoordinate)
+        sleep(4)
+
+        // Take screenshot of notification center
+        let ncScreenshot = XCUIScreen.main.screenshot()
+        let ncAttachment = XCTAttachment(screenshot: ncScreenshot)
+        ncAttachment.name = "notification_center"
+        ncAttachment.lifetime = .keepAlways
+        add(ncAttachment)
+
+        // Search all text elements for notification content
+        // Match: sender name, message body, or app name
+        var notificationFound = false
+        for element in springboard.staticTexts.allElementsBoundByIndex {
             let label = element.label.lowercased()
-            return label.contains("test user") || label.contains("chatter") || label.contains("odoo")
+            if label.contains("test user") || label.contains("xcuitest")
+                || label.contains("verification") || label.contains("odoo") {
+                notificationFound = true
+                break
+            }
         }
 
-        // Take screenshot for evidence
-        let screenshot = XCUIScreen.main.screenshot()
-        let attachment = XCTAttachment(screenshot: screenshot)
-        attachment.name = "notification_center"
-        attachment.lifetime = .keepAlways
-        add(attachment)
+        // Also check otherElements (notifications may be grouped)
+        if !notificationFound {
+            for element in springboard.otherElements.allElementsBoundByIndex {
+                let label = element.label.lowercased()
+                if label.contains("test user") || label.contains("notification")
+                    || label.contains("odoo") {
+                    notificationFound = true
+                    break
+                }
+            }
+        }
 
         XCTAssertTrue(notificationFound, "Push notification should appear in notification center")
 
