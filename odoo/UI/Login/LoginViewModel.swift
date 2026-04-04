@@ -1,6 +1,9 @@
 import Foundation
 
 /// Login flow ViewModel — manages 2-step login (server info → credentials).
+/// On init, attempts to pre-fill credentials from the last active account
+/// (Core Data + Keychain) so that returning users after session expiry
+/// can log in with a single tap instead of re-entering all fields.
 /// Ported from Android: LoginViewModel.kt
 @MainActor
 final class LoginViewModel: ObservableObject {
@@ -20,9 +23,30 @@ final class LoginViewModel: ObservableObject {
     @Published var error: String?
 
     private let repository: AccountRepositoryProtocol
+    private let secureStorage: SecureStorage
 
-    init(repository: AccountRepositoryProtocol = AccountRepository()) {
+    init(
+        repository: AccountRepositoryProtocol = AccountRepository(),
+        secureStorage: SecureStorage = .shared
+    ) {
         self.repository = repository
+        self.secureStorage = secureStorage
+        prefillFromActiveAccount()
+    }
+
+    /// Pre-fills login fields from the last active account if one exists.
+    /// Reads server URL, database, and username from Core Data, and the
+    /// saved password from Keychain. Skips the server info step so the user
+    /// lands directly on the credentials screen for a quick re-login.
+    private func prefillFromActiveAccount() {
+        guard let account = repository.getActiveAccount() else { return }
+        serverUrl = account.serverUrl
+        database = account.database
+        username = account.username
+        if let savedPassword = secureStorage.getPassword(accountId: account.username) {
+            password = savedPassword
+        }
+        step = .credentials
     }
 
     // MARK: - Navigation

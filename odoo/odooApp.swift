@@ -20,47 +20,57 @@ struct odooApp: App {
 }
 
 /// Root view — login → auth gate → main screen.
+/// Uses `AppRootViewModel` to check for an existing active account on launch,
+/// enabling auto-login when credentials are already saved (Core Data + Keychain).
 /// Monitors scenePhase for bg→fg auth re-prompt (UX-20).
 struct AppRootView: View {
+    @StateObject private var rootViewModel = AppRootViewModel()
     @StateObject private var authViewModel = AuthViewModel()
-    @State private var isLoggedIn = false
     @State private var showPin = false
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
-            if !isLoggedIn {
+            switch rootViewModel.launchState {
+            case .loading:
+                ProgressView()
+            case .login:
                 LoginView(onLoginSuccess: {
-                    isLoggedIn = true
+                    rootViewModel.onLoginSuccess()
                     if !authViewModel.requiresAuth {
                         authViewModel.setAuthenticated(true)
                     }
                 })
-            } else if authViewModel.requiresAuth && !authViewModel.isAuthenticated {
-                if showPin {
-                    PinView(
-                        authViewModel: authViewModel,
-                        onPinVerified: { showPin = false },
-                        onBackClick: { showPin = false }
-                    )
+            case .authenticated:
+                if authViewModel.requiresAuth && !authViewModel.isAuthenticated {
+                    if showPin {
+                        PinView(
+                            authViewModel: authViewModel,
+                            onPinVerified: { showPin = false },
+                            onBackClick: { showPin = false }
+                        )
+                    } else {
+                        BiometricView(
+                            authViewModel: authViewModel,
+                            onAuthSuccess: {},
+                            onUsePinClick: { showPin = true }
+                        )
+                    }
                 } else {
-                    BiometricView(
-                        authViewModel: authViewModel,
-                        onAuthSuccess: {},
-                        onUsePinClick: { showPin = true }
+                    MainView(
+                        onMenuClick: {
+                            // Will navigate to Config in M7
+                        },
+                        onSessionExpired: {
+                            rootViewModel.onSessionExpired()
+                            authViewModel.setAuthenticated(false)
+                        }
                     )
                 }
-            } else {
-                MainView(
-                    onMenuClick: {
-                        // Will navigate to Config in M7
-                    },
-                    onSessionExpired: {
-                        isLoggedIn = false
-                        authViewModel.setAuthenticated(false)
-                    }
-                )
             }
+        }
+        .task {
+            rootViewModel.checkSession()
         }
         .onChange(of: scenePhase) { newPhase in
             if newPhase == .background {
