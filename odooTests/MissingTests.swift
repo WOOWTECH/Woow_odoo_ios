@@ -115,7 +115,7 @@ final class DeepLinkValidatorEdgeCaseTests: XCTestCase {
         let result = DeepLinkValidator.isValid(url: "/website/shop", serverHost: "odoo.example.com")
         // /website starts with /web — implementation currently returns true.
         // This test pins the current behavior. Remove XCTAssertTrue if policy changes to allowlist /web only.
-        XCTAssertTrue(result, "Documenting that /website/* is currently accepted (starts with /web)")
+        XCTAssertFalse(result, "/website/* must be rejected — only /web, /web#, /web? allowed (H2 security fix)")
     }
 }
 
@@ -393,13 +393,13 @@ final class AccountRepositoryTests: XCTestCase {
         try? context.save()
 
         // Seed a password that logout must clear.
-        secureStorage.savePassword(accountId: "admin", password: "secret")
+        secureStorage.savePassword(serverUrl: "https://odoo.example.com", username: "admin", password: "secret")
 
         await repository.logout(accountId: "logout-test")
 
         let remaining = try? context.fetch(OdooAccountEntity.fetchByIdRequest(id: "logout-test"))
         XCTAssertEqual(remaining?.count ?? 0, 0, "logout must delete the Core Data entity")
-        XCTAssertNil(secureStorage.getPassword(accountId: "admin"),
+        XCTAssertNil(secureStorage.getPassword(serverUrl: "https://odoo.example.com", username: "admin"),
                      "logout must remove the password from Keychain")
     }
 
@@ -1136,21 +1136,21 @@ final class SecureStorageConcurrencyTests: XCTestCase {
         await withTaskGroup(of: Void.self) { group in
             for i in 0..<20 {
                 group.addTask {
-                    storage.savePassword(accountId: key, password: "value-\(i)")
+                    storage.savePassword(serverUrl: "https://test.com", username: key, password: "value-\(i)")
                 }
                 group.addTask {
-                    _ = storage.getPassword(accountId: key)
+                    _ = storage.getPassword(serverUrl: "https://test.com", username: key)
                 }
             }
         }
 
         // After all concurrent ops, the stored value must be one of the written values.
-        let finalValue = storage.getPassword(accountId: key)
+        let finalValue = storage.getPassword(serverUrl: "https://test.com", username: key)
         if let finalValue {
             XCTAssertTrue(finalValue.hasPrefix("value-"),
                           "After concurrent writes, stored value must be one of the written values, got: \(finalValue)")
         }
-        storage.deletePassword(accountId: key)
+        storage.deletePassword(serverUrl: "https://test.com", username: key)
     }
 }
 

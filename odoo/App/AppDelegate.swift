@@ -120,10 +120,16 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     }
 
     /// Extracted for testability — processes notification tap deep link.
+    ///
+    /// Reads the active account's server host from Core Data to pass into the validator.
+    /// The `hasPrefix("/web")` short-circuit is intentionally absent — validation must always
+    /// run through `DeepLinkValidator.isValid` to enforce the strict path regex and prevent
+    /// path-traversal or host-override payloads from bypassing validation.
     @MainActor
     func handleNotificationTap(userInfo: [AnyHashable: Any]) {
         guard let actionUrl = userInfo["odoo_action_url"] as? String else { return }
-        if actionUrl.hasPrefix("/web") || DeepLinkValidator.isValid(url: actionUrl, serverHost: "") {
+        let serverHost = AccountRepository().getActiveAccount()?.serverHost ?? ""
+        if DeepLinkValidator.isValid(url: actionUrl, serverHost: serverHost) {
             DeepLinkManager.shared.setPending(actionUrl)
         }
     }

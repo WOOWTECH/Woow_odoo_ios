@@ -27,6 +27,15 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         self.persistence = persistence
         self.secureStorage = secureStorage
         self.apiClient = apiClient
+        migratePasswordKeysIfNeeded()
+    }
+
+    /// Runs the one-time Keychain key migration from `pwd_{username}` to
+    /// `pwd_{host}_{username}` for all persisted accounts. Called once in init;
+    /// the migration itself is idempotent.
+    private func migratePasswordKeysIfNeeded() {
+        let accounts = getAllAccounts()
+        secureStorage.migratePasswordKeys(accounts: accounts)
     }
 
     func authenticate(serverUrl: String, database: String, username: String, password: String) async -> AuthResult {
@@ -76,8 +85,8 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
                 try? context.save()
             }
 
-            // Save password in Keychain
-            secureStorage.savePassword(accountId: username, password: password)
+            // Save password in Keychain, scoped to this server + username
+            secureStorage.savePassword(serverUrl: fullUrl, username: username, password: password)
         }
 
         return result
@@ -106,7 +115,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         let account = target.toDomainModel()
 
         // Validate session — try to authenticate with stored password
-        if let password = secureStorage.getPassword(accountId: account.username) {
+        if let password = secureStorage.getPassword(serverUrl: account.fullServerUrl, username: account.username) {
             let result = await apiClient.authenticate(
                 serverUrl: account.fullServerUrl,
                 database: account.database,
@@ -146,7 +155,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         await unregisterFcmToken(serverUrl: account.serverUrl)
 
         await apiClient.clearCookies(for: account.serverUrl)
-        secureStorage.deletePassword(accountId: account.username)
+        secureStorage.deletePassword(serverUrl: account.serverUrl, username: account.username)
         context.delete(account)
         try? context.save()
 
@@ -164,7 +173,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         // Unregister FCM token from Odoo server (G9)
         await unregisterFcmToken(serverUrl: entity.serverUrl)
 
-        secureStorage.deletePassword(accountId: entity.username)
+        secureStorage.deletePassword(serverUrl: entity.serverUrl, username: entity.username)
         context.delete(entity)
         try? context.save()
 

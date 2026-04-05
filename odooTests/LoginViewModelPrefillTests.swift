@@ -64,7 +64,7 @@ final class LoginViewModelPrefillTests: XCTestCase {
         let repo = MockAccountRepository()
         repo.stubbedActiveAccount = makeAccount(username: "alan@woow.com")
         let storage = MockSecureStorage()
-        storage.savePassword(accountId: "alan@woow.com", password: "s3cr3t!")
+        storage.savePassword(serverUrl: "https://myodoo.com", username: "alan@woow.com", password: "s3cr3t!")
 
         let sut = LoginViewModel(repository: repo, secureStorage: storage)
 
@@ -160,7 +160,7 @@ final class LoginViewModelPrefillTests: XCTestCase {
         let storage = MockSecureStorage()
         // The pre-fill path reads the password from storage to populate the password field.
         // Without a stored password, the guard in login() would reject empty password.
-        storage.savePassword(accountId: "alan@woow.com", password: "s3cr3t!")
+        storage.savePassword(serverUrl: "https://myodoo.com", username: "alan@woow.com", password: "s3cr3t!")
         let sut = LoginViewModel(repository: repo, secureStorage: storage)
 
         // Bridge the callback-based API into an awaitable form.

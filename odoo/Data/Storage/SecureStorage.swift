@@ -3,9 +3,10 @@ import Security
 
 /// Protocol for secure credential storage, enabling injection and testing without Keychain access.
 protocol SecureStorageProtocol: Sendable {
-    func savePassword(accountId: String, password: String)
-    func getPassword(accountId: String) -> String?
-    func deletePassword(accountId: String)
+    func savePassword(serverUrl: String, username: String, password: String)
+    func getPassword(serverUrl: String, username: String) -> String?
+    func deletePassword(serverUrl: String, username: String)
+    func migratePasswordKeys(accounts: [OdooAccount])
 }
 
 /// Keychain-backed secure storage for passwords, PIN hash, FCM token, and settings.
@@ -20,21 +21,47 @@ final class SecureStorage: SecureStorageProtocol, Sendable {
 
     private let service = "io.woowtech.odoo.keychain"
 
-    // MARK: - Password Storage (per account)
+    // MARK: - Password Storage (per account, scoped to server host)
 
-    /// Saves an encrypted password for an account.
-    func savePassword(accountId: String, password: String) {
-        save(key: "pwd_\(accountId)", value: password)
+    /// Builds a Keychain key scoped to both the server host and username, preventing
+    /// credential collisions when the same username exists on multiple Odoo servers.
+    /// Uses only the hostname component (e.g. "company.odoo.com") to keep the key clean.
+    private func passwordKey(serverUrl: String, username: String) -> String {
+        let host = URL(string: serverUrl)?.host ?? serverUrl
+        return "pwd_\(host)_\(username)"
     }
 
-    /// Retrieves the password for an account.
-    func getPassword(accountId: String) -> String? {
-        get(key: "pwd_\(accountId)")
+    /// Saves a password scoped to a specific server and username.
+    func savePassword(serverUrl: String, username: String, password: String) {
+        save(key: passwordKey(serverUrl: serverUrl, username: username), value: password)
     }
 
-    /// Deletes the password for an account.
-    func deletePassword(accountId: String) {
-        delete(key: "pwd_\(accountId)")
+    /// Retrieves the password for a specific server and username combination.
+    func getPassword(serverUrl: String, username: String) -> String? {
+        get(key: passwordKey(serverUrl: serverUrl, username: username))
+    }
+
+    /// Deletes the password for a specific server and username combination.
+    func deletePassword(serverUrl: String, username: String) {
+        delete(key: passwordKey(serverUrl: serverUrl, username: username))
+    }
+
+    /// Migrates legacy Keychain keys from the old format `pwd_{username}` to the
+    /// server-scoped format `pwd_{host}_{username}`. Safe to call multiple times —
+    /// already-migrated entries are skipped because the old key no longer exists
+    /// after the first successful migration.
+    func migratePasswordKeys(accounts: [OdooAccount]) {
+        for account in accounts {
+            let legacyKey = "pwd_\(account.username)"
+            let newKey = passwordKey(serverUrl: account.fullServerUrl, username: account.username)
+
+            // Skip if the new key already exists, or if there is nothing to migrate
+            guard get(key: newKey) == nil,
+                  let existingPassword = get(key: legacyKey) else { continue }
+
+            save(key: newKey, value: existingPassword)
+            delete(key: legacyKey)
+        }
     }
 
     // MARK: - PIN Hash

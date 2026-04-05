@@ -298,25 +298,25 @@ final class SecureStorageTests: XCTestCase {
 
     override func tearDown() {
         super.tearDown()
-        storage.deletePassword(accountId: "test-account")
+        storage.deletePassword(serverUrl: "https://test.com", username: "test-account")
         storage.deletePinHash()
     }
 
     func test_saveAndGetPassword_givenValidData_roundTrips() {
-        storage.savePassword(accountId: "test-account", password: "secret123")
-        let retrieved = storage.getPassword(accountId: "test-account")
+        storage.savePassword(serverUrl: "https://test.com", username: "test-account", password: "secret123")
+        let retrieved = storage.getPassword(serverUrl: "https://test.com", username: "test-account")
         XCTAssertEqual(retrieved, "secret123")
     }
 
     func test_getPassword_givenMissingKey_returnsNil() {
-        let result = storage.getPassword(accountId: "nonexistent-account")
+        let result = storage.getPassword(serverUrl: "https://none.com", username: "nonexistent-account")
         XCTAssertNil(result)
     }
 
     func test_deletePassword_givenExistingKey_removesIt() {
-        storage.savePassword(accountId: "test-account", password: "toDelete")
-        storage.deletePassword(accountId: "test-account")
-        XCTAssertNil(storage.getPassword(accountId: "test-account"))
+        storage.savePassword(serverUrl: "https://test.com", username: "test-account", password: "toDelete")
+        storage.deletePassword(serverUrl: "https://test.com", username: "test-account")
+        XCTAssertNil(storage.getPassword(serverUrl: "https://test.com", username: "test-account"))
     }
 
     func test_saveAndGetSettings_roundTrips() {

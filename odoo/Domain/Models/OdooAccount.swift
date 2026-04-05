@@ -46,4 +46,10 @@ struct OdooAccount: Identifiable, Codable, Equatable, Hashable, Sendable {
         if serverUrl.contains("://") { return serverUrl }
         return "https://\(serverUrl)"
     }
+
+    /// Returns the hostname component of serverUrl for use as a Keychain key scope
+    /// and deep link validation. Falls back to the raw serverUrl string if parsing fails.
+    var serverHost: String {
+        URL(string: fullServerUrl)?.host ?? serverUrl
+    }
 }
