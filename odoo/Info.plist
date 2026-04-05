@@ -2,6 +2,18 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSFaceIDUsageDescription</key>
+	<string>WoowTech Odoo uses Face ID to secure access to your Odoo account data.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>WoowTech Odoo needs camera access to upload photos in Odoo.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>WoowTech Odoo needs photo library access to upload images in Odoo.</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>zh-Hans</string>
+		<string>zh-Hant</string>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
