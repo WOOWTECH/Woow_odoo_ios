@@ -194,15 +194,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
     }
 
     func getSessionId(for serverUrl: String) -> String? {
-        // Delegate to API client's cookie management
-        // This is a synchronous call — session is in HTTPCookieStorage
-        let semaphore = DispatchSemaphore(value: 0)
-        var sessionId: String?
-        Task {
-            sessionId = await apiClient.getSessionId(for: serverUrl)
-            semaphore.signal()
-        }
-        semaphore.wait()
-        return sessionId
+        // Direct synchronous read from HTTPCookieStorage — no async needed (H1 fix)
+        apiClient.getSessionId(for: serverUrl)
     }
 }

@@ -158,7 +158,8 @@ actor OdooAPIClient {
     // Ported from OdooJsonRpcClient: CookieJar pattern
 
     /// Extracts session_id cookie for a given server URL.
-    func getSessionId(for serverUrl: String) -> String? {
+    /// Marked nonisolated — reads thread-safe HTTPCookieStorage, no actor hop needed. (H1)
+    nonisolated func getSessionId(for serverUrl: String) -> String? {
         guard let url = URL(string: serverUrl),
               let cookies = HTTPCookieStorage.shared.cookies(for: url) else {
             return nil

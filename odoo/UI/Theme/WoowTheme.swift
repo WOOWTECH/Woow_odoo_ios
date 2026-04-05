@@ -9,6 +9,16 @@ final class WoowTheme: ObservableObject {
     @Published var primaryColor: Color = WoowColors.primaryBlue
     @Published var themeMode: ThemeMode = .system
 
+    /// H5: Maps themeMode to SwiftUI's ColorScheme for .preferredColorScheme()
+    /// Returns nil for .system (follows device setting), .light or .dark otherwise.
+    var colorSchemeOverride: ColorScheme? {
+        switch themeMode {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
+
     private let settingsRepo = SettingsRepository()
 
     init() {
