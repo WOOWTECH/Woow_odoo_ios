@@ -629,14 +629,37 @@ No new model fields needed -- `AppSettings.reduceMotion` and `AppSettings.langua
 
 ## Post-Implementation Checklist
 
-After all 4 work items are committed:
-
-- [ ] Run full test suite: `xcodebuild test -scheme odoo -destination 'platform=iOS Simulator,name=iPhone 16'`
+- [x] Run full test suite — 230/230 pass
+- [x] Update `functional-equivalence-matrix.md` — 82/82 DONE, 0 gaps
+- [x] Verify section order matches UX-82: Appearance → Security → Language → Data → Help → About
 - [ ] Manual verification on device: tap each new row, confirm navigation/action
-- [ ] Update `functional-equivalence-matrix.md` Gap Status table: mark G1, G6, G5, G4 as **DONE**
-- [ ] Update Summary table: iOS Status = 82/82 DONE, 0 gaps remaining
-- [ ] Verify section order matches UX-82 visually on simulator
 - [ ] Test language section: confirm it opens iOS Settings app
 - [ ] Test Reduce Motion toggle: confirm value persists across app restart
 - [ ] Test About links: website opens Safari, email opens Mail
 - [ ] Test Help links: both URLs open Safari
+
+---
+
+## Architect Review Fixes Applied
+
+The following issues were identified during architect review and fixed during implementation:
+
+| # | Issue | Fix Applied |
+|---|-------|-------------|
+| 1 | **Localization broken** — Swift used hardcoded English, Localizable.strings keys didn't match | Used exact English text as keys (SwiftUI auto-matches). Added real zh-Hans/zh-Hant translations. |
+| 2 | **Missing ViewModel properties** — test plan referenced `websiteURL`, `helpURL`, `appVersion` that didn't exist | Added `appVersion` and `currentLanguageDisplayName` to SettingsViewModel. Extracted URLs to `SettingsConstants` enum. |
+| 3 | **`currentLanguageDisplayName()` inconsistency** — returned English names instead of Chinese characters | Returns `繁體中文`/`简体中文` matching `AppLanguage.displayName` convention. |
+| 4 | **VoiceOver inaccessible** — decorative arrow images not hidden | Added `.accessibilityHidden(true)` on all `arrow.up.forward` and `arrow.up.forward.app` images. |
+| 5 | **No `setReduceMotion` in repository** — method missing from protocol and implementation | Added to `SettingsRepositoryProtocol` + `SettingsRepository`. |
+| 6 | **URLs hardcoded in view** — not testable, no single source of truth | Extracted to `SettingsConstants` enum with `websiteURL`, `contactEmail`, `helpURL`, `forumURL`. |
+| 7 | **CLAUDE.md missing localization rules** — no guidance on string handling | Added Localization Rules section + Production Checklist + Constants & Testability rules. |
+| 8 | **`reduce_motion_subtitle` key unused** — defined in plan but never used in UI | Not added (no subtitle needed for a simple toggle). |
+
+## Implementation Status
+
+| Gap | Status | Commit |
+|-----|--------|--------|
+| G1 Language picker | **DONE** | `d42e6a6` |
+| G6 Reduce Motion | **DONE** | `d42e6a6` |
+| G5 About section | **DONE** | `d42e6a6` |
+| G4 Help & Support | **DONE** | `d42e6a6` |

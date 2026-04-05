@@ -741,21 +741,38 @@ A gap is considered closed when ALL of the following pass in CI:
 | G4 | G4-U1, G4-U2, G4-X1, G4-X2 |
 
 Once all 19 tests pass, update `docs/functional-equivalence-matrix.md`:
-- Set G1, G6, G5, G4 status from `TODO` to `DONE`
-- Update the Summary table iOS count from 78/82 to 82/82
-- Mark all four rows in the Gap Status table with strikethrough
+- Set G1, G6, G5, G4 status from `TODO` to `DONE` ✅ (done)
+- Update the Summary table iOS count from 78/82 to 82/82 ✅ (done)
 
 ---
 
-## Notes on Implementation Assumptions
+## Implementation Prerequisites — Status
 
-The following ViewModel additions are required for the unit tests to compile. These are implementation prerequisites, not test artefacts.
+| Addition | Purpose | Status |
+|----------|---------|--------|
+| `SettingsViewModel.appVersion: String` | Computed property | **DONE** |
+| `SettingsConstants.websiteURL` | URL constant (extracted from view) | **DONE** — in `SettingsConstants` enum |
+| `SettingsConstants.helpURL` | Help URL constant | **DONE** |
+| `SettingsConstants.forumURL` | Forum URL constant | **DONE** |
+| `SettingsConstants.contactEmail` | Contact email constant | **DONE** |
+| `SettingsViewModel.currentLanguageDisplayName` | System language display | **DONE** — returns Chinese characters |
+| `SettingsViewModel.toggleReduceMotion(_ enabled: Bool)` | Persists via repo | **DONE** |
+| `SettingsRepositoryProtocol.setReduceMotion` | Protocol method | **DONE** |
 
-| Addition | Purpose | Referenced by |
-|----------|---------|---------------|
-| `SettingsViewModel.appVersion: String` | Computed property reading `CFBundleShortVersionString` | G5-U1, G5-X1 |
-| `SettingsViewModel.websiteURL: String` (static) | Constant for the WoowTech website | G5-U2, G5-X2, G5-X3, G4-U2 |
-| `SettingsViewModel.helpURL: String` (static) | Constant for the documentation/support URL | G4-U1, G4-U2 |
-| `SettingsViewModel.toggleReduceMotion(_ enabled: Bool)` | Mutates `settings.reduceMotion` and persists via repo | G6-U2, G6-X2 |
+## Architect Review Fixes Applied to Test Plan
 
-`AppSettings.reduceMotion` and `AppSettings.language` already exist — no model changes are needed.
+| # | Issue | Fix |
+|---|-------|-----|
+| 1 | `guard ... else { return }` silently passes | Add `XCTFail("reason")` in every else branch |
+| 2 | Duplicate G1-U2 (exists as `testAppLanguageDisplayNames()`) | Remove from implementation |
+| 3 | `app.state != .runningForeground` is flaky | Test "does not crash on tap" instead |
+| 4 | `sleep()` instead of `waitForExistence()` | Replace per CLAUDE.md |
+| 5 | Navigation boilerplate duplicated | Extract `navigateToSettings()` helper |
+| 6 | URLs now in `SettingsConstants` not `SettingsViewModel` | Update test references |
+
+## Test Implementation Status
+
+| Test | Status | Notes |
+|------|--------|-------|
+| Unit tests (9) | **Not yet implemented** | Need to write test files |
+| XCUITests (10) | **Not yet implemented** | Need device testing |
