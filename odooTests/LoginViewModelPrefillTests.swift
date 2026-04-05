@@ -144,11 +144,13 @@ final class LoginViewModelPrefillTests: XCTestCase {
 
     /// LVM-07: Regression test confirming the login flow works end-to-end after pre-fill
     /// changes. `login(onSuccess:)` must call `onSuccess` when authenticate returns `.success`.
-    /// Uses `XCTestExpectation` because `login()` launches an unstructured `Task` internally
-    /// that cannot be awaited directly from the test.
-    func test_login_givenSuccessfulAuthentication_firesOnSuccessCallback() {
+    ///
+    /// `login()` spawns an unstructured `Task` on `@MainActor`. Because the test class is
+    /// also `@MainActor`, we bridge with `withCheckedContinuation` so we can `await` the
+    /// callback without blocking the main actor and starving the pending Task.
+    func test_login_givenSuccessfulAuthentication_firesOnSuccessCallback() async {
         let repo = MockAccountRepository()
-        repo.stubbedActiveAccount = makeAccount()
+        repo.stubbedActiveAccount = makeAccount(username: "alan@woow.com")
         repo.stubbedAuthResult = .success(AuthResult.AuthSuccess(
             userId: 1,
             sessionId: "session-abc",
@@ -156,12 +158,19 @@ final class LoginViewModelPrefillTests: XCTestCase {
             displayName: "Alan"
         ))
         let storage = MockSecureStorage()
+        // The pre-fill path reads the password from storage to populate the password field.
+        // Without a stored password, the guard in login() would reject empty password.
+        storage.savePassword(accountId: "alan@woow.com", password: "s3cr3t!")
         let sut = LoginViewModel(repository: repo, secureStorage: storage)
 
-        let expectation = XCTestExpectation(description: "onSuccess callback fired")
-        sut.login { expectation.fulfill() }
+        // Bridge the callback-based API into an awaitable form.
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            sut.login { continuation.resume() }
+        }
 
-        wait(for: [expectation], timeout: 5.0)
+        // If we reach this line the callback was invoked — the test passes implicitly.
+        // An XCTFail is not needed: a timeout in the continuation would surface as a test hang.
+        XCTAssertNil(sut.error, "No error must be set after a successful login")
     }
 
     // MARK: - EC-02
