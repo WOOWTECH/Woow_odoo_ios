@@ -954,6 +954,8 @@ final class F14_SettingsGapTests: XCTestCase {
 
     override func setUp() {
         continueAfterFailure = false
+        // Force English locale for Settings tests to avoid localized label mismatches
+        app.launchArguments += ["-AppleLanguages", "(en)"]
         app.launch()
     }
 
@@ -973,12 +975,23 @@ final class F14_SettingsGapTests: XCTestCase {
         )
         menuButton.tap()
 
+        // Config sheet opens — tap "Settings" button
+        let settingsButton = app.buttons["Settings"]
         let settingsText = app.staticTexts["Settings"]
+        if settingsButton.waitForExistence(timeout: 5) {
+            settingsButton.tap()
+        } else if settingsText.waitForExistence(timeout: 3) {
+            settingsText.tap()
+        } else {
+            XCTFail("Settings not found in Config sheet")
+            return
+        }
+
+        // Wait for Settings screen to appear
         XCTAssertTrue(
-            settingsText.waitForExistence(timeout: 5),
-            "Settings menu item must appear after tapping the hamburger menu"
+            app.staticTexts["Appearance"].waitForExistence(timeout: 5),
+            "Settings screen must show Appearance section"
         )
-        settingsText.tap()
     }
 
     // ──────────────────────────────────────────────────────
