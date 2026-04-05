@@ -24,6 +24,18 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             print("[AppDelegate] Notification permission: \(granted)")
             #endif
         }
+
+        // Register notification category with hidden previews placeholder (G7).
+        // When the user has "Show Previews: When Unlocked" in iOS Settings,
+        // the lock screen displays this placeholder instead of the full message body.
+        let odooCategory = UNNotificationCategory(
+            identifier: "odoo_message",
+            actions: [],
+            intentIdentifiers: [],
+            hiddenPreviewsBodyPlaceholder: "New Odoo notification"
+        )
+        UNUserNotificationCenter.current().setNotificationCategories([odooCategory])
+
         application.registerForRemoteNotifications()
 
         return true

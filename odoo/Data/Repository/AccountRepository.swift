@@ -95,13 +95,37 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         return (try? context.fetch(request))?.map { $0.toDomainModel() } ?? []
     }
 
+    /// Switches to the specified account after validating the session.
+    /// Re-authenticates with stored password if the session cookie is expired. (G8)
     func switchAccount(id: String) async -> Bool {
         let context = persistence.container.viewContext
         let allRequest = OdooAccountEntity.fetchAllRequest()
         guard let all = try? context.fetch(allRequest) else { return false }
-
-        all.forEach { $0.isActive = false }
         guard let target = all.first(where: { $0.id == id }) else { return false }
+
+        let account = target.toDomainModel()
+
+        // Validate session — try to authenticate with stored password
+        if let password = secureStorage.getPassword(accountId: account.username) {
+            let result = await apiClient.authenticate(
+                serverUrl: account.fullServerUrl,
+                database: account.database,
+                username: account.username,
+                password: password
+            )
+            switch result {
+            case .success:
+                break // Session valid, proceed
+            case .error:
+                #if DEBUG
+                print("[AccountRepository] Session validation failed for \(account.username)")
+                #endif
+                return false
+            }
+        }
+
+        // Activate the target account
+        all.forEach { $0.isActive = false }
         target.isActive = true
         return (try? context.save()) != nil
     }
@@ -117,18 +141,56 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         }
 
         guard let account else { return }
+
+        // Unregister FCM token from Odoo server (G9 — best-effort, never blocks logout)
+        await unregisterFcmToken(serverUrl: account.serverUrl)
+
         await apiClient.clearCookies(for: account.serverUrl)
         secureStorage.deletePassword(accountId: account.username)
         context.delete(account)
         try? context.save()
+
+        // If no accounts remain, clear the local FCM token
+        let remaining = (try? context.fetch(OdooAccountEntity.fetchAllRequest())) ?? []
+        if remaining.isEmpty {
+            secureStorage.deleteFcmToken()
+        }
     }
 
     func removeAccount(id: String) async {
         let context = persistence.container.viewContext
         guard let entity = (try? context.fetch(OdooAccountEntity.fetchByIdRequest(id: id)))?.first else { return }
+
+        // Unregister FCM token from Odoo server (G9)
+        await unregisterFcmToken(serverUrl: entity.serverUrl)
+
         secureStorage.deletePassword(accountId: entity.username)
         context.delete(entity)
         try? context.save()
+
+        // If no accounts remain, clear the local FCM token
+        let remaining = (try? context.fetch(OdooAccountEntity.fetchAllRequest())) ?? []
+        if remaining.isEmpty {
+            secureStorage.deleteFcmToken()
+        }
+    }
+
+    /// Unregisters FCM token from Odoo server. Best-effort — errors logged, never blocks.
+    private func unregisterFcmToken(serverUrl: String) async {
+        guard let token = secureStorage.getFcmToken() else { return }
+        do {
+            _ = try await apiClient.callKw(
+                serverUrl: "https://\(serverUrl)",
+                model: "woow.fcm.device",
+                method: "unregister_device",
+                args: [],
+                kwargs: ["fcm_token": token]
+            )
+        } catch {
+            #if DEBUG
+            print("[AccountRepository] FCM unregister failed for \(serverUrl): \(error)")
+            #endif
+        }
     }
 
     func getSessionId(for serverUrl: String) -> String? {

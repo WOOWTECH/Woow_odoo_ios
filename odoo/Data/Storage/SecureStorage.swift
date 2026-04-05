@@ -1,13 +1,20 @@
 import Foundation
 import Security
 
+/// Protocol for secure credential storage, enabling injection and testing without Keychain access.
+protocol SecureStorageProtocol: Sendable {
+    func savePassword(accountId: String, password: String)
+    func getPassword(accountId: String) -> String?
+    func deletePassword(accountId: String)
+}
+
 /// Keychain-backed secure storage for passwords, PIN hash, FCM token, and settings.
 /// Replaces Android's EncryptedSharedPreferences.
 ///
 /// All data stored with:
 /// - `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` (passwords, PIN)
 /// - `kSecAttrSynchronizable: false` (no iCloud sync)
-final class SecureStorage: Sendable {
+final class SecureStorage: SecureStorageProtocol, Sendable {
 
     static let shared = SecureStorage()
 
@@ -57,6 +64,12 @@ final class SecureStorage: Sendable {
     /// Retrieves the FCM device token.
     func getFcmToken() -> String? {
         get(key: "fcm_token")
+    }
+
+    /// Deletes the FCM device token from Keychain.
+    /// Called when the last account is logged out. (G9)
+    func deleteFcmToken() {
+        delete(key: "fcm_token")
     }
 
     // MARK: - App Settings

@@ -15,6 +15,22 @@ struct odooApp: App {
     var body: some Scene {
         WindowGroup {
             AppRootView()
+                .onOpenURL { url in
+                    handleIncomingURL(url)
+                }
+        }
+    }
+
+    /// Routes incoming `woowodoo://` URLs through validation and into DeepLinkManager.
+    /// Expected format: `woowodoo://open?url=/web%23id=42`
+    private func handleIncomingURL(_ url: URL) {
+        guard url.scheme == "woowodoo" else { return }
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let urlParam = components.queryItems?.first(where: { $0.name == "url" })?.value else {
+            return
+        }
+        if DeepLinkValidator.isValid(url: urlParam, serverHost: "") {
+            DeepLinkManager.shared.setPending(urlParam)
         }
     }
 }

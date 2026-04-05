@@ -7,6 +7,7 @@ struct SettingsView: View {
     let onBackClick: () -> Void
 
     @State private var showColorPicker = false
+    @State private var showPinSetup = false
     @State private var selectedColor = "#6183FC"
 
     var body: some View {
@@ -49,12 +50,25 @@ struct SettingsView: View {
                         set: { viewModel.toggleBiometric($0) }
                     ))
 
-                    HStack {
-                        Label("PIN Code", systemImage: "lock.fill")
-                        Spacer()
-                        Text(viewModel.settings.pinEnabled ? "Change PIN" : "Set PIN")
-                            .foregroundStyle(WoowColors.primaryBlue)
-                            .font(.caption)
+                    Button {
+                        showPinSetup = true
+                    } label: {
+                        HStack {
+                            Label("PIN Code", systemImage: "lock.fill")
+                            Spacer()
+                            Text(viewModel.settings.pinEnabled ? "Change PIN" : "Set PIN")
+                                .foregroundStyle(WoowColors.primaryBlue)
+                                .font(.caption)
+                        }
+                    }
+                    .foregroundStyle(.primary)
+
+                    if viewModel.settings.pinEnabled {
+                        Button(role: .destructive) {
+                            viewModel.removePin()
+                        } label: {
+                            Label("Remove PIN", systemImage: "trash")
+                        }
                     }
                 }
             }
@@ -96,6 +110,16 @@ struct SettingsView: View {
             ColorPickerView(selectedColor: $selectedColor) { hex in
                 viewModel.updateThemeColor(hex)
             }
+        }
+        .sheet(isPresented: $showPinSetup) {
+            PinSetupView(
+                isChangingPin: viewModel.settings.pinEnabled,
+                onPinSet: { newPin in
+                    viewModel.setPin(newPin)
+                    showPinSetup = false
+                },
+                onCancel: { showPinSetup = false }
+            )
         }
     }
 }

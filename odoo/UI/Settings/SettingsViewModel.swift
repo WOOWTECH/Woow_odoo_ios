@@ -46,6 +46,10 @@ final class SettingsViewModel: ObservableObject {
         settings.biometricEnabled = enabled
     }
 
+    func verifyPin(_ pin: String) -> Bool {
+        settingsRepo.verifyPin(pin)
+    }
+
     func setPin(_ pin: String) -> Bool {
         let result = settingsRepo.setPin(pin)
         if result { settings = settingsRepo.getSettings() }

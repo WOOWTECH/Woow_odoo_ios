@@ -7,6 +7,7 @@ protocol PushTokenRepositoryProtocol {
     func saveToken(_ token: String)
     func getToken() -> String?
     func registerTokenWithAllAccounts(_ token: String) async
+    func unregisterToken(for serverUrl: String) async
 }
 
 final class PushTokenRepository: PushTokenRepositoryProtocol {
@@ -57,6 +58,30 @@ final class PushTokenRepository: PushTokenRepositoryProtocol {
                 print("[PushTokenRepository] Failed to register token with \(account.serverUrl): \(error)")
                 #endif
             }
+        }
+    }
+
+    /// Unregisters the FCM token from the Odoo server for the given account.
+    /// Called during logout to stop push notifications for the logged-out account.
+    /// Best-effort: errors are logged but never block logout. (G9)
+    func unregisterToken(for serverUrl: String) async {
+        guard let token = getToken() else { return }
+
+        do {
+            _ = try await apiClient.callKw(
+                serverUrl: serverUrl,
+                model: "woow.fcm.device",
+                method: "unregister_device",
+                args: [],
+                kwargs: ["fcm_token": token]
+            )
+            #if DEBUG
+            print("[PushTokenRepository] Token unregistered from \(serverUrl)")
+            #endif
+        } catch {
+            #if DEBUG
+            print("[PushTokenRepository] Failed to unregister token from \(serverUrl): \(error)")
+            #endif
         }
     }
 

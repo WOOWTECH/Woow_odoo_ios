@@ -25,6 +25,9 @@ enum NotificationService {
             content.threadIdentifier = "odoo_messages"
         }
 
+        // Link to registered category for lock screen privacy (G7)
+        content.categoryIdentifier = "odoo_message"
+
         // Store deep link URL in userInfo for tap handling
         if let actionUrl = data["odoo_action_url"] {
             content.userInfo["odoo_action_url"] = actionUrl

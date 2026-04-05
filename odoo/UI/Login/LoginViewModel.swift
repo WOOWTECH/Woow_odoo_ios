@@ -23,11 +23,11 @@ final class LoginViewModel: ObservableObject {
     @Published var error: String?
 
     private let repository: AccountRepositoryProtocol
-    private let secureStorage: SecureStorage
+    private let secureStorage: any SecureStorageProtocol
 
     init(
         repository: AccountRepositoryProtocol = AccountRepository(),
-        secureStorage: SecureStorage = .shared
+        secureStorage: any SecureStorageProtocol = SecureStorage.shared
     ) {
         self.repository = repository
         self.secureStorage = secureStorage
