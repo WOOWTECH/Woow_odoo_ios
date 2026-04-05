@@ -362,3 +362,43 @@ Place this inside any `XCTFail` or `guard` failure path so the CI artifact alway
 Debug dumps are temporary. Once a test passes reliably:
 - Remove all `print(app.debugDescription)` and `print(springboard.debugDescription)` calls.
 - Keep only the `[NotifStrategy]` log lines — they are useful for CI triage and are not debug noise.
+
+---
+
+## Development Workflow (MANDATORY)
+
+### Plan → Implement → Test → Commit
+
+Every feature or fix follows this cycle:
+
+```
+1. PLAN    — Write <Date>-<Title>_Implementation_Plan.md + <Date>-<Title>_Test_Plan.md
+2. COMMIT  — Commit the plan docs (before any code changes)
+3. IMPLEMENT — Write the code per the plan
+4. TEST    — Run unit tests + E2E tests per the test plan
+5. If tests FAIL:
+   a. Analyze the failure (follow Fail → Analyze → Fix cycle)
+   b. Update the plan if the approach was wrong
+   c. Modify the implementation
+   d. Re-test until ALL criteria pass
+6. COMMIT  — Commit the working code with test results
+7. PUSH    — Push to GitHub
+```
+
+Do NOT skip the plan step. Do NOT commit code that hasn't been tested.
+
+### Document Naming Convention
+
+All plan documents in `docs/` follow this format:
+
+```
+<YYYY-MM-DD>-<Title-In-Kebab-Case>_Implementation_Plan.md
+<YYYY-MM-DD>-<Title-In-Kebab-Case>_Test_Plan.md
+```
+
+Examples:
+- `2026-04-05-P0-P1-Gap-Fix_Implementation_Plan.md`
+- `2026-04-05-P0-P1-Gap-Fix_Test_Plan.md`
+- `2026-04-05-Auto-Login-Deep-Link_Implementation_Plan.md`
+
+The `_Implementation_Plan` and `_Test_Plan` suffixes are mandatory. Each feature should have both.
