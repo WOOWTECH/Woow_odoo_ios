@@ -774,5 +774,33 @@ Once all 19 tests pass, update `docs/functional-equivalence-matrix.md`:
 
 | Test | Status | Notes |
 |------|--------|-------|
-| Unit tests (9) | **Not yet implemented** | Need to write test files |
-| XCUITests (10) | **Not yet implemented** | Need device testing |
+| G1-U1 `test_currentLanguageDisplayName_givenEnglishLocale_returnsNonEmptyString` | **DONE — PASSING** | `odooTests/SettingsGapTests.swift` |
+| G6-U3 `test_reduceMotion_defaultIsFalse` | **DONE — PASSING** | `odooTests/SettingsGapTests.swift` |
+| G6-U1 `test_toggleReduceMotion_givenTrue_updatesSettings` | **DONE — PASSING** | `odooTests/SettingsGapTests.swift` |
+| G6-U2 `test_toggleReduceMotion_givenFalse_updatesSettings` | **DONE — PASSING** | `odooTests/SettingsGapTests.swift` |
+| G5-U1 `test_appVersion_returnsNonEmptyString` | **DONE — PASSING** | `odooTests/SettingsGapTests.swift` |
+| G5-U2 `test_settingsConstants_urlsAreValid` | **DONE — PASSING** | `odooTests/SettingsGapTests.swift` |
+| G4-U1 `test_settingsConstants_helpURLStartsWithHttps` | **DONE — PASSING** | `odooTests/SettingsGapTests.swift` |
+| G1-U2 | **REMOVED** | Duplicate of `testAppLanguageDisplayNames()` in `odooTests.swift` per architect review fix #2 |
+| G1-X1 `test_F14_5_settings_hasLanguageSection` | **DONE — compile-verified** | `F14_SettingsGapTests` in `odooUITests/odooUITests.swift` |
+| G1-X2 `test_F14_6_languageRow_showsCurrentLanguageLabel` | **DONE — compile-verified** | `F14_SettingsGapTests` in `odooUITests/odooUITests.swift` |
+| G1-X3 `test_F14_7_languageTap_doesNotCrash` | **DONE — compile-verified** | Replaced `app.state != .runningForeground` check per architect fix #3 |
+| G6-X1 `test_F14_8_appearance_hasReduceMotionToggle` | **DONE — compile-verified** | `F14_SettingsGapTests` in `odooUITests/odooUITests.swift` |
+| G6-X2 `test_F14_9_reduceMotionToggle_canBeToggledOn` | **DONE — compile-verified** | `F14_SettingsGapTests` in `odooUITests/odooUITests.swift` |
+| G5-X1 `test_F14_10_about_hasVersionWebsiteContactCopyright` | **DONE — compile-verified** | `F14_SettingsGapTests` in `odooUITests/odooUITests.swift` |
+| G5-X2 `test_F14_11_websiteRow_showsCorrectUrl` | **DONE — compile-verified** | `F14_SettingsGapTests` in `odooUITests/odooUITests.swift` |
+| G5-X3 `test_F14_12_websiteTap_doesNotCrash` | **DONE — compile-verified** | Replaced `app.state != .runningForeground` check per architect fix #3 |
+| G4-X1 `test_F14_13_settings_hasHelpSection` | **DONE — compile-verified** | `F14_SettingsGapTests` in `odooUITests/odooUITests.swift` |
+| G4-X2 `test_F14_14_helpLink_doesNotCrash` | **DONE — compile-verified** | Replaced `app.state != .runningForeground` check per architect fix #3 |
+
+### Architect Review Fixes Applied During Implementation
+
+| Fix # | Issue | Applied |
+|-------|-------|---------|
+| 1 | Removed duplicate G1-U2 | Yes — omitted from `SettingsGapTests.swift` |
+| 2 | No `guard ... else { return }` without `XCTFail` | Yes — all guard branches call `XCTFail` or are replaced with `waitForExistence` + `XCTAssertTrue` |
+| 3 | No `sleep()` — use `waitForExistence` | Yes — `navigateToSettings()` helper uses only `waitForExistence` |
+| 4 | Extracted `navigateToSettings()` helper | Yes — private helper in `F14_SettingsGapTests` |
+| 5 | No `app.state != .runningForeground` for external URLs | Yes — X3/X2 tests verify "does not crash on tap" instead |
+| 6 | URLs in `SettingsConstants` not `SettingsViewModel` | Yes — all unit tests reference `SettingsConstants.*` |
+| 7 | `appVersion`/`currentLanguageDisplayName` are instance properties | Yes — tests instantiate `SettingsViewModel()` and call on the instance |
