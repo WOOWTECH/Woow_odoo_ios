@@ -400,6 +400,8 @@ final class F15_PerformanceTests: XCTestCase {
     }
 }
 
+
+
 // ═══════════════════════════════════════════════════════════
 // FCM: Login + Push Notification E2E Test
 // Frequency: On demand | Priority: CRITICAL
@@ -502,7 +504,7 @@ final class FCM_EndToEndTests: XCTestCase {
                                   "message_type": "comment",
                                   "subtype_xmlid": "mail.mt_comment"])
         }
-        verifyNotification(appName: "ODOO", sender: "Test User")
+        verifyNotification(appName: "ODOO", bodyContains: "XCUITest FCM verification")
     }
 
     // ── V14: @mention notification ──
@@ -519,7 +521,7 @@ final class FCM_EndToEndTests: XCTestCase {
                                   "subtype_xmlid": "mail.mt_comment",
                                   "partner_ids": [FCM_EndToEndTests.adminPartnerID]])
         }
-        verifyNotification(appName: "ODOO", sender: "Test User")
+        verifyNotification(appName: "ODOO", bodyContains: "Admin please review")
     }
 
     // ── V15: Discuss DM notification ──
@@ -529,14 +531,13 @@ final class FCM_EndToEndTests: XCTestCase {
     func test_FCM_6_discussNotification() {
         ensureLoggedIn()
         clearAndSendNotification { cookies in
-            // Post to "general" channel which admin is a member of
             self.odooRPC(cookies: cookies, model: "discuss.channel", method: "message_post",
                          args: [FCM_EndToEndTests.generalChannelID],
                          kwargs: ["body": "Discuss DM test from XCUITest",
                                   "message_type": "comment",
                                   "subtype_xmlid": "mail.mt_comment"])
         }
-        verifyNotification(appName: "ODOO", sender: "Test User")
+        verifyNotification(appName: "ODOO", bodyContains: "Discuss DM test")
     }
 
     // ── V16: Activity assigned notification ──
@@ -546,7 +547,6 @@ final class FCM_EndToEndTests: XCTestCase {
     func test_FCM_7_activityNotification() {
         ensureLoggedIn()
 
-        // Look up res.partner model ID via admin (test user lacks ir.model access)
         let adminCookies = odooLogin(email: TestConfig.adminUser, password: TestConfig.adminPass)
         guard !adminCookies.isEmpty else {
             XCTFail("Admin login failed — check TEST_ADMIN_USER and TEST_ADMIN_PASS credentials")
@@ -560,7 +560,6 @@ final class FCM_EndToEndTests: XCTestCase {
         }
 
         clearAndSendNotification { cookies in
-            // Create a To-Do activity assigned to admin
             self.odooRPC(cookies: cookies, model: "mail.activity", method: "create",
                          args: [["activity_type_id": FCM_EndToEndTests.todoActivityTypeID,
                                  "res_model_id": modelId,
@@ -569,7 +568,7 @@ final class FCM_EndToEndTests: XCTestCase {
                                  "summary": "Review partner record"]],
                          kwargs: [:])
         }
-        verifyNotification(appName: "ODOO", sender: "Test User")
+        verifyNotification(appName: "ODOO", bodyContains: "Review partner record")
     }
 
     // ── V8: Deep link tap ──
@@ -597,15 +596,40 @@ final class FCM_EndToEndTests: XCTestCase {
         swipeFrom.press(forDuration: 0.1, thenDragTo: swipeTo)
         sleep(3)
 
-        // Expand groups
-        let groupPredicate = NSPredicate(format: "label CONTAINS[c] %@", "odoo")
-        let groups = springboard.buttons.matching(groupPredicate)
-        if groups.count > 0 { groups.firstMatch.tap(); sleep(2) }
-
-        // Find and tap notification
+        // Find notification — can be ScrollView or Button (iOS renders both)
         let notifPredicate = NSPredicate(format: "label CONTAINS[c] %@ AND label CONTAINS[c] %@", "odoo", "test user")
-        let notification = springboard.buttons.matching(notifPredicate).firstMatch
-        guard notification.waitForExistence(timeout: 5) else {
+        let appPredicate = NSPredicate(format: "label CONTAINS[c] %@", "odoo")
+
+        // Search for the tappable notification element
+        // Notifications can be: BannerNotification (otherElements), Button, or inside a ScrollView
+        var notification: XCUIElement?
+        // Try BannerNotification (identifier: NotificationShortLookView) — always tappable
+        let bannerMatch = springboard.otherElements.matching(
+            NSPredicate(format: "identifier == 'NotificationShortLookView' AND label CONTAINS[c] %@ AND label CONTAINS[c] %@", "odoo", "test user")
+        )
+        let btnMatch = springboard.buttons.matching(notifPredicate)
+        if bannerMatch.count > 0 {
+            notification = bannerMatch.firstMatch
+        } else if btnMatch.count > 0 {
+            notification = btnMatch.firstMatch
+        } else {
+            // Try expanding a group first
+            let scrollGroup = springboard.scrollViews.matching(appPredicate)
+            let btnGroup = springboard.buttons.matching(appPredicate)
+            let group = scrollGroup.count > 0 ? scrollGroup.firstMatch : (btnGroup.count > 0 ? btnGroup.firstMatch : nil)
+            if let group = group {
+                group.tap()
+                sleep(3)
+                // Search again after expand
+                let banners = springboard.otherElements.matching(
+                    NSPredicate(format: "identifier == 'NotificationShortLookView' AND label CONTAINS[c] %@ AND label CONTAINS[c] %@", "odoo", "test user")
+                )
+                let b = springboard.buttons.matching(notifPredicate)
+                notification = banners.count > 0 ? banners.firstMatch : (b.count > 0 ? b.firstMatch : nil)
+            }
+        }
+
+        guard let notification = notification, notification.exists else {
             XCTFail("No notification found to tap")
             return
         }
@@ -713,27 +737,92 @@ final class FCM_EndToEndTests: XCTestCase {
         sleep(10)
     }
 
-    /// Open notification center, expand groups, verify notification content
-    private func verifyNotification(appName: String, sender: String) {
+    /// Open notification center, expand groups if needed, verify notification content.
+    /// Robust approach learned from debug analysis:
+    /// - Notifications may be already expanded (no group) or grouped
+    /// - Search directly first, expand only if not found
+    /// - If grouped under sleep mode or multi-app group, tap to expand then re-search
+    /// Search for a notification in the notification center.
+    /// Based on screen analysis: notifications can be ScrollView or Button elements
+    /// with identifier 'ListCell'. A grouped notification (ScrollView) must be tapped
+    /// to expand before individual notifications become visible.
+    private func verifyNotification(appName: String, bodyContains: String) {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
 
-        // Open lock screen
+        // Open lock screen / notification center
         let topLeft = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.01))
         let midLeft = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.6))
         topLeft.press(forDuration: 0.1, thenDragTo: midLeft)
-        sleep(2)
-        // Swipe up to reveal notifications
-        let swipeFrom = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9))
-        let swipeTo = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
-        swipeFrom.press(forDuration: 0.1, thenDragTo: swipeTo)
         sleep(3)
 
-        // Expand groups
-        let groupPredicate = NSPredicate(format: "label CONTAINS[c] %@", appName.lowercased())
-        let groups = springboard.buttons.matching(groupPredicate)
-        if groups.count > 0 {
-            groups.firstMatch.tap()
-            sleep(2)
+        let targetPredicate = NSPredicate(format: "label CONTAINS[c] %@ AND label CONTAINS[c] %@", appName, bodyContains)
+        let appPredicate = NSPredicate(format: "label CONTAINS[c] %@", appName)
+
+        // Helper: search BOTH scrollViews and buttons (iOS renders notifications as either)
+        func findNotification() -> Bool {
+            return springboard.scrollViews.matching(targetPredicate).count > 0
+                || springboard.buttons.matching(targetPredicate).count > 0
+        }
+
+        func findAppGroup() -> XCUIElement? {
+            // Check scrollViews first (grouped notifications appear as ScrollView)
+            let scrollGroups = springboard.scrollViews.matching(appPredicate)
+            if scrollGroups.count > 0 { return scrollGroups.firstMatch }
+            // Then check buttons
+            let buttonGroups = springboard.buttons.matching(appPredicate)
+            if buttonGroups.count > 0 { return buttonGroups.firstMatch }
+            return nil
+        }
+
+        func getVerifiedLabel() -> String? {
+            let inScroll = springboard.scrollViews.matching(targetPredicate)
+            if inScroll.count > 0 { return inScroll.firstMatch.label }
+            let inBtn = springboard.buttons.matching(targetPredicate)
+            if inBtn.count > 0 { return inBtn.firstMatch.label }
+            return nil
+        }
+
+        // Strategy 1: Direct search — notification already visible (no group)
+        if findNotification() {
+            print("[NotifStrategy] 1: found directly")
+        }
+
+        // Strategy 2: Tap app group to expand
+        if !findNotification(), let group = findAppGroup() {
+            print("[NotifStrategy] 2: tapping group to expand: \(group.label)")
+            group.tap()
+            sleep(3)
+        }
+
+        // Strategy 3: Focus mode group — expand focus first, then app group
+        if !findNotification() {
+            let focusPredicate = NSPredicate(format: "label CONTAINS '睡眠' OR label CONTAINS 'Sleep' OR label CONTAINS '專注'")
+            // Search both scrollViews and buttons for focus group
+            let focusScroll = springboard.scrollViews.matching(focusPredicate)
+            let focusBtn = springboard.buttons.matching(focusPredicate)
+            let focusElement = focusScroll.count > 0 ? focusScroll.firstMatch : (focusBtn.count > 0 ? focusBtn.firstMatch : nil)
+            if let focus = focusElement {
+                print("[NotifStrategy] 3: expanding focus group: \(focus.label)")
+                focus.tap()
+                sleep(2)
+                if let group = findAppGroup() {
+                    group.tap()
+                    sleep(2)
+                }
+            }
+        }
+
+        // Strategy 4: Swipe up to reveal hidden notifications, then retry
+        if !findNotification() {
+            print("[NotifStrategy] 4: swiping up")
+            let swipeFrom = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9))
+            let swipeTo = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+            swipeFrom.press(forDuration: 0.1, thenDragTo: swipeTo)
+            sleep(3)
+            if let group = findAppGroup() {
+                group.tap()
+                sleep(2)
+            }
         }
 
         // Screenshot
@@ -743,20 +832,20 @@ final class FCM_EndToEndTests: XCTestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
 
-        // Verify
-        let predicate = NSPredicate(format: "label CONTAINS[c] %@ AND label CONTAINS[c] %@", appName, sender)
-        let matched = springboard.buttons.matching(predicate)
-        let found = matched.count > 0
-
-        if found {
-            print("VERIFIED: \(matched.firstMatch.label)")
-            XCTAssertTrue(matched.firstMatch.label.contains(appName), "App name should be \(appName)")
-            XCTAssertTrue(matched.firstMatch.label.contains(sender), "Sender should be \(sender)")
+        // Final verification
+        let found = findNotification()
+        if let label = getVerifiedLabel() {
+            print("VERIFIED: \(label)")
         } else {
-            print("NOT FOUND: appName=\(appName) sender=\(sender)")
+            // Dump what IS visible for debugging
+            print("NOT FOUND: appName=\(appName) body=\(bodyContains)")
+            let scrollOdoo = springboard.scrollViews.matching(appPredicate)
+            let btnOdoo = springboard.buttons.matching(appPredicate)
+            print("  scrollViews with '\(appName)': \(scrollOdoo.count)")
+            print("  buttons with '\(appName)': \(btnOdoo.count)")
         }
 
-        XCTAssertTrue(found, "Notification with \(appName) + \(sender) should appear")
+        XCTAssertTrue(found, "Notification with \(appName) + '\(bodyContains)' should appear")
 
         XCUIDevice.shared.press(.home)
         sleep(1)

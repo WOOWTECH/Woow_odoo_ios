@@ -262,3 +262,103 @@ Every milestone MUST follow these steps in order. Do NOT skip any step. Do NOT c
 | Porting plan | `docs/2026-03-25-ios-porting-plan.md` | Architecture mapping, decisions |
 | Verification log | `docs/ios-verification-log.md` | All simulator test results |
 | Android reference | `/Users/alanlin/Woow_odoo_app/` | Source of truth for feature parity |
+
+---
+
+## XCUITest Development Process (MANDATORY)
+
+These rules apply whenever writing or modifying XCUITests, especially those that interact with Springboard, the notification center, or any system UI.
+
+### Core Rule: Analyze Before You Code
+
+**Never write a test interaction against UI you have not observed.**
+
+Before implementing any test step that taps, swipes, or queries a system screen:
+
+1. Add a temporary element dump to capture what is actually on screen.
+2. Run the dump.
+3. Read the output.
+4. Write the interaction based on what the dump shows.
+5. Remove the dump code once the test passes.
+
+Skipping this step and guessing element positions or identifiers is prohibited.
+
+### Fail → Analyze → Fix Cycle (REQUIRED after every test failure)
+
+Do NOT retry the same approach after a failure. Follow this cycle without exception:
+
+```
+Step 1: Test fails
+Step 2: Insert element dump at the point of failure
+         XCTContext.runActivity(named: "Dump screen") { _ in
+             print(XCUIApplication().debugDescription)
+             let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+             print(springboard.debugDescription)
+         }
+Step 3: Run the test — read the full dump output
+Step 4: Identify the actual element label, identifier, or position from the dump
+Step 5: Write the correct interaction using what the dump revealed
+Step 6: Run the test again — if it passes, remove the dump code
+Step 7: If it still fails, repeat from Step 2 with more context captured
+```
+
+Do not proceed past Step 3 without actually reading the dump output. Guessing after a failure is a process violation.
+
+### Notification Center — Search Strategy (REQUIRED order)
+
+Notifications can appear in many states: at the top, at the bottom, grouped, collapsed under a Focus mode banner, or hidden until the user scrolls. Never assume a fixed position.
+
+Always attempt strategies in this order, logging which one succeeds:
+
+```swift
+// Strategy 1: Direct search — notification already visible
+if springboard.otherElements["NotificationShortLookView"].firstMatch.waitForExistence(timeout: 3) {
+    print("[NotifStrategy] Found via direct search")
+    // interact
+}
+// Strategy 2: Expand a notification group
+else if springboard.otherElements["NotificationGroupView"].firstMatch.exists {
+    springboard.otherElements["NotificationGroupView"].firstMatch.tap()
+    print("[NotifStrategy] Expanded group")
+    // search again
+}
+// Strategy 3: Dismiss Focus mode banner if present
+else if springboard.buttons["Open"].exists || springboard.staticTexts["Focus"].exists {
+    // handle focus dismissal
+    print("[NotifStrategy] Dismissed Focus banner")
+}
+// Strategy 4: Swipe up from bottom to reveal notification
+else {
+    springboard.swipeUp()
+    print("[NotifStrategy] Swiped up to reveal")
+    // search again
+}
+```
+
+If none of the four strategies finds the notification, capture a screenshot and the full element dump before failing the test — do not silently assert false.
+
+### Screenshot Capture on Failure (REQUIRED)
+
+Every test that touches system UI must attach a screenshot on failure:
+
+```swift
+let screenshot = XCUIScreen.main.screenshot()
+let attachment = XCTAttachment(screenshot: screenshot)
+attachment.lifetime = .keepAlways
+add(attachment)
+```
+
+Place this inside any `XCTFail` or `guard` failure path so the CI artifact always contains visual evidence.
+
+### Prohibited Patterns
+
+- Copying a swipe or tap from a previous test without running a dump on the current screen first.
+- Retrying an identical approach more than once after a failure.
+- Using hardcoded element indices (e.g., `buttons.element(boundBy: 2)`) without dump confirmation.
+- Silently swallowing a `waitForExistence` timeout without capturing state.
+
+### Debug Dump Removal
+
+Debug dumps are temporary. Once a test passes reliably:
+- Remove all `print(app.debugDescription)` and `print(springboard.debugDescription)` calls.
+- Keep only the `[NotifStrategy]` log lines — they are useful for CI triage and are not debug noise.
