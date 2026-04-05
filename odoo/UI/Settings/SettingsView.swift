@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Settings screen — appearance, security, data, about.
-/// UX-47 through UX-57. Same section order as Android.
+/// Settings screen — Appearance, Security, Language, Data, Help, About.
+/// UX-47 through UX-57, UX-58, UX-82 (section order matches Android).
 struct SettingsView: View {
     @StateObject private var viewModel = SettingsViewModel()
     let onBackClick: () -> Void
@@ -12,7 +12,7 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            // Appearance
+            // ── Appearance ──
             Section("Appearance") {
                 Button {
                     selectedColor = viewModel.settings.themeColor
@@ -35,9 +35,15 @@ struct SettingsView: View {
                     Text("Light").tag(ThemeMode.light)
                     Text("Dark").tag(ThemeMode.dark)
                 }
+
+                // G6: Reduce Motion toggle
+                Toggle("Reduce Motion", isOn: Binding(
+                    get: { viewModel.settings.reduceMotion },
+                    set: { viewModel.toggleReduceMotion($0) }
+                ))
             }
 
-            // Security
+            // ── Security ──
             Section("Security") {
                 Toggle("App Lock", isOn: Binding(
                     get: { viewModel.settings.appLockEnabled },
@@ -73,7 +79,33 @@ struct SettingsView: View {
                 }
             }
 
-            // Data & Storage
+            // ── Language (G1) ──
+            Section("Language") {
+                Button {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                } label: {
+                    HStack {
+                        Label("Language", systemImage: "globe")
+                        Spacer()
+                        Text(viewModel.currentLanguageDisplayName)
+                            .foregroundStyle(.secondary)
+                            .font(.caption)
+                        Image(systemName: "arrow.up.forward.app")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .foregroundStyle(.primary)
+
+                Text("Change language in iOS Settings")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            // ── Data & Storage ──
             Section("Data & Storage") {
                 Button {
                     viewModel.clearCache()
@@ -88,14 +120,88 @@ struct SettingsView: View {
                 }
             }
 
-            // About
+            // ── Help & Support (G4) ──
+            Section("Help & Support") {
+                Button {
+                    if let url = URL(string: SettingsConstants.helpURL) {
+                        UIApplication.shared.open(url)
+                    }
+                } label: {
+                    HStack {
+                        Label("Odoo Help Center", systemImage: "questionmark.circle")
+                        Spacer()
+                        Image(systemName: "arrow.up.forward")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .foregroundStyle(.primary)
+
+                Button {
+                    if let url = URL(string: SettingsConstants.forumURL) {
+                        UIApplication.shared.open(url)
+                    }
+                } label: {
+                    HStack {
+                        Label("Community Forum", systemImage: "bubble.left.and.bubble.right")
+                        Spacer()
+                        Image(systemName: "arrow.up.forward")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .foregroundStyle(.primary)
+            }
+
+            // ── About (G5) ──
             Section("About") {
                 HStack {
                     Label("App Version", systemImage: "info.circle")
                     Spacer()
-                    Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
+                    Text(viewModel.appVersion)
                         .foregroundStyle(.secondary)
                 }
+
+                Button {
+                    if let url = URL(string: SettingsConstants.websiteURL) {
+                        UIApplication.shared.open(url)
+                    }
+                } label: {
+                    HStack {
+                        Label("Visit Website", systemImage: "globe")
+                        Spacer()
+                        Text(SettingsConstants.websiteDisplayName)
+                            .foregroundStyle(.secondary)
+                            .font(.caption)
+                        Image(systemName: "arrow.up.forward")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .foregroundStyle(.primary)
+
+                Button {
+                    if let url = URL(string: "mailto:\(SettingsConstants.contactEmail)") {
+                        UIApplication.shared.open(url)
+                    }
+                } label: {
+                    HStack {
+                        Label("Contact Us", systemImage: "envelope")
+                        Spacer()
+                        Text(SettingsConstants.contactEmail)
+                            .foregroundStyle(.secondary)
+                            .font(.caption)
+                    }
+                }
+                .foregroundStyle(.primary)
+
+                Text("\u{00A9} 2026 WoowTech")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
             }
         }
         .navigationTitle("Settings")
@@ -122,4 +228,14 @@ struct SettingsView: View {
             )
         }
     }
+}
+
+/// Constants for Settings — URLs, email, display names.
+/// Extracted for testability and single source of truth.
+enum SettingsConstants {
+    static let websiteURL = "https://aiot.woowtech.io"
+    static let websiteDisplayName = "aiot.woowtech.io"
+    static let contactEmail = "woowtech@designsmart.com.tw"
+    static let helpURL = "https://www.odoo.com/help"
+    static let forumURL = "https://www.odoo.com/forum"
 }

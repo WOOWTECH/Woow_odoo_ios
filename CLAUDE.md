@@ -402,3 +402,30 @@ Examples:
 - `2026-04-05-Auto-Login-Deep-Link_Implementation_Plan.md`
 
 The `_Implementation_Plan` and `_Test_Plan` suffixes are mandatory. Each feature should have both.
+
+---
+
+## Localization Rules (MANDATORY)
+
+### String Handling
+- **All user-visible strings** must be in `Localizable.strings` (en, zh-Hans, zh-Hant)
+- SwiftUI `Text("Key")`, `Label("Key", ...)`, `Section("Key")` auto-match Localizable.strings keys
+- Use the **English text as the key** (not snake_case): `"Visit Website" = "访问网站";`
+- **Never** leave zh-Hans/zh-Hant translations as English copies — provide real translations
+- URLs and brand names (Odoo, WoowTech) stay in English across all locales
+
+### Production Checklist (before every commit with UI changes)
+- [ ] All new strings added to all 3 Localizable.strings files
+- [ ] zh-Hans has Simplified Chinese translations
+- [ ] zh-Hant has Traditional Chinese translations
+- [ ] Decorative images have `.accessibilityHidden(true)`
+- [ ] External URL constants extracted (not inline in views)
+- [ ] Dark mode tested (use `.foregroundStyle(.primary/.secondary)`, not hardcoded colors)
+
+---
+
+## Constants & Testability
+
+- Extract URLs, email addresses, and display strings into `enum Constants` or dedicated `enum SettingsConstants`
+- ViewModel properties (`appVersion`, `currentLanguageDisplayName`) must be testable — no inline `Bundle.main` calls in views
+- Use protocol-based DI for repositories so ViewModels are unit-testable with mocks

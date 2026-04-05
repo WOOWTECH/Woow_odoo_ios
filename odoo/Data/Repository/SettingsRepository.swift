@@ -8,6 +8,7 @@ protocol SettingsRepositoryProtocol {
     func isBiometricEnabled() -> Bool
     func setAppLock(_ enabled: Bool)
     func setBiometric(_ enabled: Bool)
+    func setReduceMotion(_ enabled: Bool)
     func setPin(_ pin: String) -> Bool
     func verifyPin(_ pin: String) -> Bool
     func removePin()
@@ -48,6 +49,12 @@ final class SettingsRepository: SettingsRepositoryProtocol {
     func setBiometric(_ enabled: Bool) {
         var settings = secureStorage.getSettings()
         settings.biometricEnabled = enabled
+        secureStorage.saveSettings(settings)
+    }
+
+    func setReduceMotion(_ enabled: Bool) {
+        var settings = secureStorage.getSettings()
+        settings.reduceMotion = enabled
         secureStorage.saveSettings(settings)
     }
 

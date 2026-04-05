@@ -49,3 +49,19 @@
 
 /* Notifications */
 "notification_channel_messages" = "Odoo 消息";
+
+/* Settings — Language (G1) */
+"Language" = "语言";
+"Change language in iOS Settings" = "前往 设置 > odoo > 语言 更改语言";
+
+/* Settings — Reduce Motion (G6) */
+"Reduce Motion" = "减少动画";
+
+/* Settings — Help & Support (G4) */
+"Help & Support" = "帮助与支持";
+"Odoo Help Center" = "Odoo 帮助中心";
+"Community Forum" = "社区论坛";
+
+/* Settings — About (G5) */
+"Visit Website" = "访问网站";
+"Contact Us" = "联系我们";

@@ -170,7 +170,7 @@ Each row = one user-visible behavior. Both platforms must pass every row.
 
 ---
 
-## Summary (Updated 2026-04-05 — after P0+P1 implementation)
+## Summary (Updated 2026-04-05 — ALL GAPS CLOSED)
 
 | Category | Total UX Items | Android DONE | iOS Status | iOS GAPs |
 |----------|---------------|-------------|------------|----------|
@@ -178,37 +178,37 @@ Each row = one user-visible behavior. Both platforms must pass every row.
 | Biometric/PIN | 15 | 15 | 15/15 DONE | 0 |
 | Main WebView | 10 | 9 | 10/10 DONE | 0 |
 | Push Notifications | 12 | 12 | 12/12 DONE | 0 |
-| Settings | 11 | 11 | 8/11 DONE | 3 (G4: Help missing, G5: About incomplete, G6: Reduce Motion) |
-| Language | 5 | 5 | 4/5 DONE | 1 (G1: Language picker missing) |
+| Settings | 11 | 11 | 11/11 DONE | 0 |
+| Language | 5 | 5 | 5/5 DONE | 0 |
 | Cache | 4 | 4 | 4/4 DONE | 0 |
 | Multi-Account | 4 | 4 | 4/4 DONE | 0 |
 | Deep Link Security | 5 | 5 | 5/5 DONE | 0 |
 | Visual Consistency | 7 | 7 | 7/7 DONE | 0 |
-| **Total** | **82** | **81** | **78/82 DONE** | **4 gaps remaining** |
+| **Total** | **82** | **81** | **82/82 DONE** | **0 gaps** |
 
-### Gap Status
+### Gap Status — All Closed
 
 | Priority | Gap | Description | Status |
 |----------|-----|-------------|--------|
-| ~~P0~~ | ~~G3~~ | ~~URL scheme~~ | **DONE** — `CFBundleURLTypes` + `onOpenURL` handler |
-| ~~P0~~ | ~~G9~~ | ~~FCM unregister on logout~~ | **DONE** — calls `/unregister`, clears local token |
-| ~~P0~~ | ~~G7~~ | ~~Lock screen notification privacy~~ | **DONE** — `UNNotificationCategory` + `hiddenPreviewsBodyPlaceholder` |
-| ~~P1~~ | ~~G8~~ | ~~Account switch re-auth~~ | **DONE** — re-authenticates with stored password |
-| ~~P1~~ | ~~G2~~ | ~~PIN setup in Settings~~ | **DONE** — `PinSetupView` + verify/set/remove flow |
-| **P2** | G1 | Language picker UI missing | **TODO** |
-| **P2** | G6 | Reduce Motion toggle missing | **TODO** |
-| **P3** | G5 | About section incomplete | **TODO** |
-| **P3** | G4 | Help & Support section missing | **TODO** |
+| ~~P0~~ | ~~G3~~ | ~~URL scheme~~ | **DONE** |
+| ~~P0~~ | ~~G9~~ | ~~FCM unregister on logout~~ | **DONE** |
+| ~~P0~~ | ~~G7~~ | ~~Lock screen notification privacy~~ | **DONE** |
+| ~~P1~~ | ~~G8~~ | ~~Account switch re-auth~~ | **DONE** |
+| ~~P1~~ | ~~G2~~ | ~~PIN setup in Settings~~ | **DONE** |
+| ~~P2~~ | ~~G1~~ | ~~Language picker~~ | **DONE** — shows current language, taps to iOS Settings, localized hint |
+| ~~P2~~ | ~~G6~~ | ~~Reduce Motion toggle~~ | **DONE** — Toggle in Appearance, persisted via SettingsRepository |
+| ~~P3~~ | ~~G5~~ | ~~About section~~ | **DONE** — version + website + contact email + copyright |
+| ~~P3~~ | ~~G4~~ | ~~Help & Support~~ | **DONE** — Odoo Help Center + Community Forum links |
 
-#### Remaining Work
+#### Quality Fixes Applied (Architect Review)
+- All strings localized in en, zh-Hans, zh-Hant (real Chinese translations)
+- Decorative images have `.accessibilityHidden(true)` for VoiceOver
+- URLs extracted to `SettingsConstants` enum (testable, single source of truth)
+- ViewModel properties (`appVersion`, `currentLanguageDisplayName`) extracted from views
+- `setReduceMotion` added to `SettingsRepositoryProtocol` + implementation
+- CLAUDE.md updated with localization rules + production checklist
 
-| Priority | Count | Effort | Action |
-|----------|-------|--------|--------|
-| P2 (Medium) | 2 | ~3h | Fix for feature completeness |
-| P3 (Low) | 2 | ~3.5h | Polish for v1.0 |
-| **Total** | **4** | **~6.5h** | |
-
-#### Recommended Fix Order
+#### No Remaining Work
 
 1. **G1** (2 hrs) — Language picker (redirect to iOS Settings)
 2. **G6** (1 hr) — Reduce Motion toggle

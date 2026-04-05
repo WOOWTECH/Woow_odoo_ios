@@ -49,3 +49,19 @@
 
 /* Notifications */
 "notification_channel_messages" = "Odoo Messages";
+
+/* Settings — Language (G1) */
+"Language" = "Language";
+"Change language in iOS Settings" = "Change language in iOS Settings";
+
+/* Settings — Reduce Motion (G6) */
+"Reduce Motion" = "Reduce Motion";
+
+/* Settings — Help & Support (G4) */
+"Help & Support" = "Help & Support";
+"Odoo Help Center" = "Odoo Help Center";
+"Community Forum" = "Community Forum";
+
+/* Settings — About (G5) */
+"Visit Website" = "Visit Website";
+"Contact Us" = "Contact Us";

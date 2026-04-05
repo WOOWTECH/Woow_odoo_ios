@@ -46,6 +46,28 @@ final class SettingsViewModel: ObservableObject {
         settings.biometricEnabled = enabled
     }
 
+    // G6: Reduce Motion
+    func toggleReduceMotion(_ enabled: Bool) {
+        settingsRepo.setReduceMotion(enabled)
+        settings.reduceMotion = enabled
+    }
+
+    // G1: Current language display name (from system per-app language setting)
+    var currentLanguageDisplayName: String {
+        guard let code = Bundle.main.preferredLocalizations.first else { return "System" }
+        switch code {
+        case "zh-Hant": return "繁體中文"
+        case "zh-Hans": return "简体中文"
+        case "en": return "English"
+        default: return Locale.current.localizedString(forLanguageCode: code) ?? code
+        }
+    }
+
+    // G5: App version from bundle
+    var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+    }
+
     func verifyPin(_ pin: String) -> Bool {
         settingsRepo.verifyPin(pin)
     }
