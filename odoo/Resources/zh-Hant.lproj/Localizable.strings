@@ -1,67 +1,111 @@
+/* App */
+"WoowTech Odoo" = "WoowTech Odoo";
+
 /* Login */
-"login_title" = "新增帳號";
-"server_url" = "伺服器網址";
-"database_name" = "資料庫";
-"username" = "使用者名稱";
-"password" = "密碼";
-"login_button" = "登入";
-"next_button" = "下一步";
+"Add New Account" = "新增帳號";
+"Server URL" = "伺服器網址";
+"Database" = "資料庫";
+"Username" = "使用者名稱";
+"Password" = "密碼";
+"Login" = "登入";
+"Next" = "下一步";
+"Back" = "返回";
+"Change" = "變更";
+"Enter server details" = "輸入伺服器資訊";
+"Enter credentials" = "輸入登入憑據";
+"Connecting..." = "連線中...";
+"Enter database name" = "輸入資料庫名稱";
+"Username or email" = "使用者名稱或電子郵件";
+"Enter password" = "輸入密碼";
 
-/* Main */
-"app_name" = "WoowTech Odoo";
+/* Login Errors */
+"error_server_url_required" = "伺服器網址為必填項";
+"error_database_required" = "資料庫名稱為必填項";
+"error_https_required" = "需要 HTTPS 連線";
+"error_username_required" = "使用者名稱為必填項";
+"error_password_required" = "密碼為必填項";
+"error_network" = "無法連線到伺服器";
+"error_invalid_url" = "無效的伺服器網址";
+"error_database_not_found" = "未找到資料庫";
+"error_invalid_credentials" = "使用者名稱或密碼錯誤";
+"error_session_expired" = "工作階段已過期，請重新登入";
+"error_server_%@" = "伺服器錯誤：%@";
 
-/* Settings */
-"settings" = "設定";
-"appearance" = "外觀";
-"theme_color" = "主題顏色";
-"theme_mode" = "主題模式";
-"security" = "安全性";
-"app_lock" = "應用程式鎖定";
-"biometric_unlock" = "生物辨識解鎖";
-"pin_code" = "PIN 碼";
-"data_storage" = "資料與儲存";
-"clear_cache" = "清除快取";
-"about" = "關於";
-"app_version" = "應用程式版本";
+/* Auth -- Biometric */
+"Biometric Login" = "生物辨識登入";
+"Use Face ID or Touch ID to unlock" = "使用指紋或臉部登入";
+"Unlock with %@" = "使用 %@ 解鎖";
+"Use PIN" = "使用 PIN 碼";
+"biometric_reason" = "解鎖 WoowTech Odoo";
+"error_biometric_unavailable" = "生物辨識認證不可用";
+"error_biometric_lockout" = "嘗試次數過多，請使用 PIN 碼";
+"error_biometric_failed" = "認證失敗，請重試";
 
-/* Auth */
-"biometric_title" = "生物辨識登入";
-"biometric_subtitle" = "使用指紋或臉部登入";
-"use_pin" = "使用 PIN 碼";
-"enter_pin" = "輸入 PIN 碼";
+/* Auth -- PIN */
+"Enter PIN" = "輸入 PIN 碼";
+"Enter your PIN to unlock" = "輸入 PIN 碼解鎖";
+"lockout_timer_%lld" = "%lld 秒後重試";
+"wrong_pin_%lld" = "PIN 碼錯誤，剩餘 %lld 次";
 
 /* Config */
-"configuration" = "設定";
-"switch_accounts" = "切換帳號";
-"add_account" = "新增帳號";
-"logout" = "登出";
-"cancel" = "取消";
-"confirm" = "確認";
+"Configuration" = "設定";
+"Switch Account" = "切換帳號";
+"Add Account" = "新增帳號";
+"Logout" = "登出";
+"Cancel" = "取消";
+"Confirm" = "確認";
+"logout_confirm_message" = "確定要登出嗎？";
+
+/* Settings */
+"Settings" = "設定";
+"Appearance" = "外觀";
+"Theme Color" = "主題顏色";
+"Theme Mode" = "主題模式";
+"System" = "系統";
+"Light" = "淺色";
+"Dark" = "深色";
+"Security" = "安全性";
+"App Lock" = "應用程式鎖定";
+"Biometric Unlock" = "生物辨識解鎖";
+"PIN Code" = "PIN 碼";
+"Change PIN" = "變更 PIN 碼";
+"Set PIN" = "設定 PIN 碼";
+"Remove PIN" = "移除 PIN 碼";
+"Data & Storage" = "資料與儲存";
+"Clear Cache" = "清除快取";
+"About" = "關於";
+"App Version" = "應用程式版本";
+"Reduce Motion" = "減少動畫";
+
+/* Settings -- Language */
+"Language" = "語言";
+"Change language in iOS Settings" = "前往 設定 > odoo > 語言 變更語言";
+
+/* Settings -- Help & Support */
+"Help & Support" = "幫助與支持";
+"Odoo Help Center" = "Odoo 幫助中心";
+"Community Forum" = "社群論壇";
+
+/* Settings -- About */
+"Visit Website" = "訪問網站";
+"Contact Us" = "聯絡我們";
 
 /* Color Picker */
-"select_color" = "選擇顏色";
-"preset_colors" = "預設顏色";
-"custom_color" = "自訂顏色";
-"apply" = "套用";
+"Select Color" = "選擇顏色";
+"Preset Colors" = "預設顏色";
+"Accent" = "強調色";
+"Custom Color" = "自訂顏色";
+"Apply" = "套用";
+
+/* PIN Setup */
+"Enter Current PIN" = "輸入目前 PIN 碼";
+"Enter New PIN" = "輸入新 PIN 碼";
+"Confirm New PIN" = "確認新 PIN 碼";
+"Incorrect PIN" = "PIN 碼不正確";
+"PINs don't match" = "PIN 碼不相符";
 
 /* Cache */
 "cache_cleared" = "快取已清除";
 
 /* Notifications */
 "notification_channel_messages" = "Odoo 訊息";
-
-/* Settings — Language (G1) */
-"Language" = "語言";
-"Change language in iOS Settings" = "前往 設定 > odoo > 語言 變更語言";
-
-/* Settings — Reduce Motion (G6) */
-"Reduce Motion" = "減少動畫";
-
-/* Settings — Help & Support (G4) */
-"Help & Support" = "幫助與支持";
-"Odoo Help Center" = "Odoo 幫助中心";
-"Community Forum" = "社群論壇";
-
-/* Settings — About (G5) */
-"Visit Website" = "訪問網站";
-"Contact Us" = "聯絡我們";

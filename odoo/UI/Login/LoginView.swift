@@ -24,7 +24,7 @@ struct LoginView: View {
                         .font(.title)
                         .fontWeight(.bold)
 
-                    Text(viewModel.step == .serverInfo ? "Enter server details" : "Enter credentials")
+                    Text(viewModel.step == .serverInfo ? String(localized: "Enter server details") : String(localized: "Enter credentials"))
                         .foregroundStyle(.secondary)
 
                     // Error banner

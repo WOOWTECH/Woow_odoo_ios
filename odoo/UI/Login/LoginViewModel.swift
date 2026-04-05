@@ -57,18 +57,18 @@ final class LoginViewModel: ObservableObject {
 
         let trimmed = serverUrl.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            error = "Server URL is required"
+            error = String(localized: "error_server_url_required")
             return
         }
 
         guard !database.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            error = "Database name is required"
+            error = String(localized: "error_database_required")
             return
         }
 
         // Reject http:// explicitly
         if trimmed.lowercased().hasPrefix("http://") {
-            error = "HTTPS connection required"
+            error = String(localized: "error_https_required")
             return
         }
 
@@ -90,11 +90,11 @@ final class LoginViewModel: ObservableObject {
         let trimmedPass = password.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !trimmedUser.isEmpty else {
-            error = "Username is required"
+            error = String(localized: "error_username_required")
             return
         }
         guard !trimmedPass.isEmpty else {
-            error = "Password is required"
+            error = String(localized: "error_password_required")
             return
         }
 
@@ -127,13 +127,13 @@ final class LoginViewModel: ObservableObject {
 
     private func mapError(message: String, type: AuthResult.ErrorType) -> String {
         switch type {
-        case .networkError: return "Unable to connect to server"
-        case .invalidUrl: return "Invalid server URL"
-        case .databaseNotFound: return "Database not found"
-        case .invalidCredentials: return "Invalid username or password"
-        case .sessionExpired: return "Session expired, please login again"
-        case .httpsRequired: return "HTTPS connection required"
-        case .serverError: return "Server error: \(message)"
+        case .networkError: return String(localized: "error_network")
+        case .invalidUrl: return String(localized: "error_invalid_url")
+        case .databaseNotFound: return String(localized: "error_database_not_found")
+        case .invalidCredentials: return String(localized: "error_invalid_credentials")
+        case .sessionExpired: return String(localized: "error_session_expired")
+        case .httpsRequired: return String(localized: "error_https_required")
+        case .serverError: return String(format: String(localized: "error_server_%@"), message)
         case .unknown: return message
         }
     }

@@ -1,67 +1,111 @@
+/* App */
+"WoowTech Odoo" = "WoowTech Odoo";
+
 /* Login */
-"login_title" = "添加账号";
-"server_url" = "服务器网址";
-"database_name" = "数据库";
-"username" = "用户名";
-"password" = "密码";
-"login_button" = "登录";
-"next_button" = "下一步";
+"Add New Account" = "添加账号";
+"Server URL" = "服务器网址";
+"Database" = "数据库";
+"Username" = "用户名";
+"Password" = "密码";
+"Login" = "登录";
+"Next" = "下一步";
+"Back" = "返回";
+"Change" = "更改";
+"Enter server details" = "输入服务器信息";
+"Enter credentials" = "输入登录凭据";
+"Connecting..." = "连接中...";
+"Enter database name" = "输入数据库名称";
+"Username or email" = "用户名或邮箱";
+"Enter password" = "输入密码";
 
-/* Main */
-"app_name" = "WoowTech Odoo";
+/* Login Errors */
+"error_server_url_required" = "服务器网址为必填项";
+"error_database_required" = "数据库名称为必填项";
+"error_https_required" = "需要 HTTPS 连接";
+"error_username_required" = "用户名为必填项";
+"error_password_required" = "密码为必填项";
+"error_network" = "无法连接到服务器";
+"error_invalid_url" = "无效的服务器网址";
+"error_database_not_found" = "未找到数据库";
+"error_invalid_credentials" = "用户名或密码错误";
+"error_session_expired" = "会话已过期，请重新登录";
+"error_server_%@" = "服务器错误：%@";
 
-/* Settings */
-"settings" = "设置";
-"appearance" = "外观";
-"theme_color" = "主题颜色";
-"theme_mode" = "主题模式";
-"security" = "安全性";
-"app_lock" = "应用程序锁定";
-"biometric_unlock" = "生物识别解锁";
-"pin_code" = "PIN 码";
-"data_storage" = "数据与存储";
-"clear_cache" = "清除缓存";
-"about" = "关于";
-"app_version" = "应用程序版本";
+/* Auth -- Biometric */
+"Biometric Login" = "生物识别登录";
+"Use Face ID or Touch ID to unlock" = "使用指纹或面部登录";
+"Unlock with %@" = "使用 %@ 解锁";
+"Use PIN" = "使用 PIN 码";
+"biometric_reason" = "解锁 WoowTech Odoo";
+"error_biometric_unavailable" = "生物识别认证不可用";
+"error_biometric_lockout" = "尝试次数过多，请使用 PIN 码";
+"error_biometric_failed" = "认证失败，请重试";
 
-/* Auth */
-"biometric_title" = "生物识别登录";
-"biometric_subtitle" = "使用指纹或面部登录";
-"use_pin" = "使用 PIN 码";
-"enter_pin" = "输入 PIN 码";
+/* Auth -- PIN */
+"Enter PIN" = "输入 PIN 码";
+"Enter your PIN to unlock" = "输入 PIN 码解锁";
+"lockout_timer_%lld" = "%lld 秒后重试";
+"wrong_pin_%lld" = "PIN 码错误，剩余 %lld 次";
 
 /* Config */
-"configuration" = "设置";
-"switch_accounts" = "切换账号";
-"add_account" = "添加账号";
-"logout" = "退出登录";
-"cancel" = "取消";
-"confirm" = "确认";
+"Configuration" = "设置";
+"Switch Account" = "切换账号";
+"Add Account" = "添加账号";
+"Logout" = "退出登录";
+"Cancel" = "取消";
+"Confirm" = "确认";
+"logout_confirm_message" = "确定要退出登录吗？";
+
+/* Settings */
+"Settings" = "设置";
+"Appearance" = "外观";
+"Theme Color" = "主题颜色";
+"Theme Mode" = "主题模式";
+"System" = "系统";
+"Light" = "浅色";
+"Dark" = "深色";
+"Security" = "安全性";
+"App Lock" = "应用程序锁定";
+"Biometric Unlock" = "生物识别解锁";
+"PIN Code" = "PIN 码";
+"Change PIN" = "更改 PIN 码";
+"Set PIN" = "设置 PIN 码";
+"Remove PIN" = "移除 PIN 码";
+"Data & Storage" = "数据与存储";
+"Clear Cache" = "清除缓存";
+"About" = "关于";
+"App Version" = "应用程序版本";
+"Reduce Motion" = "减少动画";
+
+/* Settings -- Language */
+"Language" = "语言";
+"Change language in iOS Settings" = "前往 设置 > odoo > 语言 更改语言";
+
+/* Settings -- Help & Support */
+"Help & Support" = "帮助与支持";
+"Odoo Help Center" = "Odoo 帮助中心";
+"Community Forum" = "社区论坛";
+
+/* Settings -- About */
+"Visit Website" = "访问网站";
+"Contact Us" = "联系我们";
 
 /* Color Picker */
-"select_color" = "选择颜色";
-"preset_colors" = "预设颜色";
-"custom_color" = "自定义颜色";
-"apply" = "应用";
+"Select Color" = "选择颜色";
+"Preset Colors" = "预设颜色";
+"Accent" = "强调色";
+"Custom Color" = "自定义颜色";
+"Apply" = "应用";
+
+/* PIN Setup */
+"Enter Current PIN" = "输入当前 PIN 码";
+"Enter New PIN" = "输入新 PIN 码";
+"Confirm New PIN" = "确认新 PIN 码";
+"Incorrect PIN" = "PIN 码不正确";
+"PINs don't match" = "PIN 码不匹配";
 
 /* Cache */
 "cache_cleared" = "缓存已清除";
 
 /* Notifications */
 "notification_channel_messages" = "Odoo 消息";
-
-/* Settings — Language (G1) */
-"Language" = "语言";
-"Change language in iOS Settings" = "前往 设置 > odoo > 语言 更改语言";
-
-/* Settings — Reduce Motion (G6) */
-"Reduce Motion" = "减少动画";
-
-/* Settings — Help & Support (G4) */
-"Help & Support" = "帮助与支持";
-"Odoo Help Center" = "Odoo 帮助中心";
-"Community Forum" = "社区论坛";
-
-/* Settings — About (G5) */
-"Visit Website" = "访问网站";
-"Contact Us" = "联系我们";

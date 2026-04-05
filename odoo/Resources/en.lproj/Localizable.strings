@@ -1,67 +1,111 @@
+/* App */
+"WoowTech Odoo" = "WoowTech Odoo";
+
 /* Login */
-"login_title" = "Add New Account";
-"server_url" = "Server URL";
-"database_name" = "Database";
-"username" = "Username";
-"password" = "Password";
-"login_button" = "Login";
-"next_button" = "Next";
+"Add New Account" = "Add New Account";
+"Server URL" = "Server URL";
+"Database" = "Database";
+"Username" = "Username";
+"Password" = "Password";
+"Login" = "Login";
+"Next" = "Next";
+"Back" = "Back";
+"Change" = "Change";
+"Enter server details" = "Enter server details";
+"Enter credentials" = "Enter credentials";
+"Connecting..." = "Connecting...";
+"Enter database name" = "Enter database name";
+"Username or email" = "Username or email";
+"Enter password" = "Enter password";
 
-/* Main */
-"app_name" = "WoowTech Odoo";
+/* Login Errors */
+"error_server_url_required" = "Server URL is required";
+"error_database_required" = "Database name is required";
+"error_https_required" = "HTTPS connection required";
+"error_username_required" = "Username is required";
+"error_password_required" = "Password is required";
+"error_network" = "Unable to connect to server";
+"error_invalid_url" = "Invalid server URL";
+"error_database_not_found" = "Database not found";
+"error_invalid_credentials" = "Invalid username or password";
+"error_session_expired" = "Session expired, please login again";
+"error_server_%@" = "Server error: %@";
 
-/* Settings */
-"settings" = "Settings";
-"appearance" = "Appearance";
-"theme_color" = "Theme Color";
-"theme_mode" = "Theme Mode";
-"security" = "Security";
-"app_lock" = "App Lock";
-"biometric_unlock" = "Biometric Unlock";
-"pin_code" = "PIN Code";
-"data_storage" = "Data & Storage";
-"clear_cache" = "Clear Cache";
-"about" = "About";
-"app_version" = "App Version";
+/* Auth -- Biometric */
+"Biometric Login" = "Biometric Login";
+"Use Face ID or Touch ID to unlock" = "Use Face ID or Touch ID to unlock";
+"Unlock with %@" = "Unlock with %@";
+"Use PIN" = "Use PIN";
+"biometric_reason" = "Unlock WoowTech Odoo";
+"error_biometric_unavailable" = "Biometric authentication not available";
+"error_biometric_lockout" = "Too many attempts. Use PIN instead.";
+"error_biometric_failed" = "Authentication failed. Try again.";
 
-/* Auth */
-"biometric_title" = "Biometric Login";
-"biometric_subtitle" = "Use Face ID or Touch ID to unlock";
-"use_pin" = "Use PIN";
-"enter_pin" = "Enter PIN";
+/* Auth -- PIN */
+"Enter PIN" = "Enter PIN";
+"Enter your PIN to unlock" = "Enter your PIN to unlock";
+"lockout_timer_%lld" = "Try again in %llds";
+"wrong_pin_%lld" = "Wrong PIN. %lld attempts remaining";
 
 /* Config */
-"configuration" = "Configuration";
-"switch_accounts" = "Switch Account";
-"add_account" = "Add Account";
-"logout" = "Logout";
-"cancel" = "Cancel";
-"confirm" = "Confirm";
+"Configuration" = "Configuration";
+"Switch Account" = "Switch Account";
+"Add Account" = "Add Account";
+"Logout" = "Logout";
+"Cancel" = "Cancel";
+"Confirm" = "Confirm";
+"logout_confirm_message" = "Are you sure you want to logout?";
+
+/* Settings */
+"Settings" = "Settings";
+"Appearance" = "Appearance";
+"Theme Color" = "Theme Color";
+"Theme Mode" = "Theme Mode";
+"System" = "System";
+"Light" = "Light";
+"Dark" = "Dark";
+"Security" = "Security";
+"App Lock" = "App Lock";
+"Biometric Unlock" = "Biometric Unlock";
+"PIN Code" = "PIN Code";
+"Change PIN" = "Change PIN";
+"Set PIN" = "Set PIN";
+"Remove PIN" = "Remove PIN";
+"Data & Storage" = "Data & Storage";
+"Clear Cache" = "Clear Cache";
+"About" = "About";
+"App Version" = "App Version";
+"Reduce Motion" = "Reduce Motion";
+
+/* Settings -- Language */
+"Language" = "Language";
+"Change language in iOS Settings" = "Change language in iOS Settings";
+
+/* Settings -- Help & Support */
+"Help & Support" = "Help & Support";
+"Odoo Help Center" = "Odoo Help Center";
+"Community Forum" = "Community Forum";
+
+/* Settings -- About */
+"Visit Website" = "Visit Website";
+"Contact Us" = "Contact Us";
 
 /* Color Picker */
-"select_color" = "Select Color";
-"preset_colors" = "Preset Colors";
-"custom_color" = "Custom Color";
-"apply" = "Apply";
+"Select Color" = "Select Color";
+"Preset Colors" = "Preset Colors";
+"Accent" = "Accent";
+"Custom Color" = "Custom Color";
+"Apply" = "Apply";
+
+/* PIN Setup */
+"Enter Current PIN" = "Enter Current PIN";
+"Enter New PIN" = "Enter New PIN";
+"Confirm New PIN" = "Confirm New PIN";
+"Incorrect PIN" = "Incorrect PIN";
+"PINs don't match" = "PINs don't match";
 
 /* Cache */
 "cache_cleared" = "Cache cleared";
 
 /* Notifications */
 "notification_channel_messages" = "Odoo Messages";
-
-/* Settings — Language (G1) */
-"Language" = "Language";
-"Change language in iOS Settings" = "Change language in iOS Settings";
-
-/* Settings — Reduce Motion (G6) */
-"Reduce Motion" = "Reduce Motion";
-
-/* Settings — Help & Support (G4) */
-"Help & Support" = "Help & Support";
-"Odoo Help Center" = "Odoo Help Center";
-"Community Forum" = "Community Forum";
-
-/* Settings — About (G5) */
-"Visit Website" = "Visit Website";
-"Contact Us" = "Contact Us";

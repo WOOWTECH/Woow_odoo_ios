@@ -62,7 +62,7 @@ struct SettingsView: View {
                         HStack {
                             Label("PIN Code", systemImage: "lock.fill")
                             Spacer()
-                            Text(viewModel.settings.pinEnabled ? "Change PIN" : "Set PIN")
+                            Text(viewModel.settings.pinEnabled ? String(localized: "Change PIN") : String(localized: "Set PIN"))
                                 .foregroundStyle(WoowColors.primaryBlue)
                                 .font(.caption)
                         }

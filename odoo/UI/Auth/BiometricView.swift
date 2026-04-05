@@ -93,7 +93,7 @@ struct BiometricView: View {
         var error: NSError?
 
         guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {
-            errorMessage = "Biometric authentication not available"
+            errorMessage = String(localized: "error_biometric_unavailable")
             return
         }
 
@@ -101,7 +101,7 @@ struct BiometricView: View {
 
         context.evaluatePolicy(
             .deviceOwnerAuthenticationWithBiometrics,
-            localizedReason: "Unlock WoowTech Odoo"
+            localizedReason: String(localized: "biometric_reason")
         ) { success, authError in
             DispatchQueue.main.async {
                 isAnimating = false
@@ -115,10 +115,10 @@ struct BiometricView: View {
                     case .userFallback:
                         onUsePinClick()
                     case .biometryLockout:
-                        errorMessage = "Too many attempts. Use PIN instead."
+                        errorMessage = String(localized: "error_biometric_lockout")
                         onUsePinClick()
                     default:
-                        errorMessage = "Authentication failed. Try again."
+                        errorMessage = String(localized: "error_biometric_failed")
                     }
                 }
             }

@@ -7,6 +7,10 @@ protocol SecureStorageProtocol: Sendable {
     func getPassword(serverUrl: String, username: String) -> String?
     func deletePassword(serverUrl: String, username: String)
     func migratePasswordKeys(accounts: [OdooAccount])
+
+    func saveSessionId(serverUrl: String, username: String, sessionId: String)
+    func getSessionId(serverUrl: String, username: String) -> String?
+    func deleteSessionId(serverUrl: String, username: String)
 }
 
 /// Keychain-backed secure storage for passwords, PIN hash, FCM token, and settings.
@@ -62,6 +66,35 @@ final class SecureStorage: SecureStorageProtocol, Sendable {
             save(key: newKey, value: existingPassword)
             delete(key: legacyKey)
         }
+    }
+
+    // MARK: - Session Cookie Storage (per account, scoped to server host)
+
+    /// Builds a Keychain key scoped to both the server host and username for the session_id cookie.
+    /// Uses the same host-only scoping strategy as password keys to ensure key uniqueness across
+    /// multi-tenant deployments where the same username can exist on multiple Odoo servers.
+    private func sessionKey(serverUrl: String, username: String) -> String {
+        let host = URL(string: serverUrl)?.host ?? serverUrl
+        return "session_\(host)_\(username)"
+    }
+
+    /// Saves the Odoo session_id cookie value to Keychain for a specific account.
+    /// Storing the session in Keychain (hardware-backed, excluded from backups) instead of
+    /// relying solely on HTTPCookieStorage (plaintext on disk) prevents session hijacking via
+    /// backup extraction, MDM forensics tools, and jailbroken device file access.
+    func saveSessionId(serverUrl: String, username: String, sessionId: String) {
+        save(key: sessionKey(serverUrl: serverUrl, username: username), value: sessionId)
+    }
+
+    /// Retrieves the stored session_id for an account from Keychain.
+    func getSessionId(serverUrl: String, username: String) -> String? {
+        get(key: sessionKey(serverUrl: serverUrl, username: username))
+    }
+
+    /// Deletes the session_id for an account from Keychain. Call on logout to ensure
+    /// the session cannot be reused after the user explicitly signs out.
+    func deleteSessionId(serverUrl: String, username: String) {
+        delete(key: sessionKey(serverUrl: serverUrl, username: username))
     }
 
     // MARK: - PIN Hash

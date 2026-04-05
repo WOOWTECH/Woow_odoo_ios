@@ -65,4 +65,20 @@ final class MockSecureStorage: SecureStorageProtocol, @unchecked Sendable {
     func migratePasswordKeys(accounts: [OdooAccount]) {
         // No-op in mock — migration only applies to real Keychain
     }
+
+    // H3: Session cookie storage
+    func saveSessionId(serverUrl: String, username: String, sessionId: String) {
+        let host = URL(string: serverUrl)?.host ?? serverUrl
+        store["session_\(host)_\(username)"] = sessionId
+    }
+
+    func getSessionId(serverUrl: String, username: String) -> String? {
+        let host = URL(string: serverUrl)?.host ?? serverUrl
+        return store["session_\(host)_\(username)"]
+    }
+
+    func deleteSessionId(serverUrl: String, username: String) {
+        let host = URL(string: serverUrl)?.host ?? serverUrl
+        store.removeValue(forKey: "session_\(host)_\(username)")
+    }
 }

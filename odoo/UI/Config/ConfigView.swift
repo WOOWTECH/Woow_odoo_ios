@@ -95,7 +95,7 @@ struct ConfigView: View {
                     }
                 }
             } message: {
-                Text("Are you sure you want to logout?")
+                Text(String(localized: "logout_confirm_message"))
             }
             .onAppear { viewModel.loadAccounts() }
             .navigationDestination(isPresented: $showSettings) {

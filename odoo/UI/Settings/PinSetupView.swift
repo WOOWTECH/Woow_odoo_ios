@@ -60,7 +60,7 @@ struct PinSetupView: View {
                 Spacer()
             }
             .padding()
-            .navigationTitle(isChangingPin ? "Change PIN" : "Set PIN")
+            .navigationTitle(isChangingPin ? String(localized: "Change PIN") : String(localized: "Set PIN"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -72,9 +72,9 @@ struct PinSetupView: View {
 
     private var titleText: String {
         switch step {
-        case .verifyOld: return "Enter Current PIN"
-        case .enterNew: return "Enter New PIN"
-        case .confirmNew: return "Confirm New PIN"
+        case .verifyOld: return String(localized: "Enter Current PIN")
+        case .enterNew: return String(localized: "Enter New PIN")
+        case .confirmNew: return String(localized: "Confirm New PIN")
         }
     }
 
@@ -137,7 +137,7 @@ struct PinSetupView: View {
                 pin = ""
                 step = .enterNew
             } else {
-                error = "Incorrect PIN"
+                error = String(localized: "Incorrect PIN")
                 pin = ""
             }
         case .enterNew:
@@ -148,7 +148,7 @@ struct PinSetupView: View {
             if pin == newPin {
                 onPinSet(pin)
             } else {
-                error = "PINs don't match"
+                error = String(localized: "PINs don't match")
                 pin = ""
                 step = .enterNew
                 newPin = ""

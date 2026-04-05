@@ -87,6 +87,14 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
 
             // Save password in Keychain, scoped to this server + username
             secureStorage.savePassword(serverUrl: fullUrl, username: username, password: password)
+
+            // Save session_id to Keychain as a second, hardware-backed copy.
+            // HTTPCookieStorage still holds the cookie for URLSession network requests,
+            // but the Keychain copy is protected against backup extraction and jailbroken
+            // device file access (kSecAttrAccessibleWhenUnlockedThisDeviceOnly).
+            if !auth.sessionId.isEmpty {
+                secureStorage.saveSessionId(serverUrl: fullUrl, username: username, sessionId: auth.sessionId)
+            }
         }
 
         return result
@@ -156,6 +164,8 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
 
         await apiClient.clearCookies(for: account.serverUrl)
         secureStorage.deletePassword(serverUrl: account.serverUrl, username: account.username)
+        // Delete the Keychain session_id copy so the session cannot be reused after logout.
+        secureStorage.deleteSessionId(serverUrl: account.serverUrl, username: account.username)
         context.delete(account)
         try? context.save()
 

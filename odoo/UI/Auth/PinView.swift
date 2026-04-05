@@ -65,7 +65,7 @@ struct PinView: View {
 
             if isLockedOut {
                 let remaining = authViewModel.getLockoutRemainingSeconds()
-                Text("Try again in \(remaining)s")
+                Text(String(format: String(localized: "lockout_timer_%lld"), remaining))
                     .foregroundStyle(.red)
                     .font(.caption)
                     .padding(.top, 8)
@@ -148,7 +148,7 @@ struct PinView: View {
             } else {
                 let remaining = authViewModel.getRemainingAttempts()
                 if remaining > 0 {
-                    error = "Wrong PIN. \(remaining) attempts remaining"
+                    error = String(format: String(localized: "wrong_pin_%lld"), remaining)
                     isShaking = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                         isShaking = false
