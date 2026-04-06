@@ -12,6 +12,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        #if DEBUG
+        processTestLaunchArguments()
+        #endif
+
         #if canImport(FirebaseCore)
         FirebaseApp.configure()
         Messaging.messaging().delegate = self
@@ -40,6 +44,74 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
         return true
     }
+
+    // MARK: - XCUITest Debug Hooks
+
+    /// Reads XCUITest launch arguments and configures a known app state for deterministic tests.
+    ///
+    /// Each argument is guarded by `#if DEBUG` at the call site. This method must only be
+    /// called from within a `#if DEBUG` block. The hooks are:
+    ///
+    /// - `-ResetAppState YES`: Clears all Keychain entries and Core Data accounts so each
+    ///   test that requires a clean slate starts from first-launch state.
+    /// - `-SetTestPIN <digits>`: Hashes and stores a known PIN via `SettingsRepository`
+    ///   so PIN-unlock tests can enter a deterministic value without navigating Settings.
+    /// - `-AppLockEnabled YES`: Forces `appLockEnabled = true` in `SettingsRepository`
+    ///   so biometric/PIN gate tests do not need to toggle the Settings switch.
+    #if DEBUG
+    private func processTestLaunchArguments() {
+        let args = ProcessInfo.processInfo.arguments
+
+        if args.contains("-ResetAppState") {
+            clearAllAppState()
+        }
+
+        // Parse paired arguments: the value follows the flag name in the args array.
+        let settingsRepo = SettingsRepository()
+
+        if let pinIndex = args.firstIndex(of: "-SetTestPIN"),
+           args.indices.contains(pinIndex + 1) {
+            let pin = args[pinIndex + 1]
+            _ = settingsRepo.setPin(pin)
+            print("[TestHook] SetTestPIN applied: \(pin.count)-digit PIN stored")
+        }
+
+        if let lockIndex = args.firstIndex(of: "-AppLockEnabled"),
+           args.indices.contains(lockIndex + 1),
+           args[lockIndex + 1].uppercased() == "YES" {
+            settingsRepo.setAppLock(true)
+            print("[TestHook] AppLockEnabled applied: app lock is ON")
+        }
+    }
+
+    /// Wipes Keychain settings and Core Data accounts to produce first-launch state.
+    /// Mirrors the data cleared by `AccountRepository.logout` for every account,
+    /// plus removes app settings so PIN/lock state is reset to defaults.
+    private func clearAllAppState() {
+        // Clear app settings (includes PIN hash, app lock flag, theme, etc.)
+        SecureStorage.shared.saveSettings(AppSettings())
+
+        // Clear Core Data accounts — delete the persistent store and recreate it
+        let persistence = PersistenceController.shared
+        let context = persistence.container.viewContext
+        let request = OdooAccountEntity.fetchAllRequest()
+        if let entities = try? context.fetch(request) {
+            for entity in entities {
+                let serverUrl = entity.serverUrl ?? ""
+                let username = entity.username ?? ""
+                SecureStorage.shared.deletePassword(serverUrl: serverUrl, username: username)
+                SecureStorage.shared.deleteSessionId(serverUrl: serverUrl, username: username)
+                context.delete(entity)
+            }
+            try? context.save()
+        }
+
+        // Clear HTTPCookieStorage so no session cookies remain from prior runs
+        HTTPCookieStorage.shared.removeCookies(since: .distantPast)
+
+        print("[TestHook] ResetAppState applied: Core Data, Keychain, and cookies cleared")
+    }
+    #endif
 
     // MARK: - Remote Notification Token
 
