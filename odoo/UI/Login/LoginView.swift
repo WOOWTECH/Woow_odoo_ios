@@ -4,8 +4,19 @@ import SwiftUI
 /// Ported from Android: LoginScreen.kt
 /// UX-01 through UX-09 from functional equivalence matrix.
 struct LoginView: View {
-    @StateObject private var viewModel = LoginViewModel()
+    /// When true, the server info step is always shown so the user can configure a
+    /// new account from scratch rather than landing on the credentials step pre-filled
+    /// with the existing active account's details.
+    let addingAccount: Bool
     let onLoginSuccess: () -> Void
+
+    @StateObject private var viewModel: LoginViewModel
+
+    init(addingAccount: Bool = false, onLoginSuccess: @escaping () -> Void) {
+        self.addingAccount = addingAccount
+        self.onLoginSuccess = onLoginSuccess
+        _viewModel = StateObject(wrappedValue: LoginViewModel(addingAccount: addingAccount))
+    }
 
     @FocusState private var focusedField: Field?
     enum Field { case serverUrl, database, username, password }

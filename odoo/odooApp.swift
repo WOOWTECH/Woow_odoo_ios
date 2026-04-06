@@ -51,6 +51,16 @@ struct AppRootView: View {
     @State private var showPin = false
     @State private var showConfig = false
     @State private var showPrivacyOverlay = false
+    /// Set to true when the user taps "Add Account" so that after the Config sheet
+    /// finishes its dismissal animation, the app transitions to the login screen.
+    /// Combining sheet dismissal with a parent-view swap in the same state update
+    /// prevents SwiftUI from completing the sheet animation, so the transition is
+    /// deferred to the sheet's onDismiss callback.
+    @State private var pendingAddAccount = false
+    /// Tracks whether the login screen was reached via "Add Account" so that
+    /// LoginView can start at the server info step instead of pre-filling the
+    /// existing active account's credentials.
+    @State private var isAddingAccount = false
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -59,7 +69,8 @@ struct AppRootView: View {
             case .loading:
                 ProgressView()
             case .login:
-                LoginView(onLoginSuccess: {
+                LoginView(addingAccount: isAddingAccount, onLoginSuccess: {
+                    isAddingAccount = false
                     rootViewModel.onLoginSuccess()
                     if !authViewModel.requiresAuth {
                         authViewModel.setAuthenticated(true)
@@ -90,7 +101,17 @@ struct AppRootView: View {
                             authViewModel.setAuthenticated(false)
                         }
                     )
-                    .sheet(isPresented: $showConfig) {
+                    .sheet(isPresented: $showConfig, onDismiss: {
+                        // Deferred transition: navigate to login only after the sheet
+                        // dismissal animation completes. Changing launchState while the
+                        // sheet is still animating out causes SwiftUI to drop the
+                        // transition, leaving the login screen unreachable.
+                        if pendingAddAccount {
+                            pendingAddAccount = false
+                            isAddingAccount = true
+                            rootViewModel.onSessionExpired()
+                        }
+                    }) {
                         ConfigView(
                             onBackClick: {
                                 showConfig = false
@@ -99,8 +120,11 @@ struct AppRootView: View {
                                 // Navigation handled inside ConfigView's NavigationStack
                             },
                             onAddAccountClick: {
+                                // Mark the intent and dismiss the sheet. The actual
+                                // launchState transition happens in onDismiss after
+                                // the sheet animation completes.
+                                pendingAddAccount = true
                                 showConfig = false
-                                rootViewModel.onSessionExpired()
                             },
                             onLogout: {
                                 showConfig = false
@@ -112,6 +136,12 @@ struct AppRootView: View {
                 }
             }
         }
+        // Disable cross-fade transition when switching between launch states.
+        // SwiftUI's default Group transition keeps both the outgoing and incoming
+        // views in the accessibility hierarchy simultaneously, so an XCUITest
+        // asserting the WebView is gone would see it while it fades out. Using
+        // .identity means the swap is instantaneous — no overlap in the tree.
+        .transaction { $0.animation = nil }
         .preferredColorScheme(theme.colorSchemeOverride)
         .overlay {
             // H4: Privacy overlay — hides sensitive content in task switcher

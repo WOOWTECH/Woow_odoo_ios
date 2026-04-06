@@ -25,13 +25,21 @@ final class LoginViewModel: ObservableObject {
     private let repository: AccountRepositoryProtocol
     private let secureStorage: any SecureStorageProtocol
 
+    /// Creates a LoginViewModel.
+    /// - Parameter addingAccount: When true, the server info step is always shown
+    ///   so the user can enter credentials for a new, distinct account. When false
+    ///   (the default), existing active-account credentials are pre-filled for a
+    ///   faster session re-authentication after expiry.
     init(
+        addingAccount: Bool = false,
         repository: AccountRepositoryProtocol = AccountRepository(),
         secureStorage: any SecureStorageProtocol = SecureStorage.shared
     ) {
         self.repository = repository
         self.secureStorage = secureStorage
-        prefillFromActiveAccount()
+        if !addingAccount {
+            prefillFromActiveAccount()
+        }
     }
 
     /// Pre-fills login fields from the last active account if one exists.
