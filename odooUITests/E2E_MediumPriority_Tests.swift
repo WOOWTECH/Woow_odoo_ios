@@ -21,23 +21,8 @@
 
 import XCTest
 
-// MARK: - Test configuration (mirrors TestConfig in odooUITests.swift but with internal access)
-// TestConfig in odooUITests.swift is `private` (file-scoped). Redeclare here as `internal`
-// so all classes in this file can reference it without duplicating values.
-private enum MediumTestConfig {
-    static let serverURL = ProcessInfo.processInfo.environment["TEST_SERVER_URL"]
-        ?? "gore-outer-units-spots.trycloudflare.com"
-    static let database = ProcessInfo.processInfo.environment["TEST_DB"]
-        ?? "odoo18_ecpay"
-    static let adminUser = ProcessInfo.processInfo.environment["TEST_ADMIN_USER"]
-        ?? "admin"
-    static let adminPass = ProcessInfo.processInfo.environment["TEST_ADMIN_PASS"]
-        ?? "admin"
-    static let senderEmail = ProcessInfo.processInfo.environment["TEST_SENDER_EMAIL"]
-        ?? "test@woowtech.com"
-    static let senderPass = ProcessInfo.processInfo.environment["TEST_SENDER_PASS"]
-        ?? "test1234"
-}
+// MARK: - Test configuration (reads from TestConfig.plist)
+private typealias MediumTestConfig = SharedTestConfig
 
 // MARK: - Shared helpers
 

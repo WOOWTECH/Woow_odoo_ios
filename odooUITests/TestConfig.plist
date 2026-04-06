@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>ServerURL</key>
+	<string>photography-bool-charlotte-step.trycloudflare.com</string>
+	<key>Database</key>
+	<string>odoo18_ecpay</string>
+	<key>AdminUser</key>
+	<string>admin</string>
+	<key>AdminPass</key>
+	<string>admin</string>
+	<key>SenderEmail</key>
+	<string>test@woowtech.com</string>
+	<key>SenderPass</key>
+	<string>test1234</string>
+	<key>TestUser</key>
+	<string>xctest@woowtech.com</string>
+	<key>TestPass</key>
+	<string>XCTest2026!</string>
+	<key>SecondUser</key>
+	<string>xctest2@woowtech.com</string>
+	<key>SecondPass</key>
+	<string>XCTest2026!</string>
+</dict>
+</plist>

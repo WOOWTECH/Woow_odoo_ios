@@ -56,8 +56,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     ///   test that requires a clean slate starts from first-launch state.
     /// - `-SetTestPIN <digits>`: Hashes and stores a known PIN via `SettingsRepository`
     ///   so PIN-unlock tests can enter a deterministic value without navigating Settings.
-    /// - `-AppLockEnabled YES`: Forces `appLockEnabled = true` in `SettingsRepository`
+    /// - `-AppLockEnabled YES|NO`: Forces `appLockEnabled` in `SettingsRepository`
     ///   so biometric/PIN gate tests do not need to toggle the Settings switch.
+    /// - `-ResetPINLockout YES`: Clears failed PIN attempts and lockout timer so
+    ///   PIN lockout tests start from a clean state.
     #if DEBUG
     private func processTestLaunchArguments() {
         let args = ProcessInfo.processInfo.arguments
@@ -77,10 +79,22 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
 
         if let lockIndex = args.firstIndex(of: "-AppLockEnabled"),
-           args.indices.contains(lockIndex + 1),
-           args[lockIndex + 1].uppercased() == "YES" {
-            settingsRepo.setAppLock(true)
-            print("[TestHook] AppLockEnabled applied: app lock is ON")
+           args.indices.contains(lockIndex + 1) {
+            let value = args[lockIndex + 1].uppercased()
+            if value == "YES" {
+                settingsRepo.setAppLock(true)
+                print("[TestHook] AppLockEnabled applied: app lock is ON")
+            } else if value == "NO" {
+                settingsRepo.setAppLock(false)
+                print("[TestHook] AppLockEnabled applied: app lock is OFF")
+            }
+        }
+
+        if let lockoutIndex = args.firstIndex(of: "-ResetPINLockout"),
+           args.indices.contains(lockoutIndex + 1),
+           args[lockoutIndex + 1].uppercased() == "YES" {
+            settingsRepo.resetFailedAttempts()
+            print("[TestHook] ResetPINLockout applied: failed attempts and lockout timer cleared")
         }
     }
 

@@ -22,21 +22,8 @@
 
 import XCTest
 
-// MARK: - Local test configuration
-
-/// Test server credentials read from environment variables at run time.
-/// Mirror of the `private TestConfig` in `odooUITests.swift` — redeclared here
-/// because `private` visibility prevents cross-file access.
-private enum E2ETestConfig {
-    static let serverURL = ProcessInfo.processInfo.environment["TEST_SERVER_URL"]
-        ?? "gore-outer-units-spots.trycloudflare.com"
-    static let database = ProcessInfo.processInfo.environment["TEST_DB"]
-        ?? "odoo18_ecpay"
-    static let adminUser = ProcessInfo.processInfo.environment["TEST_ADMIN_USER"]
-        ?? "admin"
-    static let adminPass = ProcessInfo.processInfo.environment["TEST_ADMIN_PASS"]
-        ?? "admin"
-}
+// MARK: - Test configuration (reads from TestConfig.plist)
+private typealias E2ETestConfig = SharedTestConfig
 
 // MARK: - Shared failure-screenshot helper
 
@@ -1022,11 +1009,11 @@ final class E2E_LoginAccountTests: XCTestCase {
     ///
     /// This test is self-contained: it logs in as account A, adds account B inline
     /// via the "Add Account" / UX-67 flow, then switches back to account A.
-    /// Requires `TEST_SECOND_USER` and `TEST_SECOND_PASS` environment variables.
+    /// Uses `SharedTestConfig.secondUser` / `secondPass` from TestConfig.plist.
     @MainActor
     func test_UX68_givenMultipleAccounts_whenAccountSwitched_thenWebViewReloads() throws {
-        let secondUser = ProcessInfo.processInfo.environment["TEST_SECOND_USER"] ?? ""
-        let secondPass = ProcessInfo.processInfo.environment["TEST_SECOND_PASS"] ?? ""
+        let secondUser = E2ETestConfig.secondUser
+        let secondPass = E2ETestConfig.secondPass
         let secondServer = ProcessInfo.processInfo.environment["TEST_SECOND_SERVER"]
             ?? E2ETestConfig.serverURL
         let secondDB = ProcessInfo.processInfo.environment["TEST_SECOND_DB"]
@@ -1034,8 +1021,8 @@ final class E2E_LoginAccountTests: XCTestCase {
 
         guard !secondUser.isEmpty, !secondPass.isEmpty else {
             throw XCTSkip(
-                "UX-68: TEST_SECOND_USER and TEST_SECOND_PASS environment variables are required. " +
-                "Provide a second Odoo account to test account switching."
+                "UX-68: SecondUser and SecondPass must be set in TestConfig.plist or " +
+                "TEST_SECOND_USER / TEST_SECOND_PASS environment variables."
             )
         }
 

@@ -12,22 +12,10 @@ import XCTest
 
 // MARK: - Helpers
 
-// MARK: - Test Configuration (from environment or defaults)
-// Set via: xcodebuild test ... TEST_SERVER_URL=xxx TEST_DB=xxx TEST_EMAIL=xxx TEST_PASSWORD=xxx
-private enum TestConfig {
-    static let serverURL = ProcessInfo.processInfo.environment["TEST_SERVER_URL"]
-        ?? "gore-outer-units-spots.trycloudflare.com"
-    static let database = ProcessInfo.processInfo.environment["TEST_DB"]
-        ?? "odoo18_ecpay"
-    static let adminUser = ProcessInfo.processInfo.environment["TEST_ADMIN_USER"]
-        ?? "admin"
-    static let adminPass = ProcessInfo.processInfo.environment["TEST_ADMIN_PASS"]
-        ?? "admin"
-    static let senderEmail = ProcessInfo.processInfo.environment["TEST_SENDER_EMAIL"]
-        ?? "test@woowtech.com"
-    static let senderPass = ProcessInfo.processInfo.environment["TEST_SENDER_PASS"]
-        ?? "test1234"
-}
+// MARK: - Test Configuration
+// Reads from TestConfig.plist (single source of truth). See SharedTestConfig.swift.
+// Environment variables override plist values for CI.
+private typealias TestConfig = SharedTestConfig
 
 extension XCUIApplication {
     /// Navigate through login to reach main screen (for tests that need it)
