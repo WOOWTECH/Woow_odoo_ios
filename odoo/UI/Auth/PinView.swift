@@ -30,11 +30,11 @@ struct PinView: View {
 
             Spacer().frame(height: 48)
 
-            Text("Enter PIN")
+            Text(String(localized: "enter_pin_title"))
                 .font(.title2)
                 .fontWeight(.bold)
 
-            Text("Enter your PIN to unlock")
+            Text(String(localized: "enter_pin_subtitle"))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .padding(.top, 8)
@@ -75,7 +75,15 @@ struct PinView: View {
 
             // Number pad
             if !isLockedOut {
-                numberPad
+                NumberPadView(
+                    onNumberTap: { onNumberTap($0) },
+                    onDelete: {
+                        if !pin.isEmpty {
+                            pin.removeLast()
+                            error = nil
+                        }
+                    }
+                )
             }
 
             Spacer().frame(height: 40)
@@ -84,54 +92,6 @@ struct PinView: View {
         .onAppear {
             checkLockout()
         }
-    }
-
-    // MARK: - Number Pad
-
-    private var numberPad: some View {
-        VStack(spacing: 16) {
-            ForEach(0..<3, id: \.self) { row in
-                HStack(spacing: 28) {
-                    ForEach(1...3, id: \.self) { col in
-                        let number = row * 3 + col
-                        numberKey("\(number)")
-                    }
-                }
-            }
-            HStack(spacing: 28) {
-                Spacer().frame(width: 76, height: 76)
-                numberKey("0")
-                deleteKey
-            }
-        }
-    }
-
-    private func numberKey(_ number: String) -> some View {
-        Button {
-            onNumberTap(number)
-        } label: {
-            Text(number)
-                .font(.title)
-                .fontWeight(.medium)
-                .frame(width: 76, height: 76)
-                .background(Color(.systemGray6))
-                .clipShape(Circle())
-        }
-        .foregroundStyle(.primary)
-    }
-
-    private var deleteKey: some View {
-        Button {
-            if !pin.isEmpty {
-                pin.removeLast()
-                error = nil
-            }
-        } label: {
-            Image(systemName: "delete.backward")
-                .font(.title2)
-                .frame(width: 76, height: 76)
-        }
-        .foregroundStyle(.primary)
     }
 
     // MARK: - Logic

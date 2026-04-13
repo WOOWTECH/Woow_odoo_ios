@@ -175,6 +175,12 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
             setTimeout(function() { window.dispatchEvent(new Event('resize')); }, 1000);
         })();
         """
-        webView.evaluateJavaScript(js, completionHandler: nil)
+        webView.evaluateJavaScript(js) { _, error in
+            #if DEBUG
+            if let error {
+                print("[OdooWebView] OWL layout fix failed: \(error.localizedDescription)")
+            }
+            #endif
+        }
     }
 }

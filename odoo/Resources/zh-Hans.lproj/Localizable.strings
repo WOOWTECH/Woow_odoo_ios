@@ -29,6 +29,7 @@
 "error_database_not_found" = "未找到数据库";
 "error_invalid_credentials" = "用户名或密码错误";
 "error_session_expired" = "会话已过期，请重新登录";
+"error_invalid_server_url" = "无效的服务器网址格式";
 "error_server_%@" = "服务器错误：%@";
 
 /* Auth -- Biometric */

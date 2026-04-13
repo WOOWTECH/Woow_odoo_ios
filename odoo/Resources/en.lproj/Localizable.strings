@@ -29,6 +29,7 @@
 "error_database_not_found" = "Database not found";
 "error_invalid_credentials" = "Invalid username or password";
 "error_session_expired" = "Session expired, please login again";
+"error_invalid_server_url" = "Invalid server URL format";
 "error_server_%@" = "Server error: %@";
 
 /* Auth -- Biometric */

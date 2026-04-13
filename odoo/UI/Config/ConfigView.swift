@@ -78,7 +78,7 @@ struct ConfigView: View {
                     }
                 }
             }
-            .navigationTitle("Configuration")
+            .navigationTitle(String(localized: "configuration_title"))
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button(action: onBackClick) {

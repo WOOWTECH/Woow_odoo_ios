@@ -55,7 +55,16 @@ struct PinSetupView: View {
                 Spacer()
 
                 // Number pad
-                pinNumpad
+                NumberPadView(
+                    onNumberTap: { numberString in
+                        if let digit = Int(numberString) {
+                            appendDigit(digit)
+                        }
+                    },
+                    onDelete: {
+                        if !pin.isEmpty { pin.removeLast() }
+                    }
+                )
 
                 Spacer()
             }
@@ -78,48 +87,6 @@ struct PinSetupView: View {
         }
     }
 
-    private var pinNumpad: some View {
-        VStack(spacing: 12) {
-            ForEach([[1, 2, 3], [4, 5, 6], [7, 8, 9]], id: \.self) { row in
-                HStack(spacing: 24) {
-                    ForEach(row, id: \.self) { digit in
-                        Button {
-                            appendDigit(digit)
-                        } label: {
-                            Text("\(digit)")
-                                .font(.title)
-                                .frame(width: 70, height: 70)
-                                .background(Color.gray.opacity(0.15))
-                                .clipShape(Circle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-            HStack(spacing: 24) {
-                Color.clear.frame(width: 70, height: 70)
-                Button {
-                    appendDigit(0)
-                } label: {
-                    Text("0")
-                        .font(.title)
-                        .frame(width: 70, height: 70)
-                        .background(Color.gray.opacity(0.15))
-                        .clipShape(Circle())
-                }
-                .buttonStyle(.plain)
-                Button {
-                    if !pin.isEmpty { pin.removeLast() }
-                } label: {
-                    Image(systemName: "delete.backward")
-                        .font(.title2)
-                        .frame(width: 70, height: 70)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
     private func appendDigit(_ digit: Int) {
         guard pin.count < pinLength else { return }
         pin += "\(digit)"
@@ -137,7 +104,7 @@ struct PinSetupView: View {
                 pin = ""
                 step = .enterNew
             } else {
-                error = String(localized: "Incorrect PIN")
+                error = String(localized: "incorrect_pin")
                 pin = ""
             }
         case .enterNew:
@@ -148,7 +115,7 @@ struct PinSetupView: View {
             if pin == newPin {
                 onPinSet(pin)
             } else {
-                error = String(localized: "PINs don't match")
+                error = String(localized: "pins_dont_match")
                 pin = ""
                 step = .enterNew
                 newPin = ""

@@ -40,15 +40,7 @@ struct LoginView: View {
 
                     // Error banner
                     if let error = viewModel.error {
-                        HStack {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                            Text(error)
-                        }
-                        .foregroundStyle(.white)
-                        .padding()
-                        .frame(maxWidth: .infinity)
-                        .background(Color.red.opacity(0.85))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        ErrorBannerView(message: error)
                     }
 
                     // Step content

@@ -10,7 +10,7 @@ enum DeepLinkValidator {
     /// Rejects: /website/, /webapi/, /web@evil.com, /web/../
     private static let allowedRelativePathPattern = try! NSRegularExpression( // swiftlint:disable:this force_try
         pattern: #"^/web(?:[/?#]|$)"#,
-        options: .caseInsensitive
+        options: []  // Odoo paths are always lowercase — match strictly
     )
 
     /// Validates that an action URL is safe to load in WKWebView.

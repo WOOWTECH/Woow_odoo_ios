@@ -23,22 +23,17 @@ struct BiometricView: View {
                 .scaleEffect(isAnimating ? 1.1 : 1.0)
                 .animation(.easeInOut(duration: 0.3), value: isAnimating)
 
-            Text("Biometric Login")
+            Text(String(localized: "biometric_login_title"))
                 .font(.title2)
                 .fontWeight(.bold)
 
-            Text("Use Face ID or Touch ID to unlock")
+            Text(String(localized: "biometric_subtitle"))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
             // Error message
             if let error = errorMessage {
-                Text(error)
-                    .foregroundStyle(.white)
-                    .padding()
-                    .frame(maxWidth: .infinity)
-                    .background(Color.red.opacity(0.85))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                ErrorBannerView(message: error)
             }
 
             Spacer()
@@ -49,7 +44,7 @@ struct BiometricView: View {
             } label: {
                 HStack {
                     Image(systemName: biometricIcon)
-                    Text("Unlock with \(biometricName)")
+                    Text(String(localized: "unlock_with") + " " + biometricName)
                 }
                 .fontWeight(.semibold)
                 .frame(maxWidth: .infinity)
@@ -60,7 +55,7 @@ struct BiometricView: View {
             .clipShape(RoundedRectangle(cornerRadius: 16))
 
             // Use PIN fallback — NO skip button (UX-14)
-            Button("Use PIN") {
+            Button(String(localized: "use_pin_button")) {
                 onUsePinClick()
             }
             .foregroundStyle(.secondary)

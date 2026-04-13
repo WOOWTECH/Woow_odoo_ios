@@ -40,9 +40,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
 
     func authenticate(serverUrl: String, database: String, username: String, password: String) async -> AuthResult {
         // Auto-prefix https
-        let fullUrl = serverUrl.hasPrefix("https://") ? serverUrl :
-                      serverUrl.hasPrefix("http://") ? "https://" + serverUrl.dropFirst("http://".count) :
-                      "https://\(serverUrl)"
+        let fullUrl = serverUrl.ensureHTTPS
 
         let result = await apiClient.authenticate(
             serverUrl: fullUrl, database: database, username: username, password: password

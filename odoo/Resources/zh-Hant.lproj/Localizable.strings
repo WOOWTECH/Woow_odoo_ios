@@ -29,6 +29,7 @@
 "error_database_not_found" = "未找到資料庫";
 "error_invalid_credentials" = "使用者名稱或密碼錯誤";
 "error_session_expired" = "工作階段已過期，請重新登入";
+"error_invalid_server_url" = "無效的伺服器網址格式";
 "error_server_%@" = "伺服器錯誤：%@";
 
 /* Auth -- Biometric */

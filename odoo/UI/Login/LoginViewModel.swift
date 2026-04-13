@@ -80,6 +80,13 @@ final class LoginViewModel: ObservableObject {
             return
         }
 
+        // Validate URL format before proceeding
+        let normalized = trimmed.ensureHTTPS
+        guard let parsedUrl = URL(string: normalized), parsedUrl.host != nil else {
+            error = String(localized: "error_invalid_server_url")
+            return
+        }
+
         step = .credentials
     }
 
@@ -150,7 +157,6 @@ final class LoginViewModel: ObservableObject {
     var displayUrl: String {
         let trimmed = serverUrl.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return "" }
-        if trimmed.hasPrefix("https://") { return trimmed }
-        return "https://\(trimmed)"
+        return trimmed.ensureHTTPS
     }
 }

@@ -36,15 +36,9 @@ struct OdooAccount: Identifiable, Codable, Equatable, Hashable, Sendable {
     }
 
     /// Returns server URL with https:// prefix guaranteed.
-    /// Returns server URL with https:// prefix guaranteed.
     /// Handles bare domains, http:// → https://, and preserves existing https://.
     var fullServerUrl: String {
-        if serverUrl.hasPrefix("https://") { return serverUrl }
-        if serverUrl.hasPrefix("http://") {
-            return "https://" + serverUrl.dropFirst("http://".count)
-        }
-        if serverUrl.contains("://") { return serverUrl }
-        return "https://\(serverUrl)"
+        serverUrl.ensureHTTPS
     }
 
     /// Returns the hostname component of serverUrl for use as a Keychain key scope

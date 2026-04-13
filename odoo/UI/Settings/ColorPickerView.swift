@@ -15,7 +15,7 @@ struct ColorPickerView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     // Brand colors
-                    Text("Preset Colors")
+                    Text(String(localized: "preset_colors"))
                         .font(.subheadline).foregroundStyle(.secondary)
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5), spacing: 8) {
                         ForEach(WoowColors.brandColors, id: \.self) { hex in
@@ -24,7 +24,7 @@ struct ColorPickerView: View {
                     }
 
                     // Accent colors
-                    Text("Accent").font(.subheadline).foregroundStyle(.secondary)
+                    Text(String(localized: "accent_colors")).font(.subheadline).foregroundStyle(.secondary)
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5), spacing: 8) {
                         ForEach(WoowColors.accentColors, id: \.self) { hex in
                             colorSwatch(hex: hex)
@@ -32,7 +32,7 @@ struct ColorPickerView: View {
                     }
 
                     // Custom HEX
-                    Text("Custom Color").font(.subheadline).foregroundStyle(.secondary)
+                    Text(String(localized: "custom_color")).font(.subheadline).foregroundStyle(.secondary)
                     HStack {
                         TextField("#RRGGBB", text: $customHex)
                             .textFieldStyle(.roundedBorder)
