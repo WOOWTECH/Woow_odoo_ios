@@ -543,12 +543,60 @@ open odoo.xcodeproj
 
 Xcode will automatically resolve the Swift Package Manager dependencies (Firebase SDK). This may take a few minutes on first open.
 
-### 3. Configure signing
+### 3. Configure Code Signing
 
-1. Select the `odoo` target in Xcode
-2. Go to **Signing & Capabilities**
-3. Change **Team** to your Apple Developer team
-4. Update **Bundle Identifier** if needed (default: `io.woowtech.odoo.debug`)
+#### 3.1 Select your development team
+
+1. Open `odoo.xcodeproj` in Xcode
+2. Select the **`odoo`** target in the project navigator
+3. Go to **Signing & Capabilities** tab
+4. Check **"Automatically manage signing"**
+5. Select your **Team** from the dropdown (your Apple Developer account)
+6. Repeat for the **`odooTests`** and **`odooUITests`** targets
+
+> **Bundle Identifier:** Default is `io.woowtech.odoo`. If another developer on your team already uses this, change it to something unique (e.g., `io.woowtech.odoo.yourname`).
+
+#### 3.2 Create a development certificate (first time only)
+
+If Xcode says "No signing certificate found":
+
+1. Xcode will prompt **"Xcode can request a certificate for you"** → Click **Request**
+2. Xcode creates a new iOS Development certificate and stores it in your Mac's Keychain
+3. If prompted for your **Mac login password** (keychain access) → enter it and click **"Always Allow"**
+
+> **Note:** This creates a **development** certificate only. It does NOT affect any existing App Store distribution certificates.
+
+#### 3.3 Register your iPhone for testing
+
+To run on a real device (not just simulator):
+
+1. Connect your iPhone via USB
+2. Unlock the phone and tap **"Trust This Computer"** if prompted
+3. In Xcode, select your iPhone from the device dropdown (top toolbar)
+4. Xcode will automatically register your device with Apple Developer
+5. First build may take a moment — Xcode downloads a provisioning profile
+
+> **Common issue:** If you see `"Unable to install — verify code signature"`, clean the build folder: **Product → Clean Build Folder** (Cmd+Shift+K), then rebuild.
+
+#### 3.4 Signing diagram
+
+```mermaid
+flowchart TD
+    A[Open Xcode Project] --> B{Signing certificate exists?}
+    B -->|Yes| C[Select Team]
+    B -->|No| D[Xcode requests new certificate]
+    D --> E[Enter Mac login password]
+    E --> F[Click 'Always Allow']
+    F --> C
+    C --> G{Target: Simulator or Device?}
+    G -->|Simulator| H[Build — no signing needed]
+    G -->|Device| I{Device registered?}
+    I -->|No| J[Connect iPhone via USB]
+    J --> K[Trust This Computer]
+    K --> L[Xcode auto-registers device]
+    L --> M[Build & Run on device]
+    I -->|Yes| M
+```
 
 ### 4. Firebase setup (optional, for push notifications)
 
