@@ -57,6 +57,24 @@ final class E2E_PINLockoutTests: XCTestCase {
         app.launchArguments += ["-AppleLanguages", "(en)"]
     }
 
+    /// Ensures an account exists by logging in if needed, then terminates
+    /// so the next launch with hooks starts from a clean launch state.
+    @MainActor
+    private func ensureAccountThenRelaunch(extraArgs: [String]) {
+        app.launch()
+        let loginField = app.textFields["example.odoo.com"]
+        if loginField.waitForExistence(timeout: 3) {
+            app.loginWithTestCredentials()
+            _ = app.webViews.firstMatch.waitForExistence(timeout: 15)
+                || app.buttons["line.3.horizontal"].waitForExistence(timeout: 15)
+        }
+        app.terminate()
+        for arg in extraArgs {
+            app.launchArguments += [arg]
+        }
+        app.launch()
+    }
+
     // MARK: UX-16
 
     /// UX-16: Entering a wrong PIN shows an error and the remaining attempt count.
@@ -66,19 +84,14 @@ final class E2E_PINLockoutTests: XCTestCase {
     /// test skips with a descriptive message.
     @MainActor
     func test_UX16_givenWrongPIN_whenEntered_thenErrorAndRemainingAttemptsShown() throws {
-        let hasSetTestPIN = CommandLine.arguments.contains("-SetTestPIN")
-            || ProcessInfo.processInfo.environment["XCTEST_SET_PIN"] != nil
-        guard hasSetTestPIN else {
-            throw XCTSkip("UX-16 REQUIRES APP HOOK: -SetTestPIN must be wired in the app before this test can run deterministically")
-        }
+        // Self-contained: log in first, then relaunch with PIN + App Lock hooks
+        ensureAccountThenRelaunch(extraArgs: ["-SetTestPIN", "1234", "-AppLockEnabled", "YES"])
 
-        app.launchArguments += ["-SetTestPIN", "1234"]
-        app.launchArguments += ["-AppLockEnabled", "YES"]
-        app.launch()
-
-        // Navigate to PIN screen — tap "Use PIN" if biometric prompt appears first
-        if app.buttons["Use PIN"].waitForExistence(timeout: 5) {
-            app.buttons["Use PIN"].tap()
+        // On simulator: biometric fails → "Use PIN" shown. Tap it.
+        // On real device with Face ID: may auto-succeed → skip.
+        let usePinButton = app.buttons["Use PIN"]
+        if usePinButton.waitForExistence(timeout: 5) {
+            usePinButton.tap()
         }
 
         guard app.staticTexts["Enter PIN"].waitForExistence(timeout: 5) else {
@@ -121,21 +134,15 @@ final class E2E_PINLockoutTests: XCTestCase {
     /// Without the hooks the test skips.
     @MainActor
     func test_UX17_givenFiveWrongPINs_whenEntered_thenLockoutMessageAppears() throws {
-        let hasSetTestPIN = CommandLine.arguments.contains("-SetTestPIN")
-            || ProcessInfo.processInfo.environment["XCTEST_SET_PIN"] != nil
-        guard hasSetTestPIN else {
-            throw XCTSkip("UX-17 REQUIRES APP HOOK: -SetTestPIN must be wired in the app before this test can run deterministically")
-        }
+        // Self-contained: log in first, then relaunch with PIN + App Lock + lockout reset
+        ensureAccountThenRelaunch(extraArgs: [
+            "-SetTestPIN", "1234", "-AppLockEnabled", "YES", "-ResetPINLockout", "YES"
+        ])
 
-        app.launchArguments += ["-SetTestPIN", "1234"]
-        app.launchArguments += ["-AppLockEnabled", "YES"]
-        // Also reset any lingering lockout state from previous runs
-        app.launchArguments += ["-ResetPINLockout", "YES"]
-        app.launch()
-
-        // Navigate to PIN screen
-        if app.buttons["Use PIN"].waitForExistence(timeout: 5) {
-            app.buttons["Use PIN"].tap()
+        // On simulator: biometric fails → "Use PIN" shown. Tap it.
+        let usePinButton = app.buttons["Use PIN"]
+        if usePinButton.waitForExistence(timeout: 5) {
+            usePinButton.tap()
         }
 
         guard app.staticTexts["Enter PIN"].waitForExistence(timeout: 5) else {
@@ -667,10 +674,14 @@ final class E2E_CacheTests: XCTestCase {
     /// UX-64: After clearing the cache the user remains logged in (Keychain session is untouched).
     @MainActor
     func test_UX64_givenCacheCleared_whenAppReturnsToForeground_thenUserStillLoggedIn() throws {
-        // Precondition: logged-in state (WebView or hamburger menu visible)
+        // Self-contained: log in if needed
+        let loginField = app.textFields["example.odoo.com"]
+        if loginField.waitForExistence(timeout: 3) {
+            app.loginWithTestCredentials()
+        }
         let menuButton = app.buttons["line.3.horizontal"]
-        guard menuButton.waitForExistence(timeout: 10) else {
-            throw XCTSkip("UX-64: A logged-in session is required — run login flow first or set up a test account")
+        guard menuButton.waitForExistence(timeout: 15) else {
+            throw XCTSkip("UX-64: Could not reach logged-in state")
         }
 
         navigateToSettings()
@@ -729,10 +740,14 @@ final class E2E_CacheTests: XCTestCase {
     /// confirming that cookie re-injection from Keychain keeps the session alive.
     @MainActor
     func test_UX65_givenCacheCleared_whenWebViewReloads_thenOdooLoadsNotLoginPage() throws {
-        // Precondition: logged-in state
+        // Self-contained: log in if needed
+        let loginField = app.textFields["example.odoo.com"]
+        if loginField.waitForExistence(timeout: 3) {
+            app.loginWithTestCredentials()
+        }
         let menuButton = app.buttons["line.3.horizontal"]
-        guard menuButton.waitForExistence(timeout: 10) else {
-            throw XCTSkip("UX-65: A logged-in session is required — run login flow first or set up a test account")
+        guard menuButton.waitForExistence(timeout: 15) else {
+            throw XCTSkip("UX-65: Could not reach logged-in state")
         }
 
         navigateToSettings()
@@ -1096,7 +1111,18 @@ final class E2E_AppLockTests: XCTestCase {
         super.setUp()
         continueAfterFailure = false
         app.launchArguments += ["-AppleLanguages", "(en)"]
+    }
+
+    /// Ensures an account exists by logging in if needed.
+    @MainActor
+    private func ensureLoggedIn() {
         app.launch()
+        let loginField = app.textFields["example.odoo.com"]
+        if loginField.waitForExistence(timeout: 3) {
+            app.loginWithTestCredentials()
+        }
+        _ = app.webViews.firstMatch.waitForExistence(timeout: 15)
+            || app.buttons["line.3.horizontal"].waitForExistence(timeout: 15)
     }
 
     // MARK: Navigation helper
@@ -1129,17 +1155,35 @@ final class E2E_AppLockTests: XCTestCase {
         )
     }
 
+    /// Scrolls down to reveal the SECURITY section in Settings Form.
+    @MainActor
+    private func scrollToSecuritySection() {
+        if !app.switches["App Lock"].exists {
+            app.swipeUp()
+        }
+    }
+
+    /// Ensures an account exists, then relaunches with test hooks.
+    @MainActor
+    private func ensureAccountThenRelaunch(extraArgs: [String]) {
+        ensureLoggedIn()
+        app.terminate()
+        for arg in extraArgs {
+            app.launchArguments += [arg]
+        }
+        app.launch()
+    }
+
     // MARK: UX-10
 
     /// UX-10: Enabling App Lock in Settings causes auth to be required on the next cold launch.
     @MainActor
     func test_UX10_givenAppLockEnabled_whenAppRelaunched_thenAuthRequired() throws {
-        // Precondition: logged-in state
-        guard app.buttons["line.3.horizontal"].waitForExistence(timeout: 10) else {
-            throw XCTSkip("UX-10: Logged-in state is required — run login flow first")
-        }
+        // Self-contained: log in first
+        ensureLoggedIn()
 
         navigateToSettings()
+        scrollToSecuritySection()
 
         // Find App Lock toggle in the SECURITY section
         let toggle = app.switches["App Lock"]
@@ -1163,6 +1207,9 @@ final class E2E_AppLockTests: XCTestCase {
                 for digit in ["1", "2", "3", "4"] { app.buttons[digit].tap() }
             }
         }
+
+        // Wait for toggle state to propagate to accessibility layer
+        _ = XCTWaiter.wait(for: [], timeout: 1.0)
 
         // Verify the toggle is now ON
         XCTAssertEqual(
@@ -1224,40 +1271,16 @@ final class E2E_AppLockTests: XCTestCase {
     /// UX-21: When App Lock is OFF, background then foreground does NOT show an auth prompt.
     @MainActor
     func test_UX21_givenAppLockOff_whenAppBackgroundsThenForegrounds_thenNoAuthPromptAppears() throws {
-        // Precondition: logged-in state
-        guard app.buttons["line.3.horizontal"].waitForExistence(timeout: 10) else {
-            throw XCTSkip("UX-21: Logged-in state is required")
-        }
+        // Self-contained: ensure account exists, force App Lock OFF via hook
+        ensureLoggedIn()
+        app.terminate()
+        app.launchArguments += ["-AppLockEnabled", "NO"]
+        app.launch()
 
-        navigateToSettings()
-
-        let toggle = app.switches["App Lock"]
-        guard toggle.waitForExistence(timeout: 5) else {
-            failWithScreenshot(in: self, named: "UX21_no_toggle", reason: "UX-21: App Lock toggle must exist in SECURITY section")
-            return
-        }
-
-        // Assert App Lock is OFF for this test
-        XCTAssertEqual(
-            toggle.value as? String, "0",
-            "UX-21: App Lock must be OFF — disable it in Settings before running this test, or use the -AppLockEnabled NO hook"
-        )
-
-        // Dismiss Settings and return to the main screen
-        let backButton = app.navigationBars.buttons.firstMatch
-        if backButton.exists {
-            backButton.tap()
-        } else {
-            app.swipeRight()
-        }
-        // Dismiss the Config sheet too if still visible
-        if app.buttons["line.3.horizontal"].exists == false {
-            app.swipeDown()
-        }
-
-        guard app.webViews.firstMatch.waitForExistence(timeout: 10)
-                || app.buttons["line.3.horizontal"].waitForExistence(timeout: 5) else {
-            failWithScreenshot(in: self, named: "UX21_no_main_screen", reason: "UX-21: Main screen must be reachable after dismissing Settings")
+        // Wait for main screen
+        guard app.webViews.firstMatch.waitForExistence(timeout: 15)
+                || app.buttons["line.3.horizontal"].waitForExistence(timeout: 15) else {
+            failWithScreenshot(in: self, named: "UX21_no_main_screen", reason: "UX-21: Main screen must appear with App Lock OFF")
             return
         }
 
@@ -1266,7 +1289,7 @@ final class E2E_AppLockTests: XCTestCase {
         _ = XCTWaiter.wait(for: [], timeout: 2)
         app.activate()
 
-        // No auth prompt must appear — use a short timeout to assert absence
+        // No auth prompt must appear
         let usePinAppeared = app.buttons["Use PIN"].waitForExistence(timeout: 3)
         XCTAssertFalse(
             usePinAppeared,
@@ -1289,17 +1312,8 @@ final class E2E_AppLockTests: XCTestCase {
     /// REQUIRES APP HOOK: `-SetTestPIN 1111` and `-AppLockEnabled YES`.
     @MainActor
     func test_UX22_givenNewPINSet_whenAppRelaunched_thenNewPINUnlocks() throws {
-        let hasSetTestPIN = CommandLine.arguments.contains("-SetTestPIN")
-            || ProcessInfo.processInfo.environment["XCTEST_SET_PIN"] != nil
-        guard hasSetTestPIN else {
-            throw XCTSkip("UX-22 REQUIRES APP HOOK: -SetTestPIN must be wired in the app before this test can run deterministically")
-        }
-
-        // Launch with known initial PIN and App Lock ON
-        app.terminate()
-        app.launchArguments += ["-SetTestPIN", "1111"]
-        app.launchArguments += ["-AppLockEnabled", "YES"]
-        app.launch()
+        // Self-contained: log in first, then relaunch with initial PIN + App Lock
+        ensureAccountThenRelaunch(extraArgs: ["-SetTestPIN", "1111", "-AppLockEnabled", "YES"])
 
         // Unlock with initial PIN 1-1-1-1
         if app.buttons["Use PIN"].waitForExistence(timeout: 5) {
@@ -1393,9 +1407,13 @@ final class E2E_MiscTests: XCTestCase {
     /// UX-30: Tapping the hamburger menu button on the main screen opens the Config/accounts sheet.
     @MainActor
     func test_UX30_givenMainScreen_whenMenuButtonTapped_thenConfigOpens() throws {
-        // Precondition: logged-in state
-        guard app.buttons["line.3.horizontal"].waitForExistence(timeout: 10) else {
-            throw XCTSkip("UX-30: Logged-in state with visible hamburger menu is required")
+        // Self-contained: log in if needed
+        let loginField = app.textFields["example.odoo.com"]
+        if loginField.waitForExistence(timeout: 3) {
+            app.loginWithTestCredentials()
+        }
+        guard app.buttons["line.3.horizontal"].waitForExistence(timeout: 15) else {
+            throw XCTSkip("UX-30: Could not reach logged-in state")
         }
 
         // WebView must be visible before tapping the menu
@@ -1481,10 +1499,9 @@ final class E2E_MiscTests: XCTestCase {
     /// screen UI strings appear in Simplified Chinese.
     @MainActor
     func test_UX59_givenSimplifiedChineseLocale_whenAppLaunched_thenUIStringsAreSimplifiedChinese() {
-        // Override locale for this test — relaunch with zh-Hans
+        // Self-contained: clear state + set Chinese locale so login screen appears
         app.terminate()
-        // Reset to zh-Hans (do not include the default en override)
-        app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
+        app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN", "-ResetAppState"]
         app.launch()
 
         // Wait for the login screen
@@ -1510,9 +1527,9 @@ final class E2E_MiscTests: XCTestCase {
     /// step show English strings and no Chinese characters appear on native UI elements.
     @MainActor
     func test_UX61_givenEnglishLocale_whenAppLaunched_thenUIStringsAreEnglish() {
-        // The setUp already adds -AppleLanguages (en); this test also adds -AppleLocale
+        // Self-contained: clear state + set English locale so login screen appears
         app.terminate()
-        app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US", "-ResetAppState"]
         app.launch()
 
         XCTAssertTrue(
