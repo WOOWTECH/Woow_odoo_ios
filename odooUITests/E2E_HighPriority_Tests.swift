@@ -435,6 +435,30 @@ final class E2E_BiometricPINTests: XCTestCase {
         app.launchArguments += ["-AppleLanguages", "(en)"]
     }
 
+    /// Ensures an account exists by logging in if needed, then terminates the app
+    /// so the next launch with App Lock hooks starts from a clean launch state.
+    @MainActor
+    private func ensureAccountThenRelaunch(extraArgs: [String] = []) {
+        // First launch without hooks to establish a logged-in account
+        app.launch()
+
+        let loginField = app.textFields["example.odoo.com"]
+        if loginField.waitForExistence(timeout: 3) {
+            // No account — log in to create one
+            app.loginWithTestCredentials()
+            // Wait for WebView to confirm login succeeded
+            _ = app.webViews.firstMatch.waitForExistence(timeout: 15)
+                || app.buttons["line.3.horizontal"].waitForExistence(timeout: 15)
+        }
+
+        // Now terminate and relaunch with the test hooks
+        app.terminate()
+        for arg in extraArgs {
+            app.launchArguments += [arg]
+        }
+        app.launch()
+    }
+
     // ──────────────────────────────────────────────────────
     // Navigation helpers
     // ──────────────────────────────────────────────────────
@@ -491,60 +515,33 @@ final class E2E_BiometricPINTests: XCTestCase {
     /// REQUIRES APP HOOK: -AppLockEnabled YES (implemented in AppDelegate)
     @MainActor
     func test_UX12_givenBiometricEnrolled_whenMatchSucceeds_thenMainScreenAppears() throws {
-        app.launchArguments += ["-AppLockEnabled", "YES"]
-        app.launch()
+        // Self-contained: log in first, then relaunch with App Lock ON
+        ensureAccountThenRelaunch(extraArgs: ["-AppLockEnabled", "YES"])
 
-        // If the login screen appears, no prior account exists — skip.
-        let loginField = app.textFields["example.odoo.com"]
-        if loginField.waitForExistence(timeout: 3) {
-            throw XCTSkip("UX-12: No logged-in account found — biometric test requires a prior session")
-        }
-
-        // If already on the main screen, biometric auth succeeded (CI match signal was sent).
-        let menuVisible = app.buttons["line.3.horizontal"].waitForExistence(timeout: 3)
-        if menuVisible {
-            XCTAssertTrue(
-                app.buttons["line.3.horizontal"].exists,
-                "UX-12: Main screen visible — biometric auth succeeded"
-            )
-            return
-        }
-
-        // On simulators without biometric enrollment, LAContext fails immediately and shows
-        // "Use PIN". This is the expected simulator state; the pure biometric-success path
-        // requires CI coordination via xcrun simctl.
+        // On real devices with Face ID: biometric auto-succeeds → main screen visible.
+        // On simulators without biometric: LAContext fails → "Use PIN" shown.
+        // Both are valid states — the key assertion is that the app doesn't crash
+        // and either shows the main screen or an auth fallback.
+        let mainScreen = app.buttons["line.3.horizontal"].waitForExistence(timeout: 8)
+            || app.webViews.firstMatch.waitForExistence(timeout: 8)
         let usePinVisible = app.buttons["Use PIN"].waitForExistence(timeout: 3)
-        if usePinVisible {
+        let authPrompt = app.staticTexts["Authenticate to continue"].waitForExistence(timeout: 2)
+
+        if mainScreen {
+            // Biometric auto-succeeded (real device with Face ID)
+            XCTAssertTrue(mainScreen, "UX-12: Main screen visible — biometric auth succeeded")
+        } else if usePinVisible {
             throw XCTSkip(
                 "UX-12: Biometric not enrolled on this simulator. " +
-                "CI must send a match signal via xcrun simctl before the test target launches. " +
                 "Fallback PIN path is covered by UX-13 and UX-15."
             )
+        } else if authPrompt {
+            // Auth prompt shown, waiting for biometric match (CI scenario)
+            let appeared = app.buttons["line.3.horizontal"].waitForExistence(timeout: 15)
+            XCTAssertTrue(appeared, "UX-12: Main screen must appear after biometric match")
+        } else {
+            failWithScreenshot("UX-12: No auth gate or main screen found", name: "UX12_noState", testCase: self)
         }
-
-        // Auth prompt visible and biometric may be enrolled — wait for CI match result
-        let authTextVisible = app.staticTexts["Authenticate to continue"].waitForExistence(timeout: 2)
-        guard authTextVisible else {
-            throw XCTSkip("UX-12: No auth gate found — cannot proceed with biometric test")
-        }
-
-        let mainScreenAppeared =
-            app.buttons["line.3.horizontal"].waitForExistence(timeout: 15)
-            || app.webViews.firstMatch.waitForExistence(timeout: 15)
-
-        guard mainScreenAppeared else {
-            failWithScreenshot(
-                "UX-12: Main screen did not appear after biometric match within 15 seconds",
-                name: "UX12_noMainScreen",
-                testCase: self
-            )
-            return
-        }
-
-        XCTAssertTrue(
-            mainScreenAppeared,
-            "UX-12: Main screen must appear after a successful biometric match"
-        )
     }
 
     // ──────────────────────────────────────────────────────
@@ -553,58 +550,30 @@ final class E2E_BiometricPINTests: XCTestCase {
     // ──────────────────────────────────────────────────────
 
     /// Verifies that when App Lock is enabled, the auth screen shows a "Use PIN" fallback
-    /// button and no "Skip" button. On a real device with Face ID enrolled, the system
-    /// biometric prompt appears first — the test cancels it to reveal the Use PIN button.
+    /// button and no "Skip" button.
+    ///
+    /// **SIMULATOR ONLY**: On real devices with Face ID, biometric auto-succeeds before
+    /// the test can cancel it. Run this test on iPhone Simulator where biometric is not enrolled.
     ///
     /// REQUIRES APP HOOK: -AppLockEnabled YES (implemented in AppDelegate)
     @MainActor
     func test_UX13_givenBiometricUnavailableOrFails_whenAuthPromptShown_thenUsePINButtonAppears() throws {
-        app.launchArguments += ["-AppLockEnabled", "YES"]
-        app.launch()
+        // Self-contained: log in first, then relaunch with App Lock ON
+        ensureAccountThenRelaunch(extraArgs: ["-AppLockEnabled", "YES"])
 
-        // Skip if no prior account is present (nothing to lock)
-        let loginField = app.textFields["example.odoo.com"]
-        if loginField.waitForExistence(timeout: 3) {
-            throw XCTSkip(
-                "UX-13: No prior account — auth gate is not shown without a logged-in session"
-            )
-        }
-
-        // On a real device with Face ID enrolled, the system biometric dialog appears.
-        // If the main screen is already visible, Face ID succeeded automatically —
-        // we need to background and foreground to get a fresh auth prompt where we can
-        // cancel biometric to reveal the "Use PIN" button.
-        let menuVisible = app.buttons["line.3.horizontal"].waitForExistence(timeout: 3)
-        if menuVisible {
-            // Biometric auto-succeeded. Background + foreground to get a new auth prompt.
-            XCUIDevice.shared.press(.home)
-            _ = XCTWaiter.wait(for: [], timeout: 1.0)
-            app.activate()
-            _ = XCTWaiter.wait(for: [], timeout: 2.0)
-        }
-
-        // On real devices: the Face ID system dialog may be showing. Tap "Cancel" on
-        // the system alert if present, which causes LAError.userCancel and the app
-        // stays on the biometric screen showing the "Use PIN" button.
-        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        let cancelButton = springboard.buttons["Cancel"]
-        if cancelButton.waitForExistence(timeout: 5) {
-            cancelButton.tap()
-        }
-
-        // Now the "Use PIN" button should be visible (biometric was cancelled/failed)
+        // On simulators without biometric enrollment, LAContext fails immediately
+        // and the app shows "Use PIN" without a system dialog.
+        // On real devices with Face ID, biometric auto-succeeds — skip gracefully.
         guard app.buttons["Use PIN"].waitForExistence(timeout: 8) else {
-            // On devices where biometric auto-succeeds without a cancellable prompt,
-            // this test cannot force a failure state. Skip gracefully.
             throw XCTSkip(
-                "UX-13: Could not cancel biometric to reveal Use PIN button — " +
-                "Face ID may have auto-succeeded without a cancellable system dialog"
+                "UX-13: Use PIN button not found — biometric may have auto-succeeded (real device). " +
+                "Run this test on iPhone Simulator where biometric is not enrolled."
             )
         }
 
         XCTAssertTrue(
             app.buttons["Use PIN"].exists,
-            "UX-13: Use PIN button must be visible when biometric is cancelled or unavailable"
+            "UX-13: Use PIN button must be visible when biometric is unavailable"
         )
 
         // Companion check: no Skip button (UX-14)
@@ -623,45 +592,26 @@ final class E2E_BiometricPINTests: XCTestCase {
     /// Verifies that entering the correct 4-digit PIN on the PIN screen dismisses the
     /// auth gate and navigates to the main screen (WebView or menu button).
     ///
+    /// **SIMULATOR ONLY**: On real devices with Face ID, biometric auto-succeeds before
+    /// the test can navigate to the PIN screen. Run on iPhone Simulator.
+    ///
     /// REQUIRES APP HOOK: -SetTestPIN 1234 (pre-seeds PIN hash in Keychain)
     /// REQUIRES APP HOOK: -AppLockEnabled YES (forces App Lock on without navigating Settings)
     @MainActor
     func test_UX15_givenCorrectPIN_whenEnteredOnPINScreen_thenUnlockSucceeds() throws {
-        app.launchArguments += ["-SetTestPIN", "1234"]
-        app.launchArguments += ["-AppLockEnabled", "YES"]
-        app.launch()
+        // Self-contained: log in first, then relaunch with App Lock + PIN
+        ensureAccountThenRelaunch(extraArgs: ["-SetTestPIN", "1234", "-AppLockEnabled", "YES"])
 
-        // Skip if no prior account exists
-        let loginField = app.textFields["example.odoo.com"]
-        if loginField.waitForExistence(timeout: 3) {
+        // On simulator: biometric fails → "Use PIN" button appears.
+        // On real device: biometric auto-succeeds → skip.
+        let usePinButton = app.buttons["Use PIN"]
+        guard usePinButton.waitForExistence(timeout: 8) else {
             throw XCTSkip(
-                "UX-15: No prior account — PIN screen is not shown without a logged-in session"
+                "UX-15: Use PIN button not found — biometric may have auto-succeeded (real device). " +
+                "Run this test on iPhone Simulator."
             )
         }
-
-        // On real devices with Face ID, biometric may auto-succeed before we can
-        // navigate to the PIN screen. If the main screen is already visible,
-        // background + foreground to get a fresh auth prompt.
-        let menuVisible = app.buttons["line.3.horizontal"].waitForExistence(timeout: 3)
-        if menuVisible {
-            XCUIDevice.shared.press(.home)
-            _ = XCTWaiter.wait(for: [], timeout: 1.0)
-            app.activate()
-            _ = XCTWaiter.wait(for: [], timeout: 2.0)
-        }
-
-        // Cancel the Face ID system dialog if it appears (real device)
-        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        let cancelButton = springboard.buttons["Cancel"]
-        if cancelButton.waitForExistence(timeout: 5) {
-            cancelButton.tap()
-        }
-
-        // Navigate to PIN screen via "Use PIN" button
-        let usePinButton = app.buttons["Use PIN"]
-        if usePinButton.waitForExistence(timeout: 5) {
-            usePinButton.tap()
-        }
+        usePinButton.tap()
 
         // Assert PIN entry screen is shown
         guard app.staticTexts["Enter PIN"].waitForExistence(timeout: 5) else {
@@ -684,15 +634,6 @@ final class E2E_BiometricPINTests: XCTestCase {
             app.webViews.firstMatch.waitForExistence(timeout: 10)
             || app.buttons["line.3.horizontal"].waitForExistence(timeout: 10)
 
-        guard mainScreenAppeared else {
-            failWithScreenshot(
-                "UX-15: Main screen did not appear after entering the correct PIN '1234'",
-                name: "UX15_noMainScreen",
-                testCase: self
-            )
-            return
-        }
-
         XCTAssertTrue(
             mainScreenAppeared,
             "UX-15: Entering the correct PIN must dismiss the auth gate and show the main screen"
@@ -708,17 +649,21 @@ final class E2E_BiometricPINTests: XCTestCase {
     /// Verifies that when App Lock is enabled, backgrounding and then foregrounding
     /// the app re-presents the biometric/PIN auth screen so the user must re-authenticate.
     ///
+    /// **SIMULATOR ONLY**: On real devices with Face ID, the re-auth prompt auto-succeeds
+    /// before the test can detect it. Run on iPhone Simulator.
+    ///
     /// REQUIRES APP HOOK: -AppLockEnabled YES
     /// REQUIRES APP HOOK: -SetTestPIN 1234 (used to unlock the app before backgrounding)
     @MainActor
     func test_UX20_givenAppLockEnabled_whenAppBackgroundsThenForegrounds_thenAuthPromptAppears() throws {
-        app.launchArguments += ["-AppLockEnabled", "YES"]
-        app.launchArguments += ["-SetTestPIN", "1234"]
-        app.launch()
+        // Self-contained: log in first, then relaunch with App Lock + PIN
+        ensureAccountThenRelaunch(extraArgs: ["-AppLockEnabled", "YES", "-SetTestPIN", "1234"])
 
-        // Skip if no prior account exists
+        // On real devices: Face ID auto-succeeds. On simulator: shows "Use PIN".
+        // We need to get past the initial auth gate to reach the main screen.
         let loginField = app.textFields["example.odoo.com"]
         if loginField.waitForExistence(timeout: 3) {
+            // ensureAccountThenRelaunch should have prevented this
             throw XCTSkip(
                 "UX-20: No prior account — auth gate is not shown without a logged-in session"
             )
