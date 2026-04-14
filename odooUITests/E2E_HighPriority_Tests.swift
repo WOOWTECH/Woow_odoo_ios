@@ -814,6 +814,7 @@ final class E2E_LoginAccountTests: XCTestCase {
     override func setUp() {
         continueAfterFailure = false
         app.launchArguments += ["-AppleLanguages", "(en)"]
+        app.launchArguments += ["-ResetAppState"]
     }
 
     // ──────────────────────────────────────────────────────

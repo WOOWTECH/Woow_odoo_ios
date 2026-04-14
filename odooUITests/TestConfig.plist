@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>ServerURL</key>
-	<string>opponents-lotus-alt-lamb.trycloudflare.com</string>
+	<string>fabric-plaintiff-referrals-quantities.trycloudflare.com</string>
 	<key>Database</key>
 	<string>odoo18_ecpay</string>
 	<key>AdminUser</key>
