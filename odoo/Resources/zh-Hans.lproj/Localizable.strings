@@ -34,9 +34,13 @@
 
 /* Auth -- Biometric */
 "Biometric Login" = "生物识别登录";
+"biometric_login_title" = "生物识别登录";
 "Use Face ID or Touch ID to unlock" = "使用指纹或面部登录";
+"biometric_subtitle" = "使用指纹或面部登录";
 "Unlock with %@" = "使用 %@ 解锁";
+"unlock_with" = "使用";
 "Use PIN" = "使用 PIN 码";
+"use_pin_button" = "使用 PIN 码";
 "biometric_reason" = "解锁 WoowTech Odoo";
 "error_biometric_unavailable" = "生物识别认证不可用";
 "error_biometric_lockout" = "尝试次数过多，请使用 PIN 码";
@@ -44,12 +48,15 @@
 
 /* Auth -- PIN */
 "Enter PIN" = "输入 PIN 码";
+"enter_pin_title" = "输入 PIN 码";
 "Enter your PIN to unlock" = "输入 PIN 码解锁";
+"enter_pin_subtitle" = "输入 PIN 码解锁";
 "lockout_timer_%lld" = "%lld 秒后重试";
 "wrong_pin_%lld" = "PIN 码错误，剩余 %lld 次";
 
 /* Config */
 "Configuration" = "设置";
+"configuration_title" = "设置";
 "Switch Account" = "切换账号";
 "Add Account" = "添加账号";
 "Logout" = "退出登录";
@@ -94,8 +101,11 @@
 /* Color Picker */
 "Select Color" = "选择颜色";
 "Preset Colors" = "预设颜色";
+"preset_colors" = "预设颜色";
 "Accent" = "强调色";
+"accent_colors" = "强调色";
 "Custom Color" = "自定义颜色";
+"custom_color" = "自定义颜色";
 "Apply" = "应用";
 
 /* PIN Setup */
@@ -103,7 +113,9 @@
 "Enter New PIN" = "输入新 PIN 码";
 "Confirm New PIN" = "确认新 PIN 码";
 "Incorrect PIN" = "PIN 码不正确";
+"incorrect_pin" = "PIN 码不正确";
 "PINs don't match" = "PIN 码不匹配";
+"pins_dont_match" = "PIN 码不匹配";
 
 /* Cache */
 "cache_cleared" = "缓存已清除";

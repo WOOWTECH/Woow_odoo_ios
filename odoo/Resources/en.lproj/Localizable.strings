@@ -34,9 +34,13 @@
 
 /* Auth -- Biometric */
 "Biometric Login" = "Biometric Login";
+"biometric_login_title" = "Biometric Login";
 "Use Face ID or Touch ID to unlock" = "Use Face ID or Touch ID to unlock";
+"biometric_subtitle" = "Use Face ID or Touch ID to unlock";
 "Unlock with %@" = "Unlock with %@";
+"unlock_with" = "Unlock with";
 "Use PIN" = "Use PIN";
+"use_pin_button" = "Use PIN";
 "biometric_reason" = "Unlock WoowTech Odoo";
 "error_biometric_unavailable" = "Biometric authentication not available";
 "error_biometric_lockout" = "Too many attempts. Use PIN instead.";
@@ -44,12 +48,15 @@
 
 /* Auth -- PIN */
 "Enter PIN" = "Enter PIN";
+"enter_pin_title" = "Enter PIN";
 "Enter your PIN to unlock" = "Enter your PIN to unlock";
+"enter_pin_subtitle" = "Enter your PIN to unlock";
 "lockout_timer_%lld" = "Try again in %llds";
 "wrong_pin_%lld" = "Wrong PIN. %lld attempts remaining";
 
 /* Config */
 "Configuration" = "Configuration";
+"configuration_title" = "Configuration";
 "Switch Account" = "Switch Account";
 "Add Account" = "Add Account";
 "Logout" = "Logout";
@@ -94,8 +101,11 @@
 /* Color Picker */
 "Select Color" = "Select Color";
 "Preset Colors" = "Preset Colors";
+"preset_colors" = "Preset Colors";
 "Accent" = "Accent";
+"accent_colors" = "Accent";
 "Custom Color" = "Custom Color";
+"custom_color" = "Custom Color";
 "Apply" = "Apply";
 
 /* PIN Setup */
@@ -103,7 +113,9 @@
 "Enter New PIN" = "Enter New PIN";
 "Confirm New PIN" = "Confirm New PIN";
 "Incorrect PIN" = "Incorrect PIN";
+"incorrect_pin" = "Incorrect PIN";
 "PINs don't match" = "PINs don't match";
+"pins_dont_match" = "PINs don't match";
 
 /* Cache */
 "cache_cleared" = "Cache cleared";

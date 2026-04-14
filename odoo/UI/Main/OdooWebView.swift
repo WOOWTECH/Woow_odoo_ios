@@ -92,6 +92,51 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         self.serverHost = URL(string: serverUrl)?.host ?? ""
     }
 
+    // MARK: - Navigation Decision (extracted for testability)
+
+    /// The result of evaluating a URL against the WebView navigation policy.
+    /// Extracted from `decidePolicyFor` so the logic can be unit-tested without
+    /// requiring a live WKWebView or UIApplication.
+    enum NavigationDecision: Equatable {
+        /// URL is allowed to load inside the WebView.
+        case allow
+        /// URL is blocked — session expiry detected, app should show login screen.
+        case sessionExpired
+        /// URL is blocked — external host, app should open it in Safari.
+        case openInSafari(URL)
+        /// URL is blocked — no URL provided.
+        case cancel
+    }
+
+    /// Pure function that decides what to do with a navigation URL.
+    /// Does NOT have side effects — caller is responsible for acting on the result.
+    func decideNavigation(for url: URL?) -> NavigationDecision {
+        guard let url else { return .cancel }
+
+        // Session expiry detection
+        if url.absoluteString.contains("/web/login") {
+            return .sessionExpired
+        }
+
+        // Same-host: allow
+        if let host = url.host, host.caseInsensitiveCompare(serverHost) == .orderedSame {
+            return .allow
+        }
+
+        // Relative URLs (no host): allow
+        if url.host == nil {
+            return .allow
+        }
+
+        // Blob URLs: allow (OWL framework downloads)
+        if url.scheme == "blob" {
+            return .allow
+        }
+
+        // Everything else: open in Safari (UX-27)
+        return .openInSafari(url)
+    }
+
     // MARK: - WKNavigationDelegate
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
@@ -105,41 +150,20 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        guard let url = navigationAction.request.url else {
-            decisionHandler(.cancel)
-            return
-        }
+        let decision = decideNavigation(for: navigationAction.request.url)
 
-        let urlString = url.absoluteString
-
-        // Session expiry detection
-        if urlString.contains("/web/login") {
+        switch decision {
+        case .allow:
+            decisionHandler(.allow)
+        case .sessionExpired:
             onSessionExpired()
             decisionHandler(.cancel)
-            return
+        case .openInSafari(let url):
+            UIApplication.shared.open(url)
+            decisionHandler(.cancel)
+        case .cancel:
+            decisionHandler(.cancel)
         }
-
-        // Same-host: allow
-        if let host = url.host, host.caseInsensitiveCompare(serverHost) == .orderedSame {
-            decisionHandler(.allow)
-            return
-        }
-
-        // Relative URLs (no host): allow
-        if url.host == nil {
-            decisionHandler(.allow)
-            return
-        }
-
-        // Blob URLs: allow (OWL framework downloads)
-        if url.scheme == "blob" {
-            decisionHandler(.allow)
-            return
-        }
-
-        // Everything else: open in Safari (UX-27)
-        UIApplication.shared.open(url)
-        decisionHandler(.cancel)
     }
 
     // MARK: - WKUIDelegate
