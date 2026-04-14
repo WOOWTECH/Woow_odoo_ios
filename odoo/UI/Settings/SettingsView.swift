@@ -230,6 +230,14 @@ struct SettingsView: View {
     }
 }
 
+// MARK: - Preview
+
+#Preview {
+    NavigationStack {
+        SettingsView(onBackClick: {})
+    }
+}
+
 /// Constants for Settings — URLs, email, display names.
 /// Extracted for testability and single source of truth.
 enum SettingsConstants {

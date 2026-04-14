@@ -104,3 +104,14 @@ struct ConfigView: View {
         }
     }
 }
+
+// MARK: - Preview
+
+#Preview {
+    ConfigView(
+        onBackClick: {},
+        onSettingsClick: {},
+        onAddAccountClick: {},
+        onLogout: {}
+    )
+}

@@ -8,12 +8,23 @@ import CommonCrypto
 /// Algorithm: PBKDF2WithHmacSHA256, 600,000 iterations, 16-byte salt, 256-bit hash
 enum PinHasher {
 
+    /// Number of PBKDF2 iterations. 600,000 is the OWASP-recommended minimum for SHA-256,
+    /// balancing brute-force resistance with acceptable verification latency on mobile devices.
     private static let iterations: UInt32 = 600_000
+
+    /// Salt length in bytes. 16 bytes (128 bits) provides sufficient uniqueness
+    /// to prevent rainbow-table and pre-computation attacks across all stored PINs.
     private static let saltLength = 16
-    private static let hashLength = 32  // 256 bits
+
+    /// Derived key length in bytes. 32 bytes (256 bits) matches the output size
+    /// of HMAC-SHA256, ensuring the full hash strength is preserved without truncation.
+    private static let hashLength = 32
 
     // MARK: - Exponential Lockout (same as Android)
 
+    /// Escalating lockout durations indexed by failure tier.
+    /// Each tier triggers after `maxAttemptsPerTier` consecutive failures:
+    /// tier 0 = 30 seconds, tier 1 = 5 minutes, tier 2 = 30 minutes, tier 3+ = 1 hour (cap).
     private static let lockoutDurations: [TimeInterval] = [
         30,       // 5 failures: 30 seconds
         300,      // 10 failures: 5 minutes
@@ -21,7 +32,9 @@ enum PinHasher {
         3_600,    // 20+ failures: 1 hour (max)
     ]
 
-    private static let maxAttemptsPerTier = 5
+    /// Number of failed PIN attempts allowed before the first lockout tier activates.
+    /// Shared with `AuthViewModel` and `SettingsRepository` to keep the threshold in one place.
+    static let maxAttemptsPerTier = 5
 
     /// Returns lockout duration based on cumulative failed attempts.
     /// Matches Android: 30s → 5min → 30min → 1hr (caps at 1hr).

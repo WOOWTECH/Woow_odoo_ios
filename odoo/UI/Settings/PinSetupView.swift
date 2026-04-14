@@ -123,3 +123,21 @@ struct PinSetupView: View {
         }
     }
 }
+
+// MARK: - Preview
+
+#Preview("Set New PIN") {
+    PinSetupView(
+        isChangingPin: false,
+        onPinSet: { _ in },
+        onCancel: {}
+    )
+}
+
+#Preview("Change Existing PIN") {
+    PinSetupView(
+        isChangingPin: true,
+        onPinSet: { _ in },
+        onCancel: {}
+    )
+}

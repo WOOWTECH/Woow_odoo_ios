@@ -33,8 +33,28 @@ final class AuthViewModel: ObservableObject {
         settingsRepository.verifyPin(pin)
     }
 
+    /// Attempts to verify a PIN digit-by-digit. Called each time a digit is entered.
+    /// Returns the result of the attempt once enough digits are entered.
+    func enterPinDigit(_ digit: String, currentPin: inout String) -> PinEntryResult {
+        currentPin += digit
+        guard currentPin.count >= 4 else { return .needMoreDigits }
+
+        if verifyPin(currentPin) {
+            setAuthenticated(true)
+            return .success
+        } else {
+            let remaining = getRemainingAttempts()
+            currentPin = ""
+            if remaining > 0 {
+                return .wrongPin(remainingAttempts: remaining)
+            } else {
+                return .lockedOut
+            }
+        }
+    }
+
     func getRemainingAttempts() -> Int {
-        max(0, 5 - settingsRepository.getFailedAttempts())
+        max(0, PinHasher.maxAttemptsPerTier - settingsRepository.getFailedAttempts())
     }
 
     func isLockedOut() -> Bool {
@@ -46,4 +66,16 @@ final class AuthViewModel: ObservableObject {
         let remaining = end - ProcessInfo.processInfo.systemUptime
         return max(0, Int(remaining))
     }
+}
+
+/// Result of a PIN digit entry attempt.
+enum PinEntryResult {
+    /// More digits are needed to complete the PIN.
+    case needMoreDigits
+    /// PIN was verified successfully.
+    case success
+    /// PIN was incorrect. `remainingAttempts` indicates how many tries remain before lockout.
+    case wrongPin(remainingAttempts: Int)
+    /// Too many failed attempts — the user is locked out.
+    case lockedOut
 }

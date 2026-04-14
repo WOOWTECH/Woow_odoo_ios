@@ -98,27 +98,24 @@ struct PinView: View {
 
     private func onNumberTap(_ number: String) {
         guard pin.count < pinLength else { return }
-        pin += number
         error = nil
 
-        if pin.count >= 4 {
-            if authViewModel.verifyPin(pin) {
-                authViewModel.setAuthenticated(true)
-                onPinVerified()
-            } else {
-                let remaining = authViewModel.getRemainingAttempts()
-                if remaining > 0 {
-                    error = String(format: String(localized: "wrong_pin_%lld"), remaining)
-                    isShaking = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        isShaking = false
-                    }
-                } else {
-                    isLockedOut = true
-                    startLockoutTimer()
-                }
-                pin = ""
+        let result = authViewModel.enterPinDigit(number, currentPin: &pin)
+        switch result {
+        case .needMoreDigits:
+            break
+        case .success:
+            onPinVerified()
+        case .wrongPin(let remaining):
+            error = String(format: String(localized: "wrong_pin_%lld"), remaining)
+            isShaking = true
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(300))
+                isShaking = false
             }
+        case .lockedOut:
+            isLockedOut = true
+            startLockoutTimer()
         }
     }
 
@@ -138,4 +135,14 @@ struct PinView: View {
             }
         }
     }
+}
+
+// MARK: - Preview
+
+#Preview {
+    PinView(
+        authViewModel: AuthViewModel(),
+        onPinVerified: {},
+        onBackClick: {}
+    )
 }

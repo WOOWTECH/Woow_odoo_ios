@@ -83,3 +83,12 @@ struct ColorPickerView: View {
             .onTapGesture { selectedColor = hex }
     }
 }
+
+// MARK: - Preview
+
+#Preview {
+    ColorPickerView(
+        selectedColor: .constant("#6183FC"),
+        onApply: { _ in }
+    )
+}

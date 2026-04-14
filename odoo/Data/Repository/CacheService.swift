@@ -5,6 +5,9 @@ import WebKit
 /// Ported from Android: CacheRepository.kt
 final class CacheService {
 
+    private let bytesPerKB: Int64 = 1024
+    private let bytesPerMB: Int64 = 1024 * 1024
+
     /// Clears app cache directory.
     func clearAppCache() {
         if let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
@@ -26,7 +29,8 @@ final class CacheService {
         await dataStore.removeData(ofTypes: types, for: records)
     }
 
-    /// Calculates cache directory size in bytes.
+    /// Walks the app's `Caches` directory and sums the file sizes of all contained files.
+    /// Returns the total size in bytes, or 0 if the directory cannot be located.
     func calculateCacheSize() -> Int64 {
         guard let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return 0 }
         let enumerator = FileManager.default.enumerator(at: cacheDir, includingPropertiesForKeys: [.fileSizeKey])
@@ -39,12 +43,19 @@ final class CacheService {
         return total
     }
 
-    /// Formats bytes to human-readable string.
-    static func formatSize(_ bytes: Int64) -> String {
+    /// Converts a byte count into a human-readable string using binary units (B, KB, MB).
+    /// Rounds down to the nearest whole unit for KB and MB.
+    func formatSize(_ bytes: Int64) -> String {
         switch bytes {
-        case ..<1024: return "\(bytes) B"
-        case ..<(1024 * 1024): return "\(bytes / 1024) KB"
-        default: return "\(bytes / (1024 * 1024)) MB"
+        case ..<bytesPerKB: return "\(bytes) B"
+        case ..<bytesPerMB: return "\(bytes / bytesPerKB) KB"
+        default: return "\(bytes / bytesPerMB) MB"
         }
+    }
+
+    /// Static convenience overload for contexts without a `CacheService` instance.
+    static func formatSize(_ bytes: Int64) -> String {
+        let service = CacheService()
+        return service.formatSize(bytes)
     }
 }

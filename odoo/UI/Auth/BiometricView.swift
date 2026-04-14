@@ -98,7 +98,7 @@ struct BiometricView: View {
             .deviceOwnerAuthenticationWithBiometrics,
             localizedReason: String(localized: "biometric_reason")
         ) { success, authError in
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 isAnimating = false
                 if success {
                     authViewModel.setAuthenticated(true)
@@ -119,4 +119,14 @@ struct BiometricView: View {
             }
         }
     }
+}
+
+// MARK: - Preview
+
+#Preview {
+    BiometricView(
+        authViewModel: AuthViewModel(),
+        onAuthSuccess: {},
+        onUsePinClick: {}
+    )
 }

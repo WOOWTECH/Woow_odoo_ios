@@ -80,7 +80,7 @@ final class SettingsRepository: SettingsRepositoryProtocol {
             return true
         } else {
             let attempts = incrementFailedAttempts()
-            if attempts >= 5 {
+            if attempts >= PinHasher.maxAttemptsPerTier {
                 let duration = PinHasher.lockoutDuration(failedAttempts: attempts)
                 let lockoutEnd = ProcessInfo.processInfo.systemUptime + duration
                 setLockout(until: lockoutEnd)
