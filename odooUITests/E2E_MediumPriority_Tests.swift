@@ -1324,6 +1324,7 @@ final class E2E_AppLockTests: XCTestCase {
 
         // Navigate to Settings and tap Change PIN
         navigateToSettings()
+        scrollToSecuritySection()
         let changePINButton = app.staticTexts["Change PIN"]
         guard changePINButton.waitForExistence(timeout: 5) else {
             failWithScreenshot(in: self, named: "UX22_no_change_pin", reason: "UX-22: 'Change PIN' must be visible in SECURITY section")
@@ -1331,27 +1332,31 @@ final class E2E_AppLockTests: XCTestCase {
         }
         changePINButton.tap()
 
-        // If current PIN is required, enter 1-1-1-1
-        if app.staticTexts["Enter current PIN"].waitForExistence(timeout: 3)
-            || app.staticTexts["Enter PIN"].waitForExistence(timeout: 3) {
-            for digit in ["1", "1", "1", "1"] { app.buttons[digit].tap() }
+        // Step 1: Enter current PIN 1-1-1-1
+        // App shows "Enter Current PIN" (capitalized, from Localizable.strings)
+        guard app.staticTexts["Enter Current PIN"].waitForExistence(timeout: 5) else {
+            failWithScreenshot(in: self, named: "UX22_no_verify_step", reason: "UX-22: 'Enter Current PIN' must appear for PIN change")
+            return
         }
+        for digit in ["1", "1", "1", "1"] { app.buttons[digit].tap() }
 
-        // Enter new PIN 2-4-6-8
-        if app.staticTexts["Enter new PIN"].waitForExistence(timeout: 3)
-            || app.staticTexts["New PIN"].waitForExistence(timeout: 3)
-            || app.staticTexts["Create PIN"].waitForExistence(timeout: 3) {
-            for digit in ["2", "4", "6", "8"] { app.buttons[digit].tap() }
+        // Step 2: Enter new PIN 2-4-6-8-0-0 (6 digits — PinSetupView requires pinLength)
+        guard app.staticTexts["Enter New PIN"].waitForExistence(timeout: 5) else {
+            failWithScreenshot(in: self, named: "UX22_no_new_pin_step", reason: "UX-22: 'Enter New PIN' must appear after verifying old PIN")
+            return
         }
+        for digit in ["2", "4", "6", "8", "0", "0"] { app.buttons[digit].tap() }
 
-        // Confirm new PIN
-        if app.staticTexts["Confirm PIN"].waitForExistence(timeout: 3)
-            || app.staticTexts["Confirm new PIN"].waitForExistence(timeout: 3) {
-            for digit in ["2", "4", "6", "8"] { app.buttons[digit].tap() }
+        // Step 3: Confirm new PIN
+        guard app.staticTexts["Confirm New PIN"].waitForExistence(timeout: 5) else {
+            failWithScreenshot(in: self, named: "UX22_no_confirm_step", reason: "UX-22: 'Confirm New PIN' must appear after entering new PIN")
+            return
         }
+        for digit in ["2", "4", "6", "8", "0", "0"] { app.buttons[digit].tap() }
 
         // Wait for return to Settings (PIN change success)
         _ = app.staticTexts["SECURITY"].waitForExistence(timeout: 5)
+            || app.staticTexts["Security"].waitForExistence(timeout: 3)
 
         // Relaunch without the -SetTestPIN hook so the new PIN persists in Keychain
         app.terminate()
@@ -1367,12 +1372,14 @@ final class E2E_AppLockTests: XCTestCase {
             return
         }
 
-        // Unlock with the new PIN 2-4-6-8
-        for digit in ["2", "4", "6", "8"] { app.buttons[digit].tap() }
+        // Unlock with the new PIN 2-4-6-8-0-0
+        for digit in ["2", "4", "6", "8", "0", "0"] { app.buttons[digit].tap() }
 
+        let unlocked = app.webViews.firstMatch.waitForExistence(timeout: 10)
+            || app.buttons["line.3.horizontal"].waitForExistence(timeout: 10)
         XCTAssertTrue(
-            app.webViews.firstMatch.waitForExistence(timeout: 10),
-            "UX-22: New PIN 2468 must unlock the app — WebView must appear after successful authentication"
+            unlocked,
+            "UX-22: New PIN 246800 must unlock the app — main screen must appear after successful authentication"
         )
     }
 }

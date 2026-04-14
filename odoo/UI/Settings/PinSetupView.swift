@@ -92,7 +92,11 @@ struct PinSetupView: View {
         pin += "\(digit)"
         error = nil
 
-        if pin.count == pinLength {
+        // For verifyOld: try verification at 4+ digits (PIN can be 4-6 digits).
+        // For enterNew/confirmNew: wait for pinLength digits (user chooses length).
+        if step == .verifyOld && pin.count >= 4 {
+            handlePinComplete()
+        } else if pin.count == pinLength {
             handlePinComplete()
         }
     }

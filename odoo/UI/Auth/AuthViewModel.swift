@@ -34,7 +34,10 @@ final class AuthViewModel: ObservableObject {
     }
 
     /// Attempts to verify a PIN digit-by-digit. Called each time a digit is entered.
-    /// Returns the result of the attempt once enough digits are entered.
+    /// PIN length is 4-6 digits. Tries verification at 4+ digits — if the stored PIN
+    /// is longer (5 or 6 digits), a mismatch at 4 digits returns `.needMoreDigits`
+    /// instead of `.wrongPin` to allow the user to keep entering digits.
+    /// Only counts as a failed attempt when the maximum length (6) is reached.
     func enterPinDigit(_ digit: String, currentPin: inout String) -> PinEntryResult {
         currentPin += digit
         guard currentPin.count >= 4 else { return .needMoreDigits }
@@ -42,14 +45,21 @@ final class AuthViewModel: ObservableObject {
         if verifyPin(currentPin) {
             setAuthenticated(true)
             return .success
+        }
+
+        // PIN didn't match — but if we haven't reached max length (6),
+        // the stored PIN might be longer. Keep accumulating digits.
+        if currentPin.count < 6 {
+            return .needMoreDigits
+        }
+
+        // At max length and still wrong — count as failed attempt
+        let remaining = getRemainingAttempts()
+        currentPin = ""
+        if remaining > 0 {
+            return .wrongPin(remainingAttempts: remaining)
         } else {
-            let remaining = getRemainingAttempts()
-            currentPin = ""
-            if remaining > 0 {
-                return .wrongPin(remainingAttempts: remaining)
-            } else {
-                return .lockedOut
-            }
+            return .lockedOut
         }
     }
 
