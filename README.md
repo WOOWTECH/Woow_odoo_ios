@@ -598,15 +598,81 @@ flowchart TD
     I -->|Yes| M
 ```
 
-### 4. Firebase setup (optional, for push notifications)
-
-1. Create a Firebase project at [console.firebase.google.com](https://console.firebase.google.com)
-2. Add an iOS app with your bundle identifier
-3. Download `GoogleService-Info.plist` and add it to the `odoo/` directory in Xcode (ensure it is added to the `odoo` target)
-4. Upload your APNs authentication key (`.p8` file) to Firebase Console under Project Settings > Cloud Messaging > Apple app configuration
-5. Enable "Push Notifications" capability in Xcode under Signing & Capabilities
+### 4. Firebase setup (for push notifications)
 
 Without Firebase, the app runs normally but will not receive push notifications.
+
+#### 4.0 Credentials Setup Flow
+
+```mermaid
+flowchart LR
+    A[Apple Developer Portal] -->|Create APNs .p8 key| B[APNs .p8 + Key ID + Team ID]
+    B -->|Upload 3 items| C[Firebase Console]
+    C -->|Download| D[GoogleService-Info.plist]
+    D -->|Drag into Xcode| E[iOS App]
+    C -->|Generate| F[Service Account JSON]
+    F -->|Paste into system parameter| G[Odoo Server]
+    E -->|Register fcm_token| G
+    G -->|Send push via FCM| H[Firebase Cloud Messaging]
+    H -->|Relay via APNs| E
+```
+
+#### 4.1 Create the APNs authentication key (one per Apple Developer team)
+
+1. Go to [developer.apple.com/account/resources/authkeys/list](https://developer.apple.com/account/resources/authkeys/list)
+2. Click the **+** button to create a new key
+3. Name it (e.g., `WoowTech FCM APNs Key`)
+4. Check **Apple Push Notifications service (APNs)**
+5. Click **Continue** → **Register**
+6. **Download the `.p8` file** — you can only download it once, keep it safe
+7. Note the **Key ID** (10 characters, shown on the screen)
+8. Find your **Team ID** at [developer.apple.com/account](https://developer.apple.com/account) (top right, 10 characters)
+
+You now have 3 items: `.p8` file, Key ID, Team ID.
+
+#### 4.2 Create a Firebase project
+
+1. Go to [console.firebase.google.com](https://console.firebase.google.com)
+2. Click **Add project** → enter a name (e.g., `woowtech-odoo`)
+3. Disable Google Analytics (not needed) → **Create project**
+
+#### 4.3 Register the iOS app with Firebase
+
+1. In your Firebase project → click the **iOS icon** to add an iOS app
+2. Enter your **Bundle ID** (must match the Xcode bundle ID, e.g., `io.woowtech.odoo`)
+3. App nickname (optional, e.g., `WoowTech Odoo iOS`)
+4. Click **Register app**
+5. **Download `GoogleService-Info.plist`** → drag it into the `odoo/` folder in Xcode
+6. In the Xcode "Choose options" dialog: check **Copy items if needed** and check the **`odoo`** target
+7. Skip "Add Firebase SDK" step (already added via SPM)
+8. Click **Next** → **Next** → **Continue to console**
+
+#### 4.4 Upload APNs key to Firebase
+
+1. In Firebase Console → **Project Settings** (gear icon) → **Cloud Messaging** tab
+2. Scroll to **Apple app configuration** → **APNs Authentication Key** → **Upload**
+3. Upload the `.p8` file from step 4.1
+4. Enter the **Key ID** and **Team ID** from step 4.1
+5. Click **Upload**
+
+#### 4.5 Enable required Xcode capabilities
+
+In Xcode → select `odoo` target → **Signing & Capabilities** tab → **+ Capability**:
+
+1. Add **Push Notifications**
+2. Add **Background Modes** → check **Remote notifications**
+
+Without Background Modes, silent push notifications will not wake the app.
+
+#### 4.6 Verify push notifications work
+
+1. Build and run on a **real iPhone** (push does not work on simulator before iOS 16)
+2. Accept the notification permission prompt
+3. In Firebase Console → **Messaging** → **New campaign** → **Notifications**
+4. Enter test title/body → **Send test message** → paste the FCM token (see Odoo server logs or the app's debug output)
+5. Phone should receive the notification within seconds
+
+If you see the notification, Firebase → APNs → app delivery is working end-to-end.
 
 ### 5. Build and run
 
