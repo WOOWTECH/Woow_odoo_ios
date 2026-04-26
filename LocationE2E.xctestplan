@@ -1,0 +1,39 @@
+{
+  "configurations" : [
+    {
+      "id" : "01234567-89AB-CDEF-0123-456789ABCDEF",
+      "name" : "Default",
+      "options" : {
+        "environmentVariableEntries" : [
+          {
+            "key" : "RUN_LOCATION_E2E",
+            "value" : "1"
+          }
+        ]
+      }
+    }
+  ],
+  "defaultOptions" : {
+  },
+  "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:odoo.xcodeproj",
+        "identifier" : "0435CDDF2F74B70200751CCD",
+        "name" : "odooTests"
+      }
+    },
+    {
+      "selectedTests" : [
+        "E2E_LocationClockInTests\/test_clockIn_recordsNonZeroGPS_via_systray",
+        "E2E_LocationClockInTests\/test_clockOutThenIn_populatesBothGPSColumns"
+      ],
+      "target" : {
+        "containerPath" : "container:odoo.xcodeproj",
+        "identifier" : "0435CDE92F74B70200751CCD",
+        "name" : "odooUITests"
+      }
+    }
+  ],
+  "version" : 1
+}

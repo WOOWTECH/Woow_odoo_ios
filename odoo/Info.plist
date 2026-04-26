@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>WoowTech Odoo records your location when you clock in or clock out so your Odoo attendance record includes the GPS coordinates of where you checked in. Location is sent only to your own Odoo server and never to third parties.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>WoowTech Odoo uses Face ID to secure access to your Odoo account data.</string>
 	<key>NSCameraUsageDescription</key>

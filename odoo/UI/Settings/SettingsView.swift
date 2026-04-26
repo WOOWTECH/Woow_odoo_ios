@@ -79,6 +79,17 @@ struct SettingsView: View {
                 }
             }
 
+            // ── Privacy ──
+            Section(header: Text(String(localized: "settings_location_title"))) {
+                Toggle(
+                    String(localized: "settings_location_title"),
+                    isOn: $viewModel.locationEnabled
+                )
+                Text(String(localized: "settings_location_description"))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
             // ── Language (G1) ──
             Section("Language") {
                 Button {

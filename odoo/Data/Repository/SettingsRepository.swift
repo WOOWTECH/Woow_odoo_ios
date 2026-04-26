@@ -9,6 +9,8 @@ protocol SettingsRepositoryProtocol {
     func setAppLock(_ enabled: Bool)
     func setBiometric(_ enabled: Bool)
     func setReduceMotion(_ enabled: Bool)
+    /// Persists the user's preference for attaching GPS coordinates to clock-in/out events.
+    func updateLocationEnabled(_ enabled: Bool)
     func setPin(_ pin: String) -> Bool
     func verifyPin(_ pin: String) -> Bool
     func removePin()
@@ -56,6 +58,15 @@ final class SettingsRepository: SettingsRepositoryProtocol {
         var settings = secureStorage.getSettings()
         settings.reduceMotion = enabled
         secureStorage.saveSettings(settings)
+    }
+
+    func updateLocationEnabled(_ enabled: Bool) {
+        var settings = secureStorage.getSettings()
+        settings.locationEnabled = enabled
+        secureStorage.saveSettings(settings)
+        // Also persist the standalone key so LocationPermissionGate can read it
+        // without deserialising the full settings blob.
+        secureStorage.saveLocationEnabled(enabled)
     }
 
     func setPin(_ pin: String) -> Bool {

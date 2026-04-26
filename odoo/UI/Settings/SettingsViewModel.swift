@@ -8,6 +8,16 @@ final class SettingsViewModel: ObservableObject {
     @Published var settings: AppSettings
     @Published var cacheSizeText: String = "0 B"
 
+    /// Mirrors `settings.locationEnabled`. Uses a `didSet` observer to persist the
+    /// change through the repository without requiring callers to manipulate `settings`
+    /// directly — mirrors the pattern used by toggleBiometric / toggleReduceMotion.
+    @Published var locationEnabled: Bool = true {
+        didSet {
+            settingsRepo.updateLocationEnabled(locationEnabled)
+            settings.locationEnabled = locationEnabled
+        }
+    }
+
     private let settingsRepo: SettingsRepositoryProtocol
     private let cacheService: CacheService
     private let theme: WoowTheme
@@ -20,7 +30,9 @@ final class SettingsViewModel: ObservableObject {
         self.settingsRepo = settingsRepo
         self.cacheService = cacheService
         self.theme = theme
-        self.settings = settingsRepo.getSettings()
+        let loaded = settingsRepo.getSettings()
+        self.settings = loaded
+        self.locationEnabled = loaded.locationEnabled
         updateCacheSize()
     }
 
