@@ -22,12 +22,16 @@
 //  SKIP POLICY
 //  -----------
 //  Requires `RUN_LOCATION_E2E=1` in the test-process environment to opt in.
-//  All other invocations skip cleanly.
+//  All other invocations skip cleanly. (The bundled `LocationE2E.xctestplan`
+//  sets this for you.)
 //
 //  PREREQUISITES
 //  -------------
-//  1. Odoo 18 reachable at ODOO_TUNNEL with `hr_attendance` installed.
-//  2. `admin` / `admin` credentials valid on ODOO_DB database.
+//  1. Odoo 18 reachable at the URL configured in `TestConfig.plist` (key
+//     `ServerURL`) with `hr_attendance` installed. CI may override via the
+//     `TEST_SERVER_URL` env var (see `SharedTestConfig`).
+//  2. Admin credentials in `TestConfig.plist` (`AdminUser` / `AdminPass`)
+//     valid on the configured database (`Database`).
 //  3. Location permission must be in a state the test can grant:
 //       SIMULATOR — automatic via:
 //         xcrun simctl privacy <SIMCTL_UDID> grant location-always io.woowtech.odoo.debug
@@ -80,7 +84,7 @@ final class E2E_LocationClockInTests: XCTestCase {
     override func setUp() async throws {
         try XCTSkipUnless(
             ProcessInfo.processInfo.environment["RUN_LOCATION_E2E"] == "1",
-            "Location E2E disabled by default. Set RUN_LOCATION_E2E=1 plus ODOO_TUNNEL env var to opt in."
+            "Location E2E disabled by default. Run via LocationE2E.xctestplan, or set RUN_LOCATION_E2E=1."
         )
         continueAfterFailure = false
 

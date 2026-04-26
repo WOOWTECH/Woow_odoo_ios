@@ -1,7 +1,8 @@
 import Foundation
 
 /// JSON-RPC 2.0 client that runs inside the XCUITest process to authenticate with Odoo and
-/// query hr.attendance records. Reads the server URL and database from the test environment.
+/// query hr.attendance records. Reads the server URL and database from `SharedTestConfig`
+/// (single source of truth — `TestConfig.plist`, with env-var override for CI).
 ///
 /// All methods are `async throws` and use `URLSession.shared.data(for:)` (Swift Concurrency).
 /// No Combine or completion-handler patterns are used.
@@ -10,19 +11,17 @@ enum OdooHelper {
     // MARK: - Configuration
 
     /// Base URL of the Odoo server under test.
-    /// Reads `ODOO_TUNNEL` from the test-process environment, falling back to localhost.
-    static let tunnelURL: String = {
-        let raw = ProcessInfo.processInfo.environment["ODOO_TUNNEL"] ?? "http://localhost:8069"
-        // Strip trailing slash so URL composition is always consistent.
-        return raw.hasSuffix("/") ? String(raw.dropLast()) : raw
-    }()
+    ///
+    /// `SharedTestConfig.serverURL` returns a host (e.g. "example.trycloudflare.com");
+    /// we prepend `https://` to match the convention used elsewhere in the test suite
+    /// (see `odooUITests.swift:849` and `E2E_MediumPriority_Tests.swift:553`).
+    static let tunnelURL: String = "https://\(SharedTestConfig.serverURL)"
 
-    /// Odoo database name.
-    static let db: String =
-        ProcessInfo.processInfo.environment["ODOO_DB"] ?? "odoo18_ecpay"
+    /// Odoo database name. Sourced from `SharedTestConfig` (TestConfig.plist).
+    static let db: String = SharedTestConfig.database
 
-    static let user = "admin"
-    static let password = "admin"
+    static let user = SharedTestConfig.adminUser
+    static let password = SharedTestConfig.adminPass
 
     // MARK: - Attendance model
 

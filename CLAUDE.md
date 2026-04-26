@@ -363,6 +363,44 @@ Debug dumps are temporary. Once a test passes reliably:
 - Remove all `print(app.debugDescription)` and `print(springboard.debugDescription)` calls.
 - Keep only the `[NotifStrategy]` log lines — they are useful for CI triage and are not debug noise.
 
+### Test Configuration — Single Source of Truth (MANDATORY)
+
+Test configuration (server URL, database, credentials, etc.) MUST be read from
+`SharedTestConfig` (which reads `odooUITests/TestConfig.plist`, with env-var
+override). Do not introduce ad-hoc `ProcessInfo.processInfo.environment["..."]`
+lookups in test helpers or test cases.
+
+**Required:**
+```swift
+// In a test helper or test case:
+let url = "https://\(SharedTestConfig.serverURL)"
+let db  = SharedTestConfig.database
+let user = SharedTestConfig.adminUser
+```
+
+**Forbidden:**
+```swift
+// Do NOT add new env-var keys for test config:
+let raw = ProcessInfo.processInfo.environment["ODOO_TUNNEL"] ?? "..."
+let db  = ProcessInfo.processInfo.environment["ODOO_DB"]    ?? "..."
+```
+
+**Why:**
+- Single source of truth — when the dev tunnel rotates, you edit one file (`TestConfig.plist`).
+- CI override path already exists — `SharedTestConfig` reads `TEST_SERVER_URL`,
+  `TEST_DB`, `TEST_ADMIN_USER`, `TEST_ADMIN_PASS`, etc. before falling back to
+  the plist. CI sets these env vars; local dev edits the plist.
+- Test plans (`*.xctestplan`) MUST NOT hardcode environment-specific values
+  (tunnel URLs, simulator UDIDs, machine paths). Keep test plans portable —
+  only generic flags like `RUN_LOCATION_E2E=1` belong there.
+
+**If you genuinely need a new test-config key**, add it to `SharedTestConfig`
+(plist key + env override + default fallback) — do NOT bypass it.
+
+This rule exists because a previous PR introduced `ODOO_TUNNEL` and
+`SIMCTL_UDID` env vars hardcoded into a test plan, which broke for everyone
+else and rotted within hours of the next tunnel restart.
+
 ---
 
 ## Development Workflow (MANDATORY)
