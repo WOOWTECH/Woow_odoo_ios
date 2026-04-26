@@ -122,3 +122,14 @@
 
 /* Notifications */
 "notification_channel_messages" = "Odoo 消息";
+
+/* Location permission purpose */
+"NSLocationWhenInUseUsageDescription" = "WoowTech Odoo 会在您打卡上下班时记录您的位置，以便您的 Odoo 考勤记录包含打卡时的 GPS 坐标。位置信息仅发送至您自己的 Odoo 服务器，绝不会发送给第三方。";
+
+/* Location permanent-deny banner */
+"location_denied_message" = "位置访问已被拒绝。请在设置中启用，以在打卡时记录 GPS。";
+"location_open_settings" = "打开设置";
+
+/* Settings -- Privacy */
+"settings_location_title" = "打卡时记录 GPS";
+"settings_location_description" = "启用后，您的 GPS 坐标将附加到 Odoo 服务器上的每条打卡记录中。";

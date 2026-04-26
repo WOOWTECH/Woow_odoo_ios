@@ -214,4 +214,66 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         // Direct synchronous read from HTTPCookieStorage — no async needed (H1 fix)
         apiClient.getSessionId(for: serverUrl)
     }
+
+    // MARK: - DEBUG Test Helpers
+
+#if DEBUG
+    /// Replaces all persisted accounts with a single pre-authenticated test account and marks
+    /// it active, then plants the session cookie in both HTTPCookieStorage and Keychain.
+    ///
+    /// Calling this bypasses the normal authentication flow, making the WebView open directly
+    /// to the Odoo dashboard without a login round-trip. Intended exclusively for XCUITest
+    /// suites that seed a known session via `WOOW_SEED_ACCOUNT` launch-environment JSON.
+    ///
+    /// - Parameter seeded: The account to install, including the raw `sessionCookie` value.
+    func replaceAccountsForTesting(_ seeded: SeededAccount) {
+        let context = persistence.container.viewContext
+
+        // Wipe all existing accounts and their Keychain credentials.
+        let allRequest = OdooAccountEntity.fetchAllRequest()
+        if let existing = try? context.fetch(allRequest) {
+            for entity in existing {
+                let url = entity.serverUrl ?? ""
+                let user = entity.username ?? ""
+                secureStorage.deletePassword(serverUrl: url, username: user)
+                secureStorage.deleteSessionId(serverUrl: url, username: user)
+                context.delete(entity)
+            }
+        }
+
+        // Insert the test account entity.
+        let entity = OdooAccountEntity(context: context)
+        entity.id = UUID().uuidString
+        entity.serverUrl = seeded.serverURL
+        entity.database = seeded.database
+        entity.username = seeded.username
+        entity.displayName = seeded.username
+        entity.userId = 1
+        entity.isActive = true
+        entity.createdAt = Date()
+        try? context.save()
+
+        // Plant the session_id cookie in HTTPCookieStorage so WKWebView picks it up.
+        let host = URL(string: seeded.serverURL.ensureHTTPS)?.host ?? seeded.serverURL
+        let cookie = HTTPCookie(properties: [
+            .name: "session_id",
+            .value: seeded.sessionCookie,
+            .domain: host,
+            .path: "/",
+            .secure: "TRUE",
+        ])
+        if let cookie {
+            HTTPCookieStorage.shared.setCookie(cookie)
+        }
+
+        // Also save to Keychain so session reads via SecureStorage work.
+        secureStorage.saveSessionId(
+            serverUrl: seeded.serverURL.ensureHTTPS,
+            username: seeded.username,
+            sessionId: seeded.sessionCookie
+        )
+
+        print("[TestHook] replaceAccountsForTesting: installed account for \(seeded.username)@\(host)")
+    }
+#endif
 }

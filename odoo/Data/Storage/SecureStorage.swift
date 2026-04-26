@@ -132,6 +132,25 @@ final class SecureStorage: SecureStorageProtocol, Sendable {
         delete(key: "fcm_token")
     }
 
+    // MARK: - Location Enabled Flag
+
+    /// Keychain account key for the location-enabled preference.
+    /// Stored as a standalone "true"/"false" string alongside the full settings JSON blob
+    /// so it can be read in isolation without decoding the entire settings object.
+    let locationEnabledKey = "location_enabled"
+
+    /// Saves the location-enabled preference to Keychain.
+    func saveLocationEnabled(_ enabled: Bool) {
+        save(key: locationEnabledKey, value: enabled ? "true" : "false")
+    }
+
+    /// Reads the location-enabled preference from Keychain.
+    /// Returns `true` (opt-in default) when no value has been stored yet.
+    func getLocationEnabled() -> Bool {
+        guard let raw = get(key: locationEnabledKey) else { return true }
+        return raw == "true"
+    }
+
     // MARK: - App Settings
 
     /// Saves app settings as JSON in Keychain.

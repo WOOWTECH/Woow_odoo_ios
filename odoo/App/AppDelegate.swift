@@ -96,6 +96,24 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             settingsRepo.resetFailedAttempts()
             print("[TestHook] ResetPINLockout applied: failed attempts and lockout timer cleared")
         }
+
+        // Force locationEnabled ON so the geolocation shim is active during location E2E tests.
+        // Without this, a leftover "false" from a prior test run would silently reject all
+        // location requests and the clock-in coords would stay 0.
+        if args.contains("-LocationEnabled") {
+            settingsRepo.updateLocationEnabled(true)
+            print("[TestHook] LocationEnabled applied: location feature is ON")
+        }
+
+        // Seed a pre-authenticated account from WOOW_SEED_ACCOUNT env var (JSON-encoded).
+        // This lets XCUITests bypass the login screen and open directly to the Odoo dashboard.
+        if let json = ProcessInfo.processInfo.environment["WOOW_SEED_ACCOUNT"],
+           !json.isEmpty,
+           let data = json.data(using: .utf8),
+           let seeded = try? JSONDecoder().decode(SeededAccount.self, from: data) {
+            let accountRepo = AccountRepository()
+            accountRepo.replaceAccountsForTesting(seeded)
+        }
     }
 
     /// Wipes Keychain settings and Core Data accounts to produce first-launch state.

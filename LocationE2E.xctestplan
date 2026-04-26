@@ -1,0 +1,44 @@
+{
+  "configurations" : [
+    {
+      "id" : "01234567-89AB-CDEF-0123-456789ABCDEF",
+      "name" : "E2E Location",
+      "options" : {
+        "environmentVariableEntries" : [
+          {
+            "key" : "RUN_LOCATION_E2E",
+            "value" : "1"
+          },
+          {
+            "key" : "ODOO_TUNNEL",
+            "value" : "https://subscriptions-micro-enormous-eternal.trycloudflare.com"
+          },
+          {
+            "key" : "ODOO_DB",
+            "value" : "odoo18_ecpay"
+          },
+          {
+            "key" : "SIMCTL_UDID",
+            "value" : "FB62535F-F418-4228-9608-2E6C062C07BF"
+          }
+        ]
+      }
+    }
+  ],
+  "defaultOptions" : {
+  },
+  "testTargets" : [
+    {
+      "selectedTests" : [
+        "E2E_LocationClockInTests\/test_clockIn_recordsNonZeroGPS_via_systray",
+        "E2E_LocationClockInTests\/test_clockOutThenIn_populatesBothGPSColumns"
+      ],
+      "target" : {
+        "containerPath" : "container:odoo.xcodeproj",
+        "identifier" : "0435CDE92F74B70200751CCD",
+        "name" : "odooUITests"
+      }
+    }
+  ],
+  "version" : 1
+}

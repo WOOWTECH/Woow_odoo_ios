@@ -13,6 +13,9 @@ struct AppSettings: Codable, Equatable {
     var language: AppLanguage = .system
     var failedPinAttempts: Int = 0
     var pinLockoutUntil: TimeInterval? = nil
+    /// Controls whether the app attaches GPS coordinates to clock-in/out events via the JS shim.
+    /// Defaults to `true` (opt-in by default, per v2 spec).
+    var locationEnabled: Bool = true
 }
 
 enum ThemeMode: String, Codable, CaseIterable {

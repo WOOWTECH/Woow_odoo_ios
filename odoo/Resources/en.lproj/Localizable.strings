@@ -122,3 +122,14 @@
 
 /* Notifications */
 "notification_channel_messages" = "Odoo Messages";
+
+/* Location permission purpose (NSLocationWhenInUseUsageDescription — also shown in system prompt) */
+"NSLocationWhenInUseUsageDescription" = "WoowTech Odoo records your location when you clock in or clock out so your Odoo attendance record includes the GPS coordinates of where you checked in. Location is sent only to your own Odoo server and never to third parties.";
+
+/* Location permanent-deny banner */
+"location_denied_message" = "Location access is denied. Enable it in Settings to record GPS with clock-in.";
+"location_open_settings" = "Open Settings";
+
+/* Settings -- Privacy */
+"settings_location_title" = "Record GPS on Clock-In";
+"settings_location_description" = "When enabled, your GPS coordinates are attached to each clock-in and clock-out record on your Odoo server.";
