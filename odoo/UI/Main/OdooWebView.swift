@@ -24,7 +24,11 @@ struct OdooWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.defaultWebpagePreferences.allowsContentJavaScript = true
-        config.preferences.javaScriptCanOpenWindowsAutomatically = true
+        // App Store hardening: do NOT let pages spawn popup windows via
+        // window.open() without user gesture. The `WKUIDelegate` below
+        // still routes legitimate `target="_blank"` clicks back into the
+        // same WebView, so user-initiated links keep working.
+        config.preferences.javaScriptCanOpenWindowsAutomatically = false
 
         // Install the geolocation shim as a WKUserScript so it runs before any
         // page JavaScript, overriding navigator.geolocation with the native bridge.
@@ -240,7 +244,14 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     /// - `"clock-checkout"` → clicks the first button containing "Check out" text.
     #if DEBUG
     private func injectTestAutoTapIfRequested(webView: WKWebView) {
-        guard let selector = ProcessInfo.processInfo.environment["WOOW_TEST_AUTOTAP"],
+        // Belt-and-suspenders gate: even in a Debug binary the JS-injection
+        // hook is inert unless the runtime `-WoowTestRunner` marker is also
+        // present. Without this second factor, `WOOW_TEST_AUTOTAP` would
+        // permit arbitrary script execution against any page the WebView
+        // has loaded — equivalent to RCE in a shipped binary. App Store
+        // Review Guideline 2.3.1 + CLAUDE.md § "Debug Test Hooks".
+        guard TestHookGate.testHooksEnabled,
+              let selector = ProcessInfo.processInfo.environment["WOOW_TEST_AUTOTAP"],
               !selector.isEmpty else { return }
 
         // Delay slightly so OWL has time to render the systray after page load.

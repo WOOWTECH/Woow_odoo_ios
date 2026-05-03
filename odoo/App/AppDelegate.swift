@@ -60,8 +60,15 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     ///   so biometric/PIN gate tests do not need to toggle the Settings switch.
     /// - `-ResetPINLockout YES`: Clears failed PIN attempts and lockout timer so
     ///   PIN lockout tests start from a clean state.
+    ///
+    /// The body is gated by `TestHookGate.testHooksEnabled` (DEBUG build AND
+    /// `-WoowTestRunner` launch arg). Even a misconfigured CI archive that
+    /// shipped a Debug binary would not respond to any hook here without the
+    /// runtime marker. Required by CLAUDE.md § "Debug Test Hooks — Naming,
+    /// Gating & Registry (MANDATORY)".
     #if DEBUG
     private func processTestLaunchArguments() {
+        guard TestHookGate.testHooksEnabled else { return }
         let args = ProcessInfo.processInfo.arguments
 
         if args.contains("-ResetAppState") {
@@ -114,6 +121,56 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             let accountRepo = AccountRepository()
             accountRepo.replaceAccountsForTesting(seeded)
         }
+
+        // Pre-seed app-lock + biometric/PIN state so XCUITests can land
+        // directly on `BiometricView` / `PinView` for visual verification.
+        //   WOOW_TEST_FORCE_BIOMETRIC=1     → app lock ON + biometric ON
+        //   WOOW_TEST_FORCE_PIN=<4-6 digits> → app lock ON + PIN set + hash stored
+        applyDebugAuthSeeding()
+    }
+
+    /// Applies test-only auth seeding when `TestHookGate.testHooksEnabled`.
+    /// Extracted so the production `setupTestHooks` body remains short and
+    /// easy to audit.
+    private func applyDebugAuthSeeding() {
+        let env = ProcessInfo.processInfo.environment
+        let needsBiometric = env["WOOW_TEST_FORCE_BIOMETRIC"] == "1"
+        let pinValue = env["WOOW_TEST_FORCE_PIN"]
+        let needsPin = !(pinValue ?? "").isEmpty
+
+        guard needsBiometric || needsPin else { return }
+
+        var settings = SecureStorage.shared.getSettings()
+        if needsBiometric {
+            settings.appLockEnabled = true
+            settings.biometricEnabled = true
+            print("[TestHook] WOOW_TEST_FORCE_BIOMETRIC: app lock + biometric ON")
+        }
+        if needsPin, let pin = pinValue {
+            settings.appLockEnabled = true
+            // Skip the expensive PBKDF2 (600k iterations) if a PIN with
+            // the same hash is already stored — keeps debug-build cold-
+            // start fast for developers who run with the env var set.
+            let settingsRepo = SettingsRepository()
+            if !settingsRepo.verifyPin(pin) {
+                _ = settingsRepo.setPin(pin)
+                print("[TestHook] WOOW_TEST_FORCE_PIN: PIN set (length=\(pin.count))")
+            } else {
+                print("[TestHook] WOOW_TEST_FORCE_PIN: PIN already set; skipping PBKDF2")
+            }
+        }
+        SecureStorage.shared.saveSettings(settings)
+
+        // Both auth screens require an account to exist. Seed a single
+        // stub once for whichever hook is active.
+        let stub = SeededAccount(
+            serverURL: "https://stub.example.invalid",
+            database: "stub",
+            username: "stub",
+            sessionCookie: "stub",
+        )
+        AccountRepository().replaceAccountsForTesting(stub)
+        print("[TestHook] stub account seeded for auth-screen routing")
     }
 
     /// Wipes Keychain settings and Core Data accounts to produce first-launch state.

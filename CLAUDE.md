@@ -265,6 +265,94 @@ Every milestone MUST follow these steps in order. Do NOT skip any step. Do NOT c
 
 ---
 
+## Debug Test Hooks — Naming, Gating & Registry (MANDATORY)
+
+App Store Review Guideline **2.3.1** prohibits hidden/dormant/undocumented
+features in shipping binaries. To make this enforceable by CI rather than
+by code review, ALL debug-only env vars, launch arguments, and Info.plist
+overrides MUST follow these rules.
+
+### Required prefixes
+
+Every debug-only key MUST start with one of two prefixes:
+
+- `WOOW_TEST_*` — runtime test hooks (e.g. `WOOW_TEST_FORCE_BIOMETRIC`,
+  `WOOW_TEST_FORCE_PIN`, `WOOW_TEST_AUTOTAP`, `WOOW_TEST_THEME_COLOR`)
+- `WOOW_SEED_*` — pre-seeded test fixtures (e.g. `WOOW_SEED_ACCOUNT`)
+
+NO other prefix is permitted (`DEBUG_*`, `INTERNAL_*`, `QA_*`, ad-hoc
+names like `ODOO_TUNNEL`, etc.).
+
+### Required gating
+
+Every read of a `WOOW_TEST_*` / `WOOW_SEED_*` key MUST be gated behind
+`TestHookGate.testHooksEnabled` (`odoo/App/TestHookGate.swift`). The gate
+is a belt-and-suspenders check: `#if DEBUG` AND the `-WoowTestRunner`
+launch argument. Either alone is insufficient.
+
+```swift
+// REQUIRED
+guard TestHookGate.testHooksEnabled else { return }
+if let value = ProcessInfo.processInfo.environment["WOOW_TEST_FORCE_PIN"] {
+    applyDebugSeed(pin: value)
+}
+
+// FORBIDDEN — bare #if DEBUG with no runtime gate
+#if DEBUG
+if let value = ProcessInfo.processInfo.environment["WOOW_TEST_FORCE_PIN"] {
+    applyDebugSeed(pin: value)
+}
+#endif
+```
+
+### Required registry — `scripts/audit_test_hook_naming.sh`
+
+Naming convention alone is not sufficient. The audit script holds an
+explicit registry (`KNOWN_HOOKS`) listing every hook that exists. The
+script enforces TWO directions:
+
+1. **Source → registry**: greps source for any `WOOW_TEST_*` /
+   `WOOW_SEED_*` reference and FAILS if it is not in `KNOWN_HOOKS`.
+   This catches "someone added a new hook but forgot to register it".
+2. **Registry → release binary**: at archive time
+   (`scripts/audit_release_archive.sh`) greps the signed IPA for every
+   string in `KNOWN_HOOKS` and FAILS if any are present. This catches
+   "a debug-only code path leaked into the production binary".
+
+Together the two directions form a closed loop: every hook is known,
+every known hook is gated, every gated hook is absent from Release.
+
+### When you add a new hook — checklist
+
+1. **Name** it `WOOW_TEST_<purpose>` or `WOOW_SEED_<purpose>` — never any
+   other prefix.
+2. **Gate** every read behind `guard TestHookGate.testHooksEnabled else { ... }`.
+3. **Register** the exact key in the `KNOWN_HOOKS` array at the top of
+   `scripts/audit_test_hook_naming.sh`. Without this step the
+   source-side audit blocks your PR.
+4. **Test** — add an inertness test in `odooTests/TestHookGateTest.swift`
+   asserting the hook is a no-op when the gate returns false.
+5. **XCUITest** target MUST set `-WoowTestRunner` in
+   `XCUIApplication.launchArguments` (the standard test setUp helper
+   already does this — do not bypass it).
+
+### Why a registry instead of a wildcard?
+
+A pure prefix wildcard (`WOOW_TEST_|WOOW_SEED_`) would catch leaks of
+known hooks but would silently let an attacker add a new hook in a PR
+without anyone noticing — the wildcard would just absorb it. The
+registry forces every new hook to surface in a script diff, which is
+the part a human reviewer actually reads.
+
+### Why this rule exists
+
+The 2026-05-02 adversarial review found `WOOW_SEED_ACCOUNT` and
+`WOOW_TEST_AUTOTAP` un-gated, after the 2026-04-28 hardening had already
+gated 4 sibling hooks. The fix-by-fix review caught it, but a registered
++ gated audit catches it at commit time.
+
+---
+
 ## XCUITest Development Process (MANDATORY)
 
 These rules apply whenever writing or modifying XCUITests, especially those that interact with Springboard, the notification center, or any system UI.
