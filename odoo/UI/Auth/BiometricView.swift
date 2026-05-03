@@ -6,6 +6,9 @@ import SwiftUI
 /// Ported from Android: BiometricScreen.kt
 struct BiometricView: View {
     @ObservedObject var authViewModel: AuthViewModel
+    /// Observes the user's theme color so the icon + button tints reflect
+    /// the current theme (UX-48). See `WoowTheme.swift`.
+    @ObservedObject private var theme = WoowTheme.shared
     let onAuthSuccess: () -> Void
     let onUsePinClick: () -> Void
 
@@ -19,7 +22,7 @@ struct BiometricView: View {
             // Fingerprint/Face icon
             Image(systemName: biometricIcon)
                 .font(.system(size: 64))
-                .foregroundStyle(WoowColors.primaryBlue)
+                .foregroundStyle(theme.primaryColor)
                 .scaleEffect(isAnimating ? 1.1 : 1.0)
                 .animation(.easeInOut(duration: 0.3), value: isAnimating)
 
@@ -51,7 +54,7 @@ struct BiometricView: View {
                 .padding()
             }
             .buttonStyle(.borderedProminent)
-            .tint(WoowColors.primaryBlue)
+            .tint(theme.primaryColor)
             .clipShape(RoundedRectangle(cornerRadius: 16))
 
             // Use PIN fallback — NO skip button (UX-14)

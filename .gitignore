@@ -23,9 +23,6 @@ Package.resolved
 Pods/
 Podfile.lock
 
-# Firebase
-GoogleService-Info.plist
-
 # OS
 .DS_Store
 *.swp
