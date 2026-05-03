@@ -300,6 +300,12 @@ final class SecureStorageTests: XCTestCase {
         super.tearDown()
         storage.deletePassword(serverUrl: "https://test.com", username: "test-account")
         storage.deletePinHash()
+        // CLAUDE.md "Test Independence" — `test_saveAndGetSettings_roundTrips`
+        // writes themeColor=#FF0000 to the simulator's keychain. Without
+        // this restore, the next test class (`SettingsViewModelTests`)
+        // sees the polluted value and `test_initialState_loadsSettings`
+        // fails. Restore to the AppSettings default.
+        storage.saveSettings(AppSettings())
     }
 
     func test_saveAndGetPassword_givenValidData_roundTrips() {

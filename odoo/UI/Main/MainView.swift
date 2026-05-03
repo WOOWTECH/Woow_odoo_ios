@@ -5,6 +5,11 @@ import SwiftUI
 /// Ported from Android: MainScreen.kt
 struct MainView: View {
     @StateObject private var viewModel = MainViewModel()
+    /// Observes the theme so the toolbar background re-renders when the user
+    /// picks a different color in Settings → Theme Color (UX-48). Without this,
+    /// `.toolbarBackground(WoowColors.primaryBlue, ...)` was hardcoded — the
+    /// preview circle in Settings updated but the actual header chrome did not.
+    @ObservedObject private var theme = WoowTheme.shared
     let onMenuClick: () -> Void
     let onSessionExpired: () -> Void
 
@@ -57,9 +62,15 @@ struct MainView: View {
                     }
                 }
             }
-            .toolbarBackground(WoowColors.primaryBlue, for: .navigationBar)
+            .toolbarBackground(theme.primaryColor, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            // Adaptive text scheme: hardcoding `.dark` (white text) gives
+            // unreadable white-on-light when the user picks a light theme
+            // color (yellow, cream). `theme.toolbarTextScheme` samples the
+            // chosen color's WCAG luminance and flips between `.dark`
+            // (white) and `.light` (black) to maintain ≥4.5:1 contrast
+            // (Apple HIG / WCAG 2.1 SC 1.4.3).
+            .toolbarColorScheme(theme.toolbarTextScheme, for: .navigationBar)
         }
         .onAppear {
             viewModel.loadActiveAccount()

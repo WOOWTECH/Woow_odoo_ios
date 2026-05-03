@@ -6,6 +6,9 @@ import SwiftUI
 /// UX-67 through UX-70.
 struct ConfigView: View {
     @StateObject private var viewModel = ConfigViewModel()
+    /// Observes the user's theme color so the profile bubble background
+    /// reflects the current theme (UX-48). See `WoowTheme.swift`.
+    @ObservedObject private var theme = WoowTheme.shared
     let onBackClick: () -> Void
     let onSettingsClick: () -> Void
     let onAddAccountClick: () -> Void
@@ -24,7 +27,7 @@ struct ConfigView: View {
                             Text(String(account.displayName.prefix(1)).uppercased())
                                 .font(.title2).fontWeight(.bold)
                                 .frame(width: 50, height: 50)
-                                .background(WoowColors.primaryBlue.opacity(0.2))
+                                .background(theme.primaryColor.opacity(0.2))
                                 .clipShape(Circle())
                             VStack(alignment: .leading) {
                                 Text(account.displayName).font(.headline)

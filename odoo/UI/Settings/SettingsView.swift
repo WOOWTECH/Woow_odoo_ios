@@ -4,6 +4,9 @@ import SwiftUI
 /// UX-47 through UX-57, UX-58, UX-82 (section order matches Android).
 struct SettingsView: View {
     @StateObject private var viewModel = SettingsViewModel()
+    /// Observes the user's theme color so the section icons reflect the
+    /// current theme (UX-48). See `WoowTheme.swift`.
+    @ObservedObject private var theme = WoowTheme.shared
     let onBackClick: () -> Void
 
     @State private var showColorPicker = false
@@ -63,7 +66,7 @@ struct SettingsView: View {
                             Label("PIN Code", systemImage: "lock.fill")
                             Spacer()
                             Text(viewModel.settings.pinEnabled ? String(localized: "Change PIN") : String(localized: "Set PIN"))
-                                .foregroundStyle(WoowColors.primaryBlue)
+                                .foregroundStyle(theme.primaryColor)
                                 .font(.caption)
                         }
                     }

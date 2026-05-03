@@ -3,7 +3,12 @@ import Foundation
 /// App-wide settings stored in UserDefaults/Keychain.
 /// Ported from Android: AppSettings.kt
 struct AppSettings: Codable, Equatable {
-    var themeColor: String = "#6183FC"
+    /// Brand-default theme color (`#6183FC`). Surfaced as a static so tests
+    /// and `WoowTheme` can refer to "the production default" without
+    /// drifting if the value ever needs to change.
+    static let defaultThemeColor: String = "#6183FC"
+
+    var themeColor: String = AppSettings.defaultThemeColor
     var themeMode: ThemeMode = .system
     var reduceMotion: Bool = false
     var appLockEnabled: Bool = false
