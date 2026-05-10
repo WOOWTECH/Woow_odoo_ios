@@ -31,3 +31,8 @@ Podfile.lock
 # IDE
 .idea/
 .vscode/
+
+# BMad — personal/generated; project-shared config (_bmad/config.yaml,
+# _bmad/module-help.csv, _bmad/bmm/) stays tracked.
+_bmad/config.user.yaml
+_bmad-output/
