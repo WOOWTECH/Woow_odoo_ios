@@ -120,6 +120,7 @@
 				0435CDCD2F74B70100751CCD /* Sources */,
 				0435CDCE2F74B70100751CCD /* Frameworks */,
 				0435CDCF2F74B70100751CCD /* Resources */,
+				04AD17AC0DE0000000000001 /* Audit debug-hook leaks (Release) */,
 			);
 			buildRules = (
 			);
@@ -254,6 +255,30 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		04AD17AC0DE0000000000001 /* Audit debug-hook leaks (Release) */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/scripts/audit_release_archive.sh",
+				"$(BUILT_PRODUCTS_DIR)/$(PRODUCT_NAME).app/$(PRODUCT_NAME)",
+			);
+			name = "Audit debug-hook leaks (Release)";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ \"$CONFIGURATION\" != \"Release\" ]; then\n    echo \"Skipping debug-hook audit (configuration: $CONFIGURATION)\"\n    exit 0\nfi\n\"$SRCROOT/scripts/audit_release_archive.sh\" \"$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		0435CDCD2F74B70100751CCD /* Sources */ = {
