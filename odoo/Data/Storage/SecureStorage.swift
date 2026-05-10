@@ -198,9 +198,7 @@ final class SecureStorage: SecureStorageProtocol, Sendable {
         }
 
         if status != errSecSuccess {
-            #if DEBUG
-            print("[SecureStorage] Failed to save key=\(key): OSStatus \(status)")
-            #endif
+            AppLogger.data.error("SecureStorage failed to save key=\(key): OSStatus \(status, privacy: .public)")
             return false
         }
         return true

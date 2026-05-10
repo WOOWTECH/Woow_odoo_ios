@@ -54,9 +54,7 @@ enum NotificationService {
 
         UNUserNotificationCenter.current().add(request) { error in
             if let error {
-                #if DEBUG
-                print("[NotificationService] Failed to show notification: \(error)")
-                #endif
+                AppLogger.push.error("Failed to show notification: \(error.localizedDescription, privacy: .public)")
             }
         }
     }

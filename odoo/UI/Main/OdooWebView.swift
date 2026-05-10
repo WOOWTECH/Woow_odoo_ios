@@ -362,11 +362,9 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         })();
         """
         webView.evaluateJavaScript(js) { _, error in
-            #if DEBUG
             if let error {
-                print("[OdooWebView] OWL layout fix failed: \(error.localizedDescription)")
+                AppLogger.webview.error("OWL layout fix failed: \(error.localizedDescription, privacy: .public)")
             }
-            #endif
         }
     }
 }

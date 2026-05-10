@@ -126,7 +126,7 @@ final class WoowTheme: ObservableObject {
     @discardableResult
     func setPrimaryColor(hex: String) -> Bool {
         guard WoowTheme.isValidHex(hex) else {
-            print("⚠️ [WoowTheme] rejected invalid hex \(hex)")
+            AppLogger.theme.warning("rejected invalid hex \(hex, privacy: .public)")
             return false
         }
         primaryColor = Color(hex: hex)

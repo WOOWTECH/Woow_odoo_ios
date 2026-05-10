@@ -50,7 +50,7 @@ final class PersistenceController: @unchecked Sendable {
                 fatalError("Core Data failed to load: \(error)")
                 #else
                 // Release: log error and flag for graceful degradation
-                print("[ERROR] Core Data failed to load: \(error)")
+                AppLogger.data.fault("Core Data failed to load: \(error.localizedDescription, privacy: .public)")
                 #endif
             }
         }

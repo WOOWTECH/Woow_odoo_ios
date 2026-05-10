@@ -54,9 +54,7 @@ final class PushTokenRepository: PushTokenRepositoryProtocol {
                     ]
                 )
             } catch {
-                #if DEBUG
-                print("[PushTokenRepository] Failed to register token with \(account.serverUrl): \(error)")
-                #endif
+                AppLogger.push.error("Failed to register token with \(account.serverUrl): \(error.localizedDescription, privacy: .public)")
             }
         }
     }
@@ -75,13 +73,9 @@ final class PushTokenRepository: PushTokenRepositoryProtocol {
                 args: [],
                 kwargs: ["fcm_token": token]
             )
-            #if DEBUG
-            print("[PushTokenRepository] Token unregistered from \(serverUrl)")
-            #endif
+            AppLogger.push.info("Token unregistered from \(serverUrl)")
         } catch {
-            #if DEBUG
-            print("[PushTokenRepository] Failed to unregister token from \(serverUrl): \(error)")
-            #endif
+            AppLogger.push.error("Failed to unregister token from \(serverUrl): \(error.localizedDescription, privacy: .public)")
         }
     }
 
