@@ -427,14 +427,94 @@ final class FCMPushE2ETests: XCTestCase {
             }
             return false
         }
+
+        // R-05 Phase A: wipe the notification center BEFORE every test so a
+        // stale "E2E-fcm-*" entry from a prior run can never satisfy our
+        // unique-body matcher and turn a real delivery failure into a false
+        // pass. This is the bias-elimination half of R-05; the survival
+        // half (app-state assert) lives in tearDown below.
+        _clearNotificationCenter()
     }
 
     override func tearDown() {
+        // R-05 Phase A: app crash-survival assertion. Any test that returns
+        // with the AUT no longer in `.runningForeground` is treated as a
+        // hard failure even if the notification matcher already passed —
+        // a push that arrives but takes the iOS app down is still a P0
+        // defect for the H' pipeline.
+        //
+        // We capture state into a local first so the message can name the
+        // observed state (helps triage when the runner logs only the first
+        // failing assertion).
+        if let app = app {
+            let endState = app.state
+            XCTAssertEqual(
+                endState,
+                .runningForeground,
+                "iOS app crashed or backgrounded during test (final state=\(endState.rawValue)). "
+                + "Expected .runningForeground (rawValue=4). A crash here means the push payload "
+                + "or the in-app handler killed the process — investigate AppDelegate "
+                + "didReceiveRemoteNotification + the FCM background-mode entitlement."
+            )
+        }
+
         // Do NOT terminate the app here — the FCM registration we triggered
         // benefits from the app remaining alive so the OS doesn't drop the
         // background push channel before the next manual test or operator
         // inspection. Test cleanup is deliberately minimal.
         super.tearDown()
+    }
+
+    // MARK: - R-05 Phase A: notification-center hygiene
+
+    /// Wipes any leftover notifications from the iOS notification center
+    /// so per-test unique-body matchers can never be satisfied by stale
+    /// entries from a prior test run.
+    ///
+    /// Implementation notes:
+    /// - Pull down from the very top of the springboard to surface the
+    ///   notification center, then look for the "Clear" / "Clear All
+    ///   Notifications" affordance. If present, tap it.
+    /// - If no Clear button is found (notification center already empty,
+    ///   or iOS version uses a different label), best-effort dismiss by
+    ///   pressing the home button. We deliberately do NOT XCTFail here —
+    ///   an empty center is the desired end state and matches the goal.
+    /// - This helper is main-thread-safe via the implicit MainActor on
+    ///   all XCUI* calls. Total wall time is bounded (~2s typical, ≤4s).
+    private func _clearNotificationCenter() {
+        // Surface notification center.
+        let top = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01))
+        let mid = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
+        top.press(forDuration: 0.1, thenDragTo: mid)
+        Thread.sleep(forTimeInterval: 0.5)
+
+        // Try the modern "Clear All Notifications" pill first; fall back
+        // to the older "Clear" label. We give each label a tight 1s
+        // existence window — we are NOT willing to slow every test by
+        // many seconds for a best-effort cleanup.
+        let clearLabels = [
+            "Clear All Notifications",
+            "Clear All",
+            "Clear",
+        ]
+        for label in clearLabels {
+            let btn = springboard.buttons[label]
+            if btn.waitForExistence(timeout: 1) {
+                btn.tap()
+                Thread.sleep(forTimeInterval: 0.3)
+                // Some iOS variants present a confirm sheet — accept it.
+                let confirm = springboard.buttons["Clear"]
+                if confirm.waitForExistence(timeout: 0.5) {
+                    confirm.tap()
+                }
+                break
+            }
+        }
+
+        // Always dismiss notification center so the next test starts from
+        // the home screen rather than the pull-down sheet.
+        XCUIDevice.shared.press(.home)
+        Thread.sleep(forTimeInterval: 0.5)
     }
 
     @MainActor
