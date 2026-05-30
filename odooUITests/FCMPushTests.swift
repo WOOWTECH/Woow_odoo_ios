@@ -517,13 +517,46 @@ final class FCMPushE2ETests: XCTestCase {
         Thread.sleep(forTimeInterval: 0.5)
     }
 
+    /// Broadcast trigger types covered by the batched E2E test.
+    ///
+    /// Each case maps to one row in the I/O Matrix (B-1..B-5) and is
+    /// posted via a dedicated `_post*` helper. We model triggers as a
+    /// strong type so the switch in `_postTrigger` is exhaustive at the
+    /// compile level — adding a new broadcast path forces the test to
+    /// be extended.
+    fileprivate enum BroadcastTrigger: String, CaseIterable {
+        case recordMention   = "B-1-record-mention"
+        case channelMention  = "B-2-channel-mention"
+        case directMessage   = "B-3-direct-message"
+        case followerPost    = "B-4-follower-post"
+        case activityAssign  = "B-5-activity-assign"
+    }
+
+    /// R-05 Phase B: batched coverage of all 5 FCM broadcast triggers.
+    ///
+    /// Runs login + FCM registration ONCE, then iterates B-1..B-5 with
+    /// per-trigger soft-fail. Each sub-trigger emits a unique body marker
+    /// (`E2E-<trigger>-<unix-ts>`) so notification matching can never be
+    /// satisfied by a stale entry from another sub-trigger. Failed
+    /// sub-triggers attach a springboard screenshot for visual evidence.
+    ///
+    /// Acceptance criterion: the test FAILS only when at least one
+    /// sub-trigger fails; the failure message includes the per-trigger
+    /// pass/fail map so triage can immediately see which broadcast path
+    /// regressed (e.g. "Broadcast triggers failed: [B-3-direct-message]").
+    ///
+    /// This method intentionally replaces the prior single-trigger test
+    /// `test_FCM_E2E_loginAndChatterMentionDeliversNotificationOnDevice`
+    /// (covered only channel mention). Rationale: 5 separate XCTestCases
+    /// would each pay the ~30s login + ~30s registration tax, yielding
+    /// ~5min of test setup overhead vs the batched ~1min.
     @MainActor
-    func test_FCM_E2E_loginAndChatterMentionDeliversNotificationOnDevice() {
+    func test_FCM_E2E_all_broadcast_triggers() {
         let serverURL = TestConfig.serverURL
 
-        // ── Step 1: Launch app & log in ──────────────────────────────
+        // ── Step 1: Launch app & log in (one-time) ───────────────────
         app.launch()
-        app.activate()  // surface the permission dialog if it's queued
+        app.activate()
 
         let loginField = app.textFields["example.odoo.com"]
         if loginField.waitForExistence(timeout: 5) {
@@ -534,10 +567,7 @@ final class FCMPushE2ETests: XCTestCase {
                 password: TestConfig.adminPass
             )
         }
-
-        // Trigger UI interruption monitor by interacting with the app once
-        // after login (XCUITest only fires monitors when the AUT receives focus).
-        app.tap()
+        app.tap()  // surface UI interruption monitor for the permission dialog
 
         let mainScreenLoaded = app.buttons["line.3.horizontal"].waitForExistence(timeout: 15)
         XCTAssertTrue(
@@ -545,10 +575,7 @@ final class FCMPushE2ETests: XCTestCase {
             "Login failed: main screen (hamburger button) never loaded after credentials submitted"
         )
 
-        // ── Step 2: Wait for FCM device registration ─────────────────
-        // Poll Odoo via JSON-RPC every 2s for up to 30s, checking for a row
-        // in woow_fcm_device for admin (user_id=2). Polling is more reliable
-        // than a fixed sleep because registration timing varies with network.
+        // ── Step 2: Wait for FCM device registration (one-time) ──────
         let regDeadline = Date().addingTimeInterval(30)
         var devicesFound = 0
         while Date() < regDeadline {
@@ -564,54 +591,355 @@ final class FCMPushE2ETests: XCTestCase {
             + "register_device POST never reached Odoo. Check Settings → Odoo → Notifications."
         )
 
-        // ── Step 3a: Background the app BEFORE posting mention ───────
-        // CRITICAL: when the app is in foreground, iOS suppresses notification
-        // banners — the push arrives but is routed to
-        // userNotificationCenter(_:willPresent:) in-app instead of being shown
-        // in notification center. To verify the user-visible delivery, the app
-        // must be backgrounded so the OS routes the notification to the lock
-        // screen / notification center the way a real user would see it.
-        //
-        // We use the home button press to background the app. This puts the
-        // app into the background just before the chatter mention is posted,
-        // ensuring the resulting push notification surfaces as a banner /
-        // notification-center entry that XCUITest can find via springboard.
+        // ── Step 3: Background app so banners surface in notification center
         XCUIDevice.shared.press(.home)
-        Thread.sleep(forTimeInterval: 1.0)  // let the background transition settle
+        Thread.sleep(forTimeInterval: 1.0)
 
-        // ── Step 3b: Post chatter mention as 'demo' tagging admin ────
-        let uniqueBody = "E2E-fcm-\(Int(Date().timeIntervalSince1970))"
-        let posted = _postChatterMentionAsDemo(
-            serverURL: serverURL,
-            channelId: 1,                  // #general
-            mentionedPartnerId: 3,         // Mitchell Admin
-            mentionedName: "Mitchell Admin",
-            uniqueBody: uniqueBody
-        )
-        XCTAssertTrue(posted, "Failed to post chatter mention via demo user JSON-RPC")
+        // ── Step 4: Iterate all 5 broadcast triggers, collect per-trigger results
+        var results: [String: Bool] = [:]
+        var perTriggerError: [String: String] = [:]
 
-        // ── Step 4: Open notification center via swipe-down ──────────
-        let topOfScreen = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01))
-        let middleOfScreen = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        topOfScreen.press(forDuration: 0.1, thenDragTo: middleOfScreen)
+        for trigger in BroadcastTrigger.allCases {
+            // Wipe notification center between sub-triggers so a successful
+            // B-1 entry can never satisfy the B-2 matcher (and so on).
+            // Cheap: the helper is bounded ~2s and we run it 4× (after B-1..B-4).
+            // We deliberately skip the wipe before the FIRST trigger because
+            // setUp() already did one.
+            if results.count > 0 {
+                _clearNotificationCenter()
+            }
 
-        // ── Step 5: Assert notification appears within 5s ────────────
-        let notificationPredicate = NSPredicate(format: "label CONTAINS[c] %@", uniqueBody)
-        let notification = springboard.otherElements.matching(notificationPredicate).firstMatch
-        let appeared = notification.waitForExistence(timeout: 5)
-
-        if !appeared {
-            // Snapshot the springboard so the failure has visual evidence.
-            let screenshot = springboard.screenshot()
-            let attachment = XCTAttachment(screenshot: screenshot)
-            attachment.name = "notification-center-at-failure"
-            attachment.lifetime = .keepAlways
-            add(attachment)
+            let marker = "E2E-\(trigger.rawValue)-\(Int(Date().timeIntervalSince1970))"
+            do {
+                try _postTrigger(trigger, serverURL: serverURL, marker: marker)
+                let appeared = _waitForNotification(containing: marker, timeout: 30)
+                results[trigger.rawValue] = appeared
+                if !appeared {
+                    // Attach a springboard screenshot for the specific failed
+                    // sub-trigger — we want one piece of visual evidence per
+                    // failure, not per-test.
+                    let shot = springboard.screenshot()
+                    let attachment = XCTAttachment(screenshot: shot)
+                    attachment.name = "notification-center-fail-\(trigger.rawValue)"
+                    attachment.lifetime = .keepAlways
+                    add(attachment)
+                    perTriggerError[trigger.rawValue] = "no notification with marker '\(marker)' within 30s"
+                }
+            } catch {
+                results[trigger.rawValue] = false
+                perTriggerError[trigger.rawValue] = "post helper threw: \(error)"
+            }
         }
-        XCTAssertTrue(
-            appeared,
-            "FCM push notification containing '\(uniqueBody)' did not appear in notification "
-            + "center within 5s of chatter mention. devices_registered=\(devicesFound)"
+
+        // ── Step 5: Synthesize verdict ───────────────────────────────
+        let failed = results.filter { !$0.value }.map { $0.key }.sorted()
+        let summary = BroadcastTrigger.allCases
+            .map { "\($0.rawValue)=\(results[$0.rawValue] == true ? "PASS" : "FAIL")" }
+            .joined(separator: ", ")
+        if !failed.isEmpty {
+            let errorDetail = failed
+                .map { "\($0): \(perTriggerError[$0] ?? "unknown")" }
+                .joined(separator: " | ")
+            FCMLogCapture.captureStructuredLogsOnFailure(app: app, testCase: self)
+            XCTFail(
+                "R-05 Phase B: \(failed.count)/\(BroadcastTrigger.allCases.count) broadcast triggers failed. "
+                + "Summary: [\(summary)]. Details: \(errorDetail). "
+                + "devices_registered=\(devicesFound)"
+            )
+        } else {
+            // Surface the all-pass summary as a test annotation so the CI
+            // log shows "5/5 PASS" even on success.
+            print("R-05 Phase B all broadcast triggers PASS: [\(summary)]")
+        }
+    }
+
+    // MARK: - R-05 Phase B: broadcast trigger helpers
+
+    /// Dispatches to the per-trigger poster. Centralizing the switch here
+    /// means BroadcastTrigger.allCases ↔ helper mapping is exhaustive at
+    /// the compile level (Swift catches a missing case at build time).
+    private func _postTrigger(_ trigger: BroadcastTrigger, serverURL: String, marker: String) throws {
+        switch trigger {
+        case .recordMention:
+            try _postRecordMention(serverURL: serverURL, marker: marker)
+        case .channelMention:
+            try _postChannelMention(serverURL: serverURL, marker: marker)
+        case .directMessage:
+            try _postDirectMessage(serverURL: serverURL, marker: marker)
+        case .followerPost:
+            try _postFollowerComment(serverURL: serverURL, marker: marker)
+        case .activityAssign:
+            try _createActivityForAdmin(serverURL: serverURL, marker: marker)
+        }
+    }
+
+    /// Errors thrown by the broadcast-trigger helpers. Each case names the
+    /// step that failed so the per-trigger error map can pinpoint cause.
+    fileprivate enum BroadcastHelperError: Error, CustomStringConvertible {
+        case authFailed(user: String)
+        case rpcFailed(model: String, method: String, reason: String)
+
+        var description: String {
+            switch self {
+            case .authFailed(let user):       return "auth as '\(user)' failed (no session cookie)"
+            case .rpcFailed(let m, let mt, let r): return "\(m).\(mt) failed: \(r)"
+            }
+        }
+    }
+
+    /// Authenticates as the given Odoo user and returns the `session_id`
+    /// cookie line (`session_id=…`). Throws `BroadcastHelperError.authFailed`
+    /// if the response carries no session_id (wrong creds, db, or RPC body).
+    private func _authenticate(serverURL: String, login: String, password: String) throws -> String {
+        let sem = DispatchSemaphore(value: 0)
+        var cookie: String?
+        guard let url = URL(string: "https://\(serverURL)/web/session/authenticate") else {
+            throw BroadcastHelperError.authFailed(user: login)
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = 8
+        let payload: [String: Any] = [
+            "jsonrpc": "2.0",
+            "params": ["db": TestConfig.database, "login": login, "password": password]
+        ]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        URLSession.shared.dataTask(with: req) { _, response, _ in
+            defer { sem.signal() }
+            guard let httpResp = response as? HTTPURLResponse else { return }
+            for (k, v) in httpResp.allHeaderFields {
+                if let key = k as? String, key.lowercased() == "set-cookie",
+                   let val = v as? String, val.contains("session_id=") {
+                    cookie = val.components(separatedBy: ";").first
+                    return
+                }
+            }
+        }.resume()
+        _ = sem.wait(timeout: .now() + 10)
+        guard let c = cookie else { throw BroadcastHelperError.authFailed(user: login) }
+        return c
+    }
+
+    /// Generic `call_kw` invocation. Returns the parsed `result` field on
+    /// success, throws `BroadcastHelperError.rpcFailed` on any failure
+    /// (non-200, missing result, or non-nil error envelope).
+    @discardableResult
+    private func _callKw(
+        serverURL: String,
+        cookie: String,
+        model: String,
+        method: String,
+        args: [Any],
+        kwargs: [String: Any] = [:]
+    ) throws -> Any {
+        let sem = DispatchSemaphore(value: 0)
+        var result: Any?
+        var failureReason: String?
+        guard let url = URL(string: "https://\(serverURL)/web/dataset/call_kw") else {
+            throw BroadcastHelperError.rpcFailed(model: model, method: method, reason: "bad URL")
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue(cookie, forHTTPHeaderField: "Cookie")
+        req.timeoutInterval = 8
+        let payload: [String: Any] = [
+            "jsonrpc": "2.0",
+            "params": ["model": model, "method": method, "args": args, "kwargs": kwargs]
+        ]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        URLSession.shared.dataTask(with: req) { data, response, error in
+            defer { sem.signal() }
+            if let e = error { failureReason = e.localizedDescription; return }
+            guard let httpResp = response as? HTTPURLResponse else {
+                failureReason = "no HTTP response"; return
+            }
+            if httpResp.statusCode != 200 {
+                failureReason = "HTTP \(httpResp.statusCode)"; return
+            }
+            guard let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                failureReason = "non-JSON body"; return
+            }
+            if let err = json["error"] {
+                failureReason = "Odoo error: \(err)"; return
+            }
+            if json["result"] == nil {
+                failureReason = "missing result field"; return
+            }
+            result = json["result"]
+        }.resume()
+        _ = sem.wait(timeout: .now() + 10)
+        if let r = result { return r }
+        throw BroadcastHelperError.rpcFailed(
+            model: model, method: method, reason: failureReason ?? "unknown"
+        )
+    }
+
+    /// Polls springboard for a notification whose label contains the given
+    /// marker. Uses 30s by default (push has been observed up to ~20m in
+    /// degraded states; 30s is the tolerated upper bound for this test).
+    private func _waitForNotification(containing marker: String, timeout: TimeInterval) -> Bool {
+        // Re-pull notification center so any banner posted since the last
+        // wipe is visible. Cheap and idempotent.
+        let top = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01))
+        let mid = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        top.press(forDuration: 0.1, thenDragTo: mid)
+
+        let predicate = NSPredicate(format: "label CONTAINS[c] %@", marker)
+        let element = springboard.otherElements.matching(predicate).firstMatch
+        return element.waitForExistence(timeout: timeout)
+    }
+
+    // B-1: @mention on a res.partner record's chatter.
+    // Admin's partner_id=3 ("Mitchell Admin"). Demo posts on that record.
+    private func _postRecordMention(serverURL: String, marker: String) throws {
+        let cookie = try _authenticate(serverURL: serverURL, login: "demo", password: "demo")
+        let mentionHTML = "<p><a href=\"#\" data-oe-model=\"res.partner\" data-oe-id=\"3\">@Mitchell Admin</a> \(marker)</p>"
+        try _callKw(
+            serverURL: serverURL, cookie: cookie,
+            model: "res.partner", method: "message_post",
+            args: [[3]],
+            kwargs: [
+                "body": mentionHTML,
+                "partner_ids": [3],
+                "message_type": "comment",
+                "subtype_xmlid": "mail.mt_comment"
+            ]
+        )
+    }
+
+    // B-2: @mention in channel #general (channel id 1, partner_id=3 admin).
+    private func _postChannelMention(serverURL: String, marker: String) throws {
+        let cookie = try _authenticate(serverURL: serverURL, login: "demo", password: "demo")
+        let mentionHTML = "<p><a href=\"#\" data-oe-model=\"res.partner\" data-oe-id=\"3\">@Mitchell Admin</a> \(marker)</p>"
+        try _callKw(
+            serverURL: serverURL, cookie: cookie,
+            model: "discuss.channel", method: "message_post",
+            args: [[1]],
+            kwargs: [
+                "body": mentionHTML,
+                "partner_ids": [3],
+                "message_type": "comment",
+                "subtype_xmlid": "mail.mt_comment"
+            ]
+        )
+    }
+
+    // B-3: Direct message demo→admin. We use channel_get to fetch-or-create
+    // the 1:1 DM channel, then message_post into it. The body has no @-tag
+    // — DM delivery is on the recipient side regardless of mention.
+    private func _postDirectMessage(serverURL: String, marker: String) throws {
+        let cookie = try _authenticate(serverURL: serverURL, login: "demo", password: "demo")
+        // channel_get expects partners_to as a list of partner ids; returns the channel record.
+        let channel = try _callKw(
+            serverURL: serverURL, cookie: cookie,
+            model: "discuss.channel", method: "channel_get",
+            args: [],
+            kwargs: ["partners_to": [3]]
+        )
+        // Result shape varies across Odoo versions. We look for an `id` field
+        // in either the top-level result dict or the first record of an array.
+        let channelId: Int
+        if let dict = channel as? [String: Any], let id = dict["id"] as? Int {
+            channelId = id
+        } else if let arr = channel as? [[String: Any]], let id = arr.first?["id"] as? Int {
+            channelId = id
+        } else {
+            throw BroadcastHelperError.rpcFailed(
+                model: "discuss.channel", method: "channel_get",
+                reason: "unrecognized result shape: \(channel)"
+            )
+        }
+        try _callKw(
+            serverURL: serverURL, cookie: cookie,
+            model: "discuss.channel", method: "message_post",
+            args: [[channelId]],
+            kwargs: [
+                "body": "<p>\(marker)</p>",
+                "message_type": "comment",
+                "subtype_xmlid": "mail.mt_comment"
+            ]
+        )
+    }
+
+    // B-4: Follower notification. Admin follows admin's own partner record
+    // (already true by default in Odoo demo data); demo posts a plain
+    // comment (no @-tag) — admin should receive via follower subscription.
+    private func _postFollowerComment(serverURL: String, marker: String) throws {
+        let cookie = try _authenticate(serverURL: serverURL, login: "demo", password: "demo")
+        // Ensure admin (partner_id=3) is a follower of partner id=3 itself.
+        // message_subscribe is idempotent so re-subscribing is safe.
+        try _callKw(
+            serverURL: serverURL, cookie: cookie,
+            model: "res.partner", method: "message_subscribe",
+            args: [[3]],
+            kwargs: ["partner_ids": [3]]
+        )
+        try _callKw(
+            serverURL: serverURL, cookie: cookie,
+            model: "res.partner", method: "message_post",
+            args: [[3]],
+            kwargs: [
+                "body": "<p>\(marker)</p>",
+                "message_type": "comment",
+                "subtype_xmlid": "mail.mt_comment"
+            ]
+        )
+    }
+
+    // B-5: Activity assignment. Demo creates a mail.activity row assigning
+    // admin (user_id=2) to follow up on partner id=3. The activity model
+    // raises an Odoo notification that the H' broadcast layer turns into
+    // an FCM push for admin's registered device.
+    private func _createActivityForAdmin(serverURL: String, marker: String) throws {
+        let cookie = try _authenticate(serverURL: serverURL, login: "demo", password: "demo")
+        // Look up the activity_type id for "To Do" (default in Odoo demo data).
+        let typeResult = try _callKw(
+            serverURL: serverURL, cookie: cookie,
+            model: "mail.activity.type", method: "search_read",
+            args: [],
+            kwargs: ["domain": [["name", "=", "To Do"]], "fields": ["id"], "limit": 1]
+        )
+        let activityTypeId: Int
+        if let rows = typeResult as? [[String: Any]], let first = rows.first, let id = first["id"] as? Int {
+            activityTypeId = id
+        } else {
+            throw BroadcastHelperError.rpcFailed(
+                model: "mail.activity.type", method: "search_read",
+                reason: "no 'To Do' activity type found"
+            )
+        }
+        // Look up res_model_id for res.partner (mail.activity requires it).
+        let modelResult = try _callKw(
+            serverURL: serverURL, cookie: cookie,
+            model: "ir.model", method: "search_read",
+            args: [],
+            kwargs: ["domain": [["model", "=", "res.partner"]], "fields": ["id"], "limit": 1]
+        )
+        let resModelId: Int
+        if let rows = modelResult as? [[String: Any]], let first = rows.first, let id = first["id"] as? Int {
+            resModelId = id
+        } else {
+            throw BroadcastHelperError.rpcFailed(
+                model: "ir.model", method: "search_read",
+                reason: "no res.partner ir.model row"
+            )
+        }
+        try _callKw(
+            serverURL: serverURL, cookie: cookie,
+            model: "mail.activity", method: "create",
+            args: [[
+                [
+                    "activity_type_id": activityTypeId,
+                    "res_model_id": resModelId,
+                    "res_id": 3,
+                    "user_id": 2,                         // admin
+                    "summary": marker,
+                    "note": "<p>\(marker)</p>"
+                ]
+            ]]
         )
     }
 
