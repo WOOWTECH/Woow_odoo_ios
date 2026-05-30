@@ -404,6 +404,10 @@ final class FCMPushE2ETests: XCTestCase {
 
     private var app: XCUIApplication!
     private var springboard: XCUIApplication!
+    /// Set to true by diagnostic tests that deliberately background the app
+    /// (e.g. test_DIAG_dumpUIForFCMNotification) so tearDown skips the
+    /// crash-survival assertion which would otherwise fire a false failure.
+    private var skipAppStateTearDownAssert = false
 
     override func setUp() {
         super.setUp()
@@ -446,7 +450,7 @@ final class FCMPushE2ETests: XCTestCase {
         // We capture state into a local first so the message can name the
         // observed state (helps triage when the runner logs only the first
         // failing assertion).
-        if let app = app {
+        if let app = app, !skipAppStateTearDownAssert {
             let endState = app.state
             XCTAssertEqual(
                 endState,
@@ -483,19 +487,30 @@ final class FCMPushE2ETests: XCTestCase {
     ///   all XCUI* calls. Total wall time is bounded (~2s typical, ≤4s).
     private func _clearNotificationCenter() {
         // Surface notification center.
-        let top = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01))
-        let mid = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
+        // IMPORTANT: pull from the top-LEFT (dx=0.15) NOT the center (dx=0.5).
+        // On iPhone 16, the center of the top edge is occupied by the Dynamic
+        // Island; a drag from dx=0.5 is intercepted and never opens the
+        // notification center. The left edge (dx=0.15) is the safe zone.
+        // Reference: E2E_MediumPriority_Tests.swift:459 (proven working).
+        springboard.activate()
+        Thread.sleep(forTimeInterval: 0.3)
+        let top = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.01))
+        let mid = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.6))
         top.press(forDuration: 0.1, thenDragTo: mid)
-        Thread.sleep(forTimeInterval: 0.5)
+        Thread.sleep(forTimeInterval: 1.0)
 
         // Try the modern "Clear All Notifications" pill first; fall back
-        // to the older "Clear" label. We give each label a tight 1s
-        // existence window — we are NOT willing to slow every test by
-        // many seconds for a best-effort cleanup.
+        // to the older "Clear" label. Include Traditional Chinese (zh-TW)
+        // labels because this device's locale is zh-TW (verified via dump:
+        // 行事曆/聯絡人/照片 icons visible in Chinese).
+        // We give each label a tight 1s existence window — we are NOT willing
+        // to slow every test by many seconds for a best-effort cleanup.
         let clearLabels = [
             "Clear All Notifications",
             "Clear All",
             "Clear",
+            "全部清除",   // zh-TW: "Clear All"
+            "清除",       // zh-TW: "Clear"
         ]
         for label in clearLabels {
             let btn = springboard.buttons[label]
@@ -709,6 +724,11 @@ final class FCMPushE2ETests: XCTestCase {
     /// before running so the screen stays alive during the 60s wait.
     @MainActor
     func test_DIAG_dumpUIForFCMNotification() {
+        // DIAG tests deliberately background the app to surface notification
+        // center. Skip the tearDown crash-survival assertion for this test
+        // because the app will be in .runningBackground at the end.
+        skipAppStateTearDownAssert = true
+
         let serverURL = TestConfig.serverURL
 
         // 1. Launch + login (same as broadcast test)
@@ -743,9 +763,14 @@ final class FCMPushE2ETests: XCTestCase {
         XCUIDevice.shared.press(.home)
         Thread.sleep(forTimeInterval: 2.0)
 
-        // 4. Capture PRE-push baseline of notification center
-        let prePushTop = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01))
-        let prePushMid = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        // 4. Capture PRE-push baseline of notification center.
+        // Use dx=0.15 (top-LEFT) to avoid the Dynamic Island at center top.
+        // This is the coordinate proven to open notification center on iPhone 16
+        // (verified in E2E_MediumPriority_Tests.swift:459).
+        springboard.activate()
+        Thread.sleep(forTimeInterval: 0.3)
+        let prePushTop = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.01))
+        let prePushMid = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.6))
         prePushTop.press(forDuration: 0.1, thenDragTo: prePushMid)
         Thread.sleep(forTimeInterval: 2.0)
         let prePushDump = springboard.debugDescription
@@ -776,9 +801,14 @@ final class FCMPushE2ETests: XCTestCase {
             springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.001)).tap()
         }
 
-        // 7. Open notification center
-        let topNC = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01))
-        let midNC = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        // 7. Open notification center.
+        // Use dx=0.15 (top-LEFT) — NOT dx=0.5 which hits the Dynamic Island
+        // on iPhone 16 and never opens the notification center.
+        // Reference: E2E_MediumPriority_Tests.swift:459.
+        springboard.activate()
+        Thread.sleep(forTimeInterval: 0.5)
+        let topNC = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.01))
+        let midNC = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.6))
         topNC.press(forDuration: 0.1, thenDragTo: midNC)
         Thread.sleep(forTimeInterval: 2.0)
 
@@ -799,7 +829,10 @@ final class FCMPushE2ETests: XCTestCase {
         // 10. Element-type counts so we know which XCUIElement collection
         //     actually contains the notification banner on this device.
         let markerPred = NSPredicate(format: "label CONTAINS[c] %@", marker)
-        let odooPred = NSPredicate(format: "label CONTAINS[c] %@ OR label CONTAINS[c] %@", "ODOO", "Odoo")
+        // Case-insensitive match so we catch 'odoo', 'Odoo', 'ODOO' — the
+        // app icon label on this device is lowercase 'odoo' per prior
+        // investigation. The [c] flag handles all three variants.
+        let odooPred = NSPredicate(format: "label CONTAINS[c] %@", "odoo")
         var counts = "DIAG element-type counts\n"
         counts += "========================\n"
         counts += "Marker: '\(marker)'\n"
@@ -808,12 +841,22 @@ final class FCMPushE2ETests: XCTestCase {
         counts += "  springboard.cells:         \(springboard.cells.matching(markerPred).count)\n"
         counts += "  springboard.otherElements: \(springboard.otherElements.matching(markerPred).count)\n"
         counts += "  springboard.staticTexts:   \(springboard.staticTexts.matching(markerPred).count)\n"
-        counts += "\nGeneric 'ODOO'/'Odoo':\n"
+        counts += "\nGeneric 'odoo' (case-insensitive, catches odoo/Odoo/ODOO):\n"
         counts += "  springboard.scrollViews:   \(springboard.scrollViews.matching(odooPred).count)\n"
         counts += "  springboard.buttons:       \(springboard.buttons.matching(odooPred).count)\n"
         counts += "  springboard.cells:         \(springboard.cells.matching(odooPred).count)\n"
         counts += "  springboard.otherElements: \(springboard.otherElements.matching(odooPred).count)\n"
         counts += "  springboard.staticTexts:   \(springboard.staticTexts.matching(odooPred).count)\n"
+        counts += "\nAll springboard buttons (first 5 labels — reveals 'odoo' group label):\n"
+        let allBtns = springboard.buttons.allElementsBoundByIndex
+        for (i, btn) in allBtns.prefix(5).enumerated() {
+            counts += "  btn[\(i)]: '\(btn.label)'\n"
+        }
+        counts += "All springboard scrollViews (first 5 labels):\n"
+        let allScrolls = springboard.scrollViews.allElementsBoundByIndex
+        for (i, sv) in allScrolls.prefix(5).enumerated() {
+            counts += "  scroll[\(i)]: '\(sv.label)'\n"
+        }
         let countsAttach = XCTAttachment(string: counts)
         countsAttach.name = "DIAG-element-counts"
         countsAttach.lifetime = .keepAlways
@@ -969,8 +1012,12 @@ final class FCMPushE2ETests: XCTestCase {
         // the marker substring (not app name). After each strategy we
         // re-check; first success returns true.
 
-        let top = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01))
-        let mid = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        // Pull from top-LEFT (dx=0.15) to avoid the Dynamic Island catch zone
+        // at the center. Proven working in E2E_MediumPriority_Tests.swift:459.
+        springboard.activate()
+        Thread.sleep(forTimeInterval: 0.3)
+        let top = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.01))
+        let mid = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.6))
         top.press(forDuration: 0.1, thenDragTo: mid)
         Thread.sleep(forTimeInterval: 1.0)
 
