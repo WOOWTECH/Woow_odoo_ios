@@ -484,7 +484,22 @@ final class FCMPushE2ETests: XCTestCase {
             + "register_device POST never reached Odoo. Check Settings → Odoo → Notifications."
         )
 
-        // ── Step 3: Post chatter mention as 'demo' tagging admin ─────
+        // ── Step 3a: Background the app BEFORE posting mention ───────
+        // CRITICAL: when the app is in foreground, iOS suppresses notification
+        // banners — the push arrives but is routed to
+        // userNotificationCenter(_:willPresent:) in-app instead of being shown
+        // in notification center. To verify the user-visible delivery, the app
+        // must be backgrounded so the OS routes the notification to the lock
+        // screen / notification center the way a real user would see it.
+        //
+        // We use the home button press to background the app. This puts the
+        // app into the background just before the chatter mention is posted,
+        // ensuring the resulting push notification surfaces as a banner /
+        // notification-center entry that XCUITest can find via springboard.
+        XCUIDevice.shared.press(.home)
+        Thread.sleep(forTimeInterval: 1.0)  // let the background transition settle
+
+        // ── Step 3b: Post chatter mention as 'demo' tagging admin ────
         let uniqueBody = "E2E-fcm-\(Int(Date().timeIntervalSince1970))"
         let posted = _postChatterMentionAsDemo(
             serverURL: serverURL,
