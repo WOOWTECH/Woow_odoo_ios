@@ -679,6 +679,154 @@ final class FCMPushE2ETests: XCTestCase {
         test_FCM_E2E_all_broadcast_triggers()
     }
 
+    // MARK: - DIAGNOSTIC test — dump real SpringBoard UI for FCM notifications
+
+    /// Diagnostic test that does NOT assert anything about the matcher.
+    /// Its purpose is to OBSERVE what iOS actually emits in the SpringBoard
+    /// accessibility tree when an FCM push notification arrives for the
+    /// ODOO app. The matcher logic (_waitForNotification) was previously
+    /// written based on assumptions copied from another test; this DIAG
+    /// captures real evidence so we can rewrite the matcher correctly.
+    ///
+    /// Output attachments inspected via xcresult:
+    ///   - `DIAG-springboard-debugDescription` — the full SpringBoard
+    ///     accessibility tree as a string. Search for the marker to find
+    ///     where iOS placed the notification (which element type, which
+    ///     container, what the label looks like).
+    ///   - `DIAG-springboard-screenshot` — visual reference matched to
+    ///     the tree dump.
+    ///   - `DIAG-element-counts` — per-element-type match counts for
+    ///     both the unique marker and generic 'ODOO'/'Odoo' labels.
+    ///   - `DIAG-springboard-debugDescription-PRE-PUSH` — same dump
+    ///     taken BEFORE the push arrives, so we can diff and see exactly
+    ///     what the notification added.
+    ///
+    /// Procedure: login → register FCM → background app → post chatter
+    /// mention via JSON-RPC → keep iPhone awake for 60s while push
+    /// arrives → open notification center → dump everything.
+    ///
+    /// Set iPhone Settings → Display & Brightness → Auto-Lock → Never
+    /// before running so the screen stays alive during the 60s wait.
+    @MainActor
+    func test_DIAG_dumpUIForFCMNotification() {
+        let serverURL = TestConfig.serverURL
+
+        // 1. Launch + login (same as broadcast test)
+        app.launch()
+        app.activate()
+        let loginField = app.textFields["example.odoo.com"]
+        if loginField.waitForExistence(timeout: 5) {
+            app.loginWithTestCredentials(
+                server: serverURL,
+                database: TestConfig.database,
+                username: TestConfig.adminUser,
+                password: TestConfig.adminPass
+            )
+        }
+        app.tap()
+        XCTAssertTrue(
+            app.buttons["line.3.horizontal"].waitForExistence(timeout: 15),
+            "DIAG: main screen never loaded (login failed)"
+        )
+
+        // 2. Wait for FCM device registration
+        let regDeadline = Date().addingTimeInterval(30)
+        var devicesFound = 0
+        while Date() < regDeadline {
+            devicesFound = _countFCMDevicesForAdmin(serverURL: serverURL)
+            if devicesFound > 0 { break }
+            Thread.sleep(forTimeInterval: 2.0)
+        }
+        XCTAssertGreaterThan(devicesFound, 0, "DIAG: FCM device never registered")
+
+        // 3. Background app so banners surface in notification center
+        XCUIDevice.shared.press(.home)
+        Thread.sleep(forTimeInterval: 2.0)
+
+        // 4. Capture PRE-push baseline of notification center
+        let prePushTop = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01))
+        let prePushMid = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        prePushTop.press(forDuration: 0.1, thenDragTo: prePushMid)
+        Thread.sleep(forTimeInterval: 2.0)
+        let prePushDump = springboard.debugDescription
+        let prePushAttach = XCTAttachment(string: prePushDump)
+        prePushAttach.name = "DIAG-springboard-debugDescription-PRE-PUSH"
+        prePushAttach.lifetime = .keepAlways
+        add(prePushAttach)
+        XCUIDevice.shared.press(.home)
+        Thread.sleep(forTimeInterval: 1.0)
+
+        // 5. Fire ONE chatter mention via existing helper
+        let marker = "DIAG-\(Int(Date().timeIntervalSince1970))"
+        do {
+            try _postChannelMention(serverURL: serverURL, marker: marker)
+        } catch {
+            XCTFail("DIAG: post helper failed: \(error)")
+            return
+        }
+
+        // 6. Wait 60s for push to arrive. Tap status bar every 10s to keep
+        //    the screen awake (in case Auto-Lock is short). Status bar tap
+        //    is harmless and does NOT trigger notification center.
+        print("DIAG: posted mention marker='\(marker)', devices=\(devicesFound). Waiting 60s for push…")
+        for _ in 0..<6 {
+            Thread.sleep(forTimeInterval: 10)
+            // Tap the very top center of the status bar to keep screen on.
+            // (Center, dy=0.001 — above the notification-center pull zone.)
+            springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.001)).tap()
+        }
+
+        // 7. Open notification center
+        let topNC = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01))
+        let midNC = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        topNC.press(forDuration: 0.1, thenDragTo: midNC)
+        Thread.sleep(forTimeInterval: 2.0)
+
+        // 8. POST-push dump — the full SpringBoard tree
+        let postPushDump = springboard.debugDescription
+        let postPushAttach = XCTAttachment(string: postPushDump)
+        postPushAttach.name = "DIAG-springboard-debugDescription"
+        postPushAttach.lifetime = .keepAlways
+        add(postPushAttach)
+
+        // 9. Visual screenshot
+        let screenshot = XCUIScreen.main.screenshot()
+        let shotAttach = XCTAttachment(screenshot: screenshot)
+        shotAttach.name = "DIAG-springboard-screenshot"
+        shotAttach.lifetime = .keepAlways
+        add(shotAttach)
+
+        // 10. Element-type counts so we know which XCUIElement collection
+        //     actually contains the notification banner on this device.
+        let markerPred = NSPredicate(format: "label CONTAINS[c] %@", marker)
+        let odooPred = NSPredicate(format: "label CONTAINS[c] %@ OR label CONTAINS[c] %@", "ODOO", "Odoo")
+        var counts = "DIAG element-type counts\n"
+        counts += "========================\n"
+        counts += "Marker: '\(marker)'\n"
+        counts += "  springboard.scrollViews:   \(springboard.scrollViews.matching(markerPred).count)\n"
+        counts += "  springboard.buttons:       \(springboard.buttons.matching(markerPred).count)\n"
+        counts += "  springboard.cells:         \(springboard.cells.matching(markerPred).count)\n"
+        counts += "  springboard.otherElements: \(springboard.otherElements.matching(markerPred).count)\n"
+        counts += "  springboard.staticTexts:   \(springboard.staticTexts.matching(markerPred).count)\n"
+        counts += "\nGeneric 'ODOO'/'Odoo':\n"
+        counts += "  springboard.scrollViews:   \(springboard.scrollViews.matching(odooPred).count)\n"
+        counts += "  springboard.buttons:       \(springboard.buttons.matching(odooPred).count)\n"
+        counts += "  springboard.cells:         \(springboard.cells.matching(odooPred).count)\n"
+        counts += "  springboard.otherElements: \(springboard.otherElements.matching(odooPred).count)\n"
+        counts += "  springboard.staticTexts:   \(springboard.staticTexts.matching(odooPred).count)\n"
+        let countsAttach = XCTAttachment(string: counts)
+        countsAttach.name = "DIAG-element-counts"
+        countsAttach.lifetime = .keepAlways
+        add(countsAttach)
+
+        print("DIAG complete: marker='\(marker)', devicesRegistered=\(devicesFound)")
+        print("DIAG counts:\n\(counts)")
+
+        // No assertion about the marker — this is observation only.
+        // The DIAG test is considered successful if it produced the dumps.
+        XCTAssertTrue(true, "DIAG always passes; consult xcresult attachments")
+    }
+
     // MARK: - R-05 Phase B: broadcast trigger helpers
 
     /// Dispatches to the per-trigger poster. Centralizing the switch here
