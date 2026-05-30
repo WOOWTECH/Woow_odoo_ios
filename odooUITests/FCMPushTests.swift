@@ -50,12 +50,18 @@ private enum DeviceSelector {
         return configured
     }
 
-    /// Returns UDIDs of currently paired physical iOS devices via `xcrun devicectl`.
-    /// Returns an empty array on any failure (simulator, no device, etc.).
+    /// Returns UDIDs of currently paired physical iOS devices (AC7).
+    ///
+    /// On a macOS host runner (Process is available), shells out to
+    /// `xcrun xctrace list devices` and parses the UDIDs from the output.
+    /// On the iOS device target itself (Process is unavailable), returns
+    /// an empty array — AC7 still works because xcodebuild's destination
+    /// validation surfaces device-not-found errors before this helper runs.
+    /// The caller (AC7 error message formatting) should treat an empty
+    /// array on iOS as "device-listing only available when tests run from
+    /// macOS host" and surface that explanation to the operator.
     private static func _listPairedDeviceUDIDs() -> [String] {
-        // xcrun devicectl list devices --quiet outputs one UDID per line on modern Xcode.
-        // This is a best-effort helper; the primary enforcement is xcodebuild's destination
-        // validation which surfaces AC7 failures with the correct error.
+        #if os(macOS)
         let task = Process()
         task.launchPath = "/usr/bin/xcrun"
         task.arguments = ["xctrace", "list", "devices"]
@@ -77,6 +83,12 @@ private enum DeviceSelector {
         } catch {
             return []
         }
+        #else
+        // iOS device target: Process is unavailable. Caller should interpret
+        // empty array as "macOS-host runner required to enumerate paired devices"
+        // and include that note in any user-facing error message.
+        return []
+        #endif
     }
 }
 
@@ -126,6 +138,7 @@ private enum FCMLogCapture {
         name: String,
         testCase: XCTestCase
     ) {
+        #if os(macOS)
         let task = Process()
         task.launchPath = command
         task.arguments = arguments
@@ -144,6 +157,27 @@ private enum FCMLogCapture {
         attachment.name = name
         attachment.lifetime = .keepAlways
         testCase.add(attachment)
+        #else
+        // iOS device target: Process is unavailable, so we can't shell out to
+        // docker. AC3 is degraded (logs not auto-captured) but not gutted —
+        // attach a human-actionable instruction so the operator knows exactly
+        // which command to run on the host to gather the equivalent logs.
+        let argString = arguments.joined(separator: " ")
+        let instruction = """
+        Log capture unavailable on iOS device target (Process() is macOS-only).
+        On the host that ran this test, run the equivalent command to gather
+        the diagnostic logs that would have been auto-attached:
+
+            \(command) \(argString)
+
+        Attachment name: \(name)
+        """
+        let data = Data(instruction.utf8)
+        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.plain-text")
+        attachment.name = "\(name)-instruction"
+        attachment.lifetime = .keepAlways
+        testCase.add(attachment)
+        #endif
     }
 }
 
@@ -208,42 +242,68 @@ final class FCMPushTests: XCTestCase {
         let postSem = DispatchSemaphore(value: 0)
 
         DispatchQueue.global().async {
-            do {
-                guard let url = URL(string: "http://\(serverURL)/mail/message/post") else {
-                    chatError = NSError(domain: "FCMPushTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Bad URL"])
-                    postSem.signal()
-                    return
-                }
-                var request = URLRequest(url: url)
-                request.httpMethod = "POST"
-                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                // Use session cookie (pre-logged-in app) or basic auth header.
-                // In the verification env the admin session is pre-established.
-                let payload: [String: Any] = [
-                    "jsonrpc": "2.0",
-                    "method": "call",
-                    "params": [
-                        "thread_model": "mail.channel",
-                        "thread_id": 1,
-                        "post_data": [
-                            "body": "@testuser \(uniqueBody)",
-                            "message_type": "comment",
-                            "subtype_xmlid": "mail.mt_comment"
-                        ]
+            // Sentinel: any code path inside this closure that completes
+            // synchronously MUST signal the semaphore so the outer
+            // `postSem.wait(timeout: 3s)` doesn't hang. The dataTask path
+            // signals from its own completion handler; we set a flag to
+            // suppress this defer in that case (otherwise we'd double-signal).
+            var asyncTaskScheduled = false
+            defer { if !asyncTaskScheduled { postSem.signal() } }
+
+            guard let url = URL(string: "http://\(serverURL)/mail/message/post") else {
+                chatError = NSError(domain: "FCMPushTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Bad URL"])
+                return
+            }
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.timeoutInterval = 5  // bound so a hung dataTask doesn't outlive the outer 3s semaphore wait
+            // Use session cookie (pre-logged-in app) or basic auth header.
+            // In the verification env the admin session is pre-established.
+            let payload: [String: Any] = [
+                "jsonrpc": "2.0",
+                "method": "call",
+                "params": [
+                    "thread_model": "mail.channel",
+                    "thread_id": 1,
+                    "post_data": [
+                        "body": "@testuser \(uniqueBody)",
+                        "message_type": "comment",
+                        "subtype_xmlid": "mail.mt_comment"
                     ]
                 ]
+            ]
+            do {
                 request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-                let (data, response) = try URLSession.shared.data(for: request, delegate: nil)
-                if let httpResp = response as? HTTPURLResponse, httpResp.statusCode == 200 {
-                    if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                       json["result"] != nil {
-                        messagePosted = true
-                    }
-                }
             } catch {
                 chatError = error
+                return
             }
-            postSem.signal()
+            // Use completion-handler URLSession API (sync context — Process/async-await
+            // require Swift concurrency, which this DispatchQueue closure doesn't provide).
+            asyncTaskScheduled = true
+            URLSession.shared.dataTask(with: request) { data, response, error in
+                defer { postSem.signal() }
+                if let error = error {
+                    chatError = error
+                    return
+                }
+                guard let httpResp = response as? HTTPURLResponse else {
+                    chatError = NSError(domain: "FCMPushTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Response was not HTTP"])
+                    return
+                }
+                if httpResp.statusCode != 200 {
+                    chatError = NSError(domain: "FCMPushTests", code: httpResp.statusCode, userInfo: [NSLocalizedDescriptionKey: "Chatter POST returned HTTP \(httpResp.statusCode)"])
+                    return
+                }
+                guard let data = data,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      json["result"] != nil else {
+                    chatError = NSError(domain: "FCMPushTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "Response body did not contain a 'result' field"])
+                    return
+                }
+                messagePosted = true
+            }.resume()
         }
 
         // Allow up to 3s for the API call to complete before checking the notification.
