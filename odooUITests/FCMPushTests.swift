@@ -499,30 +499,39 @@ final class FCMPushE2ETests: XCTestCase {
         top.press(forDuration: 0.1, thenDragTo: mid)
         Thread.sleep(forTimeInterval: 1.0)
 
-        // Try the modern "Clear All Notifications" pill first; fall back
-        // to the older "Clear" label. Include Traditional Chinese (zh-TW)
-        // labels because this device's locale is zh-TW (verified via dump:
-        // 行事曆/聯絡人/照片 icons visible in Chinese).
-        // We give each label a tight 1s existence window — we are NOT willing
-        // to slow every test by many seconds for a best-effort cleanup.
-        let clearLabels = [
-            "Clear All Notifications",
-            "Clear All",
-            "Clear",
-            "全部清除",   // zh-TW: "Clear All"
-            "清除",       // zh-TW: "Clear"
-        ]
-        for label in clearLabels {
-            let btn = springboard.buttons[label]
-            if btn.waitForExistence(timeout: 1) {
-                btn.tap()
-                Thread.sleep(forTimeInterval: 0.3)
-                // Some iOS variants present a confirm sheet — accept it.
-                let confirm = springboard.buttons["Clear"]
-                if confirm.waitForExistence(timeout: 0.5) {
-                    confirm.tap()
+        // First try: match by accessibility identifier 'clear-button' which is
+        // stable across locale changes. Observed in PRE-push dump from
+        // Attempt 1 (2026-05-31): identifier='clear-button', label='確認清除',
+        // value='通知中心'. This is the ellipsis/kebab clear affordance shown
+        // next to the app-group stacked header in iOS 18 notification center.
+        let clearById = springboard.buttons["clear-button"]
+        if clearById.waitForExistence(timeout: 2) {
+            clearById.tap()
+            Thread.sleep(forTimeInterval: 0.5)
+        } else {
+            // Fallback: match by label. Include both English and zh-TW (Traditional
+            // Chinese) variants. '確認清除' observed on this device (iOS 18, zh-TW).
+            // We give each label a tight 1s existence window.
+            let clearLabels = [
+                "確認清除",              // zh-TW observed in Attempt 1 dump
+                "Clear All Notifications",
+                "Clear All",
+                "Clear",
+                "全部清除",              // zh-TW: "Clear All"
+                "清除",                  // zh-TW: "Clear"
+            ]
+            for label in clearLabels {
+                let btn = springboard.buttons[label]
+                if btn.waitForExistence(timeout: 1) {
+                    btn.tap()
+                    Thread.sleep(forTimeInterval: 0.3)
+                    // Some iOS variants present a confirm sheet — accept it.
+                    let confirm = springboard.buttons["Clear"]
+                    if confirm.waitForExistence(timeout: 0.5) {
+                        confirm.tap()
+                    }
+                    break
                 }
-                break
             }
         }
 
@@ -692,6 +701,89 @@ final class FCMPushE2ETests: XCTestCase {
         // batched test's per-trigger summary makes it easy to see whether
         // the B-2 case (the one this test name describes) was the failure.
         test_FCM_E2E_all_broadcast_triggers()
+    }
+
+    // MARK: - R-05 single-trigger focused E2E test (B-2 channel mention)
+
+    /// Focused single-trigger E2E test that proves the matcher + clearer work
+    /// end-to-end for B-2 (channel mention). Faster than the full 5-trigger
+    /// test and useful for verifying matcher correctness in isolation.
+    ///
+    /// Evidence basis (Attempt 1, 2026-05-31):
+    ///   - Notification center opens with dx=0.15 swipe (not dx=0.5 which hits
+    ///     the Dynamic Island on iPhone 16).
+    ///   - FCM notification appears as SpringBoard ScrollView with identifier
+    ///     'ListCell', label contains 'ODOO' + marker substring.
+    ///   - `springboard.scrollViews.matching(markerPredicate)` returns count=1.
+    ///   - Clear button has identifier 'clear-button', label '確認清除' (zh-TW).
+    @MainActor
+    func test_FCM_E2E_singleChannelMention() {
+        let serverURL = TestConfig.serverURL
+
+        // 1. Launch + login
+        app.launch()
+        app.activate()
+        let loginField = app.textFields["example.odoo.com"]
+        if loginField.waitForExistence(timeout: 5) {
+            app.loginWithTestCredentials(
+                server: serverURL,
+                database: TestConfig.database,
+                username: TestConfig.adminUser,
+                password: TestConfig.adminPass
+            )
+        }
+        app.tap()
+        XCTAssertTrue(
+            app.buttons["line.3.horizontal"].waitForExistence(timeout: 15),
+            "B-2: main screen never loaded (login failed)"
+        )
+
+        // 2. Wait for FCM device registration
+        let regDeadline = Date().addingTimeInterval(30)
+        var devicesFound = 0
+        while Date() < regDeadline {
+            devicesFound = _countFCMDevicesForAdmin(serverURL: serverURL)
+            if devicesFound > 0 { break }
+            Thread.sleep(forTimeInterval: 2.0)
+        }
+        XCTAssertGreaterThan(devicesFound, 0, "B-2: FCM device never registered")
+
+        // 3. Background app so notification banners surface
+        XCUIDevice.shared.press(.home)
+        Thread.sleep(forTimeInterval: 1.0)
+
+        // 4. Post B-2 trigger (channel mention)
+        let marker = "E2E-B-2-\(Int(Date().timeIntervalSince1970))"
+        do {
+            try _postChannelMention(serverURL: serverURL, marker: marker)
+        } catch {
+            XCTFail("B-2: _postChannelMention failed: \(error)")
+            return
+        }
+        print("B-2: posted channel mention marker='\(marker)', devices=\(devicesFound)")
+
+        // 5. Wait for notification (30s timeout — delivery typically <5s on
+        //    a healthy pipeline, but Cloudflare tunnel can add latency).
+        let appeared = _waitForNotification(containing: marker, timeout: 30)
+
+        // Capture screenshot for CI evidence regardless of pass/fail.
+        let screenshot = XCUIScreen.main.screenshot()
+        let att = XCTAttachment(screenshot: screenshot)
+        att.name = "B-2-singleChannelMention-result"
+        att.lifetime = .keepAlways
+        add(att)
+
+        XCTAssertTrue(
+            appeared,
+            "B-2 channel mention: notification with marker '\(marker)' "
+            + "did not appear in notification center within 30s. "
+            + "devices_registered=\(devicesFound). "
+            + "Check pipeline: Odoo plugin → sidecar → central → FCM → APNs → iPhone."
+        )
+
+        // 6. Bring app back to foreground (satisfies tearDown app-state assertion)
+        app.activate()
+        Thread.sleep(forTimeInterval: 1.0)
     }
 
     // MARK: - DIAGNOSTIC test — dump real SpringBoard UI for FCM notifications
