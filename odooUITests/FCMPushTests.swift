@@ -375,6 +375,308 @@ final class FCMPushTests: XCTestCase {
     }
 }
 
+// MARK: - E2E test: login + tag + notification (autonomous, R-05 closure)
+//
+// This test class drives the FULL H' push pipeline from a fresh iPhone state:
+//   1. Reset app state, launch app
+//   2. Drive login UI as admin
+//   3. Wait for FCM device registration to complete (poll Odoo DB via JSON-RPC)
+//   4. As 'demo' user (via Odoo JSON-RPC), post a chatter mention tagging admin
+//      in the #general channel
+//   5. Pull down notification center on the iPhone
+//   6. Assert the notification with our unique body text appears within 5s
+//
+// Unlike test_FCM_4_notificationAppearsInCenter (which assumes a pre-logged-in
+// app), this test does the WHOLE flow autonomously — closing R-05 without any
+// human tapping the phone.
+//
+// Pre-requisites (environment):
+//   - K8s central stack running (postgres + tvs + whitelist)
+//   - fcm-sidecar container running, socket mounted into Odoo
+//   - Odoo ecpay_odoo18 running with H'-mode plugin loaded
+//   - Cloudflare tunnel pointing localhost:8069 → SharedTestConfig.serverURL
+//   - iPhone paired (TEST_DEVICE_UDID or single device)
+//   - Notification permission either pre-granted OR auto-handled by UI monitor
+
+final class FCMPushE2ETests: XCTestCase {
+
+    private typealias TestConfig = SharedTestConfig
+
+    private var app: XCUIApplication!
+    private var springboard: XCUIApplication!
+
+    override func setUp() {
+        super.setUp()
+        continueAfterFailure = false
+
+        app = XCUIApplication()
+        // Reset to fresh state so we always start from the login screen.
+        app.launchArguments += ["-AppleLanguages", "(en)", "-ResetAppState"]
+        app.launchEnvironment["TEST_MODE"] = "1"
+        app.launchEnvironment["FCM_HPRIME_MODE"] = "1"
+        springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+
+        // Auto-accept system notification permission dialog if it appears.
+        addUIInterruptionMonitor(withDescription: "System notification permission") { dialog in
+            for buttonLabel in ["Allow", "Allow Notifications", "OK"] {
+                let btn = dialog.buttons[buttonLabel]
+                if btn.exists {
+                    btn.tap()
+                    return true
+                }
+            }
+            return false
+        }
+    }
+
+    override func tearDown() {
+        // Do NOT terminate the app here — the FCM registration we triggered
+        // benefits from the app remaining alive so the OS doesn't drop the
+        // background push channel before the next manual test or operator
+        // inspection. Test cleanup is deliberately minimal.
+        super.tearDown()
+    }
+
+    @MainActor
+    func test_FCM_E2E_loginAndChatterMentionDeliversNotificationOnDevice() {
+        let serverURL = TestConfig.serverURL
+
+        // ── Step 1: Launch app & log in ──────────────────────────────
+        app.launch()
+        app.activate()  // surface the permission dialog if it's queued
+
+        let loginField = app.textFields["example.odoo.com"]
+        if loginField.waitForExistence(timeout: 5) {
+            app.loginWithTestCredentials(
+                server: serverURL,
+                database: TestConfig.database,
+                username: TestConfig.adminUser,
+                password: TestConfig.adminPass
+            )
+        }
+
+        // Trigger UI interruption monitor by interacting with the app once
+        // after login (XCUITest only fires monitors when the AUT receives focus).
+        app.tap()
+
+        let mainScreenLoaded = app.buttons["line.3.horizontal"].waitForExistence(timeout: 15)
+        XCTAssertTrue(
+            mainScreenLoaded,
+            "Login failed: main screen (hamburger button) never loaded after credentials submitted"
+        )
+
+        // ── Step 2: Wait for FCM device registration ─────────────────
+        // Poll Odoo via JSON-RPC every 2s for up to 30s, checking for a row
+        // in woow_fcm_device for admin (user_id=2). Polling is more reliable
+        // than a fixed sleep because registration timing varies with network.
+        let regDeadline = Date().addingTimeInterval(30)
+        var devicesFound = 0
+        while Date() < regDeadline {
+            devicesFound = _countFCMDevicesForAdmin(serverURL: serverURL)
+            if devicesFound > 0 { break }
+            Thread.sleep(forTimeInterval: 2.0)
+        }
+        XCTAssertGreaterThan(
+            devicesFound,
+            0,
+            "FCM device for admin never appeared in woow_fcm_device within 30s after login. "
+            + "Likely cause: notification permission denied OR Firebase init failed OR "
+            + "register_device POST never reached Odoo. Check Settings → Odoo → Notifications."
+        )
+
+        // ── Step 3: Post chatter mention as 'demo' tagging admin ─────
+        let uniqueBody = "E2E-fcm-\(Int(Date().timeIntervalSince1970))"
+        let posted = _postChatterMentionAsDemo(
+            serverURL: serverURL,
+            channelId: 1,                  // #general
+            mentionedPartnerId: 3,         // Mitchell Admin
+            mentionedName: "Mitchell Admin",
+            uniqueBody: uniqueBody
+        )
+        XCTAssertTrue(posted, "Failed to post chatter mention via demo user JSON-RPC")
+
+        // ── Step 4: Open notification center via swipe-down ──────────
+        let topOfScreen = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01))
+        let middleOfScreen = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        topOfScreen.press(forDuration: 0.1, thenDragTo: middleOfScreen)
+
+        // ── Step 5: Assert notification appears within 5s ────────────
+        let notificationPredicate = NSPredicate(format: "label CONTAINS[c] %@", uniqueBody)
+        let notification = springboard.otherElements.matching(notificationPredicate).firstMatch
+        let appeared = notification.waitForExistence(timeout: 5)
+
+        if !appeared {
+            // Snapshot the springboard so the failure has visual evidence.
+            let screenshot = springboard.screenshot()
+            let attachment = XCTAttachment(screenshot: screenshot)
+            attachment.name = "notification-center-at-failure"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+        XCTAssertTrue(
+            appeared,
+            "FCM push notification containing '\(uniqueBody)' did not appear in notification "
+            + "center within 5s of chatter mention. devices_registered=\(devicesFound)"
+        )
+    }
+
+    // MARK: - Helpers
+
+    /// Synchronously calls Odoo JSON-RPC search_count for woow.fcm.device
+    /// filtered by user_id=2 (admin). Returns the count. Uses admin/admin
+    /// session auth for the call.
+    private func _countFCMDevicesForAdmin(serverURL: String) -> Int {
+        let sem = DispatchSemaphore(value: 0)
+        var count = 0
+
+        // Step A: authenticate as admin → get session cookie
+        guard let authURL = URL(string: "https://\(serverURL)/web/session/authenticate") else { return 0 }
+        var authReq = URLRequest(url: authURL)
+        authReq.httpMethod = "POST"
+        authReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        authReq.timeoutInterval = 8
+        let authPayload: [String: Any] = [
+            "jsonrpc": "2.0",
+            "params": [
+                "db": TestConfig.database,
+                "login": TestConfig.adminUser,
+                "password": TestConfig.adminPass
+            ]
+        ]
+        authReq.httpBody = try? JSONSerialization.data(withJSONObject: authPayload)
+
+        var sessionCookie: String?
+        URLSession.shared.dataTask(with: authReq) { _, response, _ in
+            defer { sem.signal() }
+            guard let httpResp = response as? HTTPURLResponse else { return }
+            for (k, v) in httpResp.allHeaderFields {
+                if let key = k as? String, key.lowercased() == "set-cookie",
+                   let val = v as? String, val.contains("session_id=") {
+                    sessionCookie = val.components(separatedBy: ";").first
+                    return
+                }
+            }
+        }.resume()
+        _ = sem.wait(timeout: .now() + 10)
+        guard let cookie = sessionCookie else { return 0 }
+
+        // Step B: search_count woow.fcm.device WHERE user_id=2 AND active=true
+        let sem2 = DispatchSemaphore(value: 0)
+        guard let searchURL = URL(string: "https://\(serverURL)/web/dataset/call_kw") else { return 0 }
+        var searchReq = URLRequest(url: searchURL)
+        searchReq.httpMethod = "POST"
+        searchReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        searchReq.setValue(cookie, forHTTPHeaderField: "Cookie")
+        searchReq.timeoutInterval = 8
+        let searchPayload: [String: Any] = [
+            "jsonrpc": "2.0",
+            "params": [
+                "model": "woow.fcm.device",
+                "method": "search_count",
+                "args": [[["user_id", "=", 2], ["active", "=", true]]],
+                "kwargs": [:]
+            ]
+        ]
+        searchReq.httpBody = try? JSONSerialization.data(withJSONObject: searchPayload)
+
+        URLSession.shared.dataTask(with: searchReq) { data, _, _ in
+            defer { sem2.signal() }
+            guard let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let result = json["result"] as? Int else { return }
+            count = result
+        }.resume()
+        _ = sem2.wait(timeout: .now() + 10)
+
+        return count
+    }
+
+    /// Authenticates as demo/demo, then posts a chatter message to the given
+    /// channel with body containing the unique marker, tagging the given
+    /// partner_id. Returns true on success.
+    private func _postChatterMentionAsDemo(
+        serverURL: String,
+        channelId: Int,
+        mentionedPartnerId: Int,
+        mentionedName: String,
+        uniqueBody: String
+    ) -> Bool {
+        let sem = DispatchSemaphore(value: 0)
+        var success = false
+
+        // Step A: authenticate as demo → get session cookie
+        guard let authURL = URL(string: "https://\(serverURL)/web/session/authenticate") else { return false }
+        var authReq = URLRequest(url: authURL)
+        authReq.httpMethod = "POST"
+        authReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        authReq.timeoutInterval = 8
+        let authPayload: [String: Any] = [
+            "jsonrpc": "2.0",
+            "params": [
+                "db": TestConfig.database,
+                "login": "demo",
+                "password": "demo"
+            ]
+        ]
+        authReq.httpBody = try? JSONSerialization.data(withJSONObject: authPayload)
+
+        var sessionCookie: String?
+        URLSession.shared.dataTask(with: authReq) { _, response, _ in
+            defer { sem.signal() }
+            guard let httpResp = response as? HTTPURLResponse else { return }
+            for (k, v) in httpResp.allHeaderFields {
+                if let key = k as? String, key.lowercased() == "set-cookie",
+                   let val = v as? String, val.contains("session_id=") {
+                    sessionCookie = val.components(separatedBy: ";").first
+                    return
+                }
+            }
+        }.resume()
+        _ = sem.wait(timeout: .now() + 10)
+        guard let cookie = sessionCookie else { return false }
+
+        // Step B: discuss.channel.message_post on channelId
+        let sem2 = DispatchSemaphore(value: 0)
+        guard let postURL = URL(string: "https://\(serverURL)/web/dataset/call_kw") else { return false }
+        var postReq = URLRequest(url: postURL)
+        postReq.httpMethod = "POST"
+        postReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        postReq.setValue(cookie, forHTTPHeaderField: "Cookie")
+        postReq.timeoutInterval = 8
+        let mentionHTML = "<p><a href=\"#\" data-oe-model=\"res.partner\" data-oe-id=\"\(mentionedPartnerId)\">@\(mentionedName)</a> \(uniqueBody)</p>"
+        let postPayload: [String: Any] = [
+            "jsonrpc": "2.0",
+            "params": [
+                "model": "discuss.channel",
+                "method": "message_post",
+                "args": [[channelId]],
+                "kwargs": [
+                    "body": mentionHTML,
+                    "partner_ids": [mentionedPartnerId],
+                    "message_type": "comment",
+                    "subtype_xmlid": "mail.mt_comment"
+                ]
+            ]
+        ]
+        postReq.httpBody = try? JSONSerialization.data(withJSONObject: postPayload)
+
+        URLSession.shared.dataTask(with: postReq) { data, response, _ in
+            defer { sem2.signal() }
+            guard let httpResp = response as? HTTPURLResponse,
+                  httpResp.statusCode == 200,
+                  let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+            // message_post returns a record dict on success (no top-level error)
+            if json["result"] != nil && json["error"] == nil {
+                success = true
+            }
+        }.resume()
+        _ = sem2.wait(timeout: .now() + 10)
+
+        return success
+    }
+}
+
 // MARK: - BUG-3 fix verification tests
 //
 // These tests exist to verify that the BUG-3 fix (FCMPushTests iOS compile
