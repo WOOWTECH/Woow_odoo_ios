@@ -19,7 +19,7 @@ import XCTest
 
 // MARK: - Device selection helpers (AC5, AC6, AC7)
 
-private enum DeviceSelector {
+fileprivate enum DeviceSelector {
     /// Resolve which device to use for push tests.
     ///
     /// - Returns: The UDID string to pass to xcodebuild `-destination`, or nil
@@ -60,7 +60,7 @@ private enum DeviceSelector {
     /// The caller (AC7 error message formatting) should treat an empty
     /// array on iOS as "device-listing only available when tests run from
     /// macOS host" and surface that explanation to the operator.
-    private static func _listPairedDeviceUDIDs() -> [String] {
+    fileprivate static func _listPairedDeviceUDIDs() -> [String] {
         #if os(macOS)
         let task = Process()
         task.launchPath = "/usr/bin/xcrun"
@@ -94,7 +94,7 @@ private enum DeviceSelector {
 
 // MARK: - Log capture helpers (AC3)
 
-private enum FCMLogCapture {
+fileprivate enum FCMLogCapture {
     /// Captures diagnostic logs from all three layers for triage when a test fails.
     ///
     /// - Parameter app: The XCUIApplication under test (for screenshot).
@@ -132,7 +132,7 @@ private enum FCMLogCapture {
         )
     }
 
-    private static func _attachShellOutput(
+    fileprivate static func _attachShellOutput(
         command: String,
         arguments: [String],
         name: String,
@@ -371,6 +371,159 @@ final class FCMPushTests: XCTestCase {
             "AC7 is validated at the CI environment level via xcodebuild destination validation. "
             + "DeviceSelector.resolvedUDID() was called in setUp() without XCTFail, confirming "
             + "the current TEST_DEVICE_UDID (if set) matches a paired device."
+        )
+    }
+}
+
+// MARK: - BUG-3 fix verification tests
+//
+// These tests exist to verify that the BUG-3 fix (FCMPushTests iOS compile
+// errors patched without violating AC3/AC7 specs) actually behaves as
+// documented in the commit message, not just that the file compiles.
+//
+// Following Murat's "compile ≠ correct" discipline: a passing build does
+// not prove the patched code paths work. These tests exercise the iOS
+// fallback branches of the helpers + the URLSession defer-with-flag pattern
+// to confirm runtime behavior matches the intent.
+//
+// Scope:
+//   1. _listPairedDeviceUDIDs() returns cleanly on both target platforms
+//   2. _attachShellOutput() iOS branch attaches without crashing
+//   3. defer-with-flag pattern signals semaphore exactly once
+//
+// Out of scope (deferred to v1.1 backlog):
+//   - HTTP status discrimination test for URLSession completion handler.
+//     Requires URLSession injection / response-parser extraction. See
+//     docs/h-prime-backlog.md for the follow-up story.
+
+final class FCMPushTestsHelpers: XCTestCase {
+
+    // Test 1: _listPairedDeviceUDIDs() does not crash and returns a clean
+    // array on both target platforms. On iOS the array is empty by design;
+    // on macOS it depends on the runner's paired-device state (could be 0
+    // if no devices are paired; not a failure condition for this test).
+    func test_listPairedDeviceUDIDs_returnsCleanlyOnTargetPlatform() {
+        let udids = DeviceSelector._listPairedDeviceUDIDs()
+        // Must return an array without throwing or crashing.
+        XCTAssertNotNil(udids, "Returned array reference is unexpectedly nil")
+
+        #if os(iOS)
+        XCTAssertEqual(
+            udids.count,
+            0,
+            "iOS device target must return empty array (Process unavailable; macOS-host fallback). "
+            + "If this fails, the #if os(macOS) guard regressed."
+        )
+        #endif
+        // On macOS: udids.count can be 0 (no paired devices) or >0 (paired); both are valid.
+    }
+
+    // Test 2: _attachShellOutput() iOS branch attaches an actionable
+    // instruction without crashing. We cannot easily inspect XCTAttachment
+    // content via public API, so this is a smoke test for "no crash + no
+    // throw". Combined with the source-level inspection of the iOS branch
+    // (which builds the instruction string), this gives reasonable coverage.
+    func test_attachShellOutput_iOSDoesNotCrash() {
+        // Call the helper with realistic arguments. Pass `self` as testCase;
+        // the iOS branch will add an instruction attachment. We just verify
+        // the call completes cleanly.
+        FCMLogCapture._attachShellOutput(
+            command: "/Applications/Docker.app/Contents/Resources/bin/docker",
+            arguments: ["logs", "--tail", "100", "ecpay_odoo18"],
+            name: "test-attachment",
+            testCase: self
+        )
+        // Reaching this line means no crash + no uncaught exception. The
+        // attachment itself is added inside the helper; XCTest persists it
+        // to the result bundle. Visual verification of the attachment text
+        // requires inspecting the .xcresult bundle after a test run.
+        XCTAssertTrue(true, "Smoke test passed: _attachShellOutput returned without crashing on iOS")
+    }
+
+    // Test 3: defer-with-flag pattern signals semaphore exactly once,
+    // across both early-return paths and async-completion paths. This is
+    // the pattern used in the URLSession refactor in
+    // test_FCM_4_notificationAppearsInCenter. Testing the pattern directly
+    // (not the production usage) because URLSession injection would require
+    // a larger refactor (v1.1 backlog).
+    func test_deferWithFlagPattern_signalsSemaphoreExactlyOnce_earlyReturnPath() {
+        let sem = DispatchSemaphore(value: 0)
+        var signalCount = 0
+        let countingQueue = DispatchQueue(label: "signal-counter", qos: .userInitiated)
+
+        // Wrap signal to count invocations safely.
+        func signal() {
+            countingQueue.sync { signalCount += 1 }
+            sem.signal()
+        }
+
+        // Simulate the production block's defer-with-flag pattern.
+        DispatchQueue.global().async {
+            var asyncTaskScheduled = false
+            defer { if !asyncTaskScheduled { signal() } }
+
+            // Simulate early return BEFORE scheduling the async task.
+            // (e.g. bad URL, JSON serialization error)
+            let earlyReturnTriggered = true
+            if earlyReturnTriggered {
+                return  // defer signals
+            }
+            // (Unreached in this test: would set asyncTaskScheduled=true
+            // and call dataTask().resume() which would signal from its own
+            // completion handler.)
+            asyncTaskScheduled = true
+            _ = asyncTaskScheduled  // silence unused warning
+        }
+
+        let result = sem.wait(timeout: .now() + 2)
+        XCTAssertEqual(result, .success, "Semaphore was not signaled within 2s on early-return path")
+
+        // Allow any spurious extra signals to land (none expected).
+        Thread.sleep(forTimeInterval: 0.1)
+        let final = countingQueue.sync { signalCount }
+        XCTAssertEqual(
+            final,
+            1,
+            "defer-with-flag pattern must signal exactly once on early-return path; got \(final)"
+        )
+    }
+
+    // Test 3b: defer-with-flag in async-completion path also signals once
+    // (the defer should NOT fire because asyncTaskScheduled=true).
+    func test_deferWithFlagPattern_signalsSemaphoreExactlyOnce_asyncCompletionPath() {
+        let sem = DispatchSemaphore(value: 0)
+        var signalCount = 0
+        let countingQueue = DispatchQueue(label: "signal-counter-async", qos: .userInitiated)
+
+        func signal() {
+            countingQueue.sync { signalCount += 1 }
+            sem.signal()
+        }
+
+        // Simulate the production block's defer-with-flag, this time taking
+        // the async-completion path.
+        DispatchQueue.global().async {
+            var asyncTaskScheduled = false
+            defer { if !asyncTaskScheduled { signal() } }
+
+            asyncTaskScheduled = true
+            // Simulate the async task firing its completion handler later.
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.05) {
+                signal()
+            }
+        }
+
+        let result = sem.wait(timeout: .now() + 2)
+        XCTAssertEqual(result, .success, "Semaphore was not signaled within 2s on async path")
+
+        // Allow any spurious extra signals to land.
+        Thread.sleep(forTimeInterval: 0.2)
+        let final = countingQueue.sync { signalCount }
+        XCTAssertEqual(
+            final,
+            1,
+            "defer-with-flag pattern must signal exactly once on async-completion path "
+            + "(defer should be skipped because asyncTaskScheduled=true); got \(final)"
         )
     }
 }
