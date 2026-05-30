@@ -407,14 +407,78 @@ final class FCMPushChaosTests: XCTestCase {
     }
 
     /// Polls springboard for a notification with the given marker.
+    /// Port of the 4-strategy `verifyNotification` algorithm from
+    /// E2E_MediumPriority_Tests.swift::verifyNotification — handles iOS
+    /// folded notification groups (the ODOO app stacks all its push
+    /// notifications into a single collapsed cell). See FCMPushTests.swift
+    /// for the canonical implementation; kept in sync intentionally.
     private func _waitForNotification(containing marker: String, timeout: TimeInterval) -> Bool {
         let top = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01))
         let mid = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         top.press(forDuration: 0.1, thenDragTo: mid)
+        Thread.sleep(forTimeInterval: 1.0)
 
-        let predicate = NSPredicate(format: "label CONTAINS[c] %@", marker)
-        let element = springboard.otherElements.matching(predicate).firstMatch
-        return element.waitForExistence(timeout: timeout)
+        let markerPredicate = NSPredicate(format: "label CONTAINS[c] %@", marker)
+        let appPredicate = NSPredicate(
+            format: "label CONTAINS[c] %@ OR label CONTAINS[c] %@",
+            "ODOO", "Odoo"
+        )
+
+        func findNotification() -> Bool {
+            springboard.scrollViews.matching(markerPredicate).count > 0
+                || springboard.buttons.matching(markerPredicate).count > 0
+                || springboard.otherElements.matching(markerPredicate).count > 0
+                || springboard.staticTexts.matching(markerPredicate).count > 0
+                || springboard.cells.matching(markerPredicate).count > 0
+        }
+
+        func findAppGroup() -> XCUIElement? {
+            let scrollGroups = springboard.scrollViews.matching(appPredicate)
+            if scrollGroups.count > 0 { return scrollGroups.firstMatch }
+            let buttonGroups = springboard.buttons.matching(appPredicate)
+            if buttonGroups.count > 0 { return buttonGroups.firstMatch }
+            let cellGroups = springboard.cells.matching(appPredicate)
+            if cellGroups.count > 0 { return cellGroups.firstMatch }
+            return nil
+        }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if findNotification() { return true }
+            if let group = findAppGroup() {
+                group.tap()
+                Thread.sleep(forTimeInterval: 1.5)
+                if findNotification() { return true }
+            }
+            let focusPredicate = NSPredicate(
+                format: "label CONTAINS '睡眠' OR label CONTAINS 'Sleep' OR label CONTAINS '專注' OR label CONTAINS 'Focus' OR label CONTAINS '勿擾'"
+            )
+            let focusScroll = springboard.scrollViews.matching(focusPredicate)
+            let focusBtn = springboard.buttons.matching(focusPredicate)
+            let focusElement: XCUIElement? = focusScroll.count > 0
+                ? focusScroll.firstMatch
+                : (focusBtn.count > 0 ? focusBtn.firstMatch : nil)
+            if let focus = focusElement {
+                focus.tap()
+                Thread.sleep(forTimeInterval: 1.0)
+                if let group = findAppGroup() {
+                    group.tap()
+                    Thread.sleep(forTimeInterval: 1.0)
+                }
+                if findNotification() { return true }
+            }
+            let swipeFrom = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9))
+            let swipeTo = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+            swipeFrom.press(forDuration: 0.1, thenDragTo: swipeTo)
+            Thread.sleep(forTimeInterval: 1.5)
+            if let group = findAppGroup() {
+                group.tap()
+                Thread.sleep(forTimeInterval: 1.0)
+            }
+            if findNotification() { return true }
+            Thread.sleep(forTimeInterval: 2.0)
+        }
+        return findNotification()
     }
 
     // Below are duplicates of FCMPushE2ETests helpers — kept local because

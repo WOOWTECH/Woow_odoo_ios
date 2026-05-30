@@ -653,6 +653,32 @@ final class FCMPushE2ETests: XCTestCase {
         }
     }
 
+    // MARK: - Deprecated wrapper preserving the original test name
+
+    /// Preserves the original test name and intent of the single-trigger
+    /// E2E test that proved chatter mention → APNs notification end-to-end.
+    /// That intent is now FULLY covered by
+    /// `test_FCM_E2E_all_broadcast_triggers` (B-2 channel-mention case).
+    ///
+    /// Kept as a thin wrapper to:
+    ///   - Preserve any external CI configuration referencing this test name
+    ///   - Document the intent migration for future readers
+    ///   - Avoid losing the original test's history in test reports
+    ///
+    /// If you only want to verify B-2 in isolation (without paying the cost
+    /// of B-1, B-3, B-4, B-5), delete the other entries from
+    /// `BroadcastTrigger.allCases` temporarily, or use Xcode's
+    /// `-only-testing:` flag for surgical runs.
+    @available(*, deprecated, message: "Replaced by test_FCM_E2E_all_broadcast_triggers; B-2 case covers the original intent. See git history before commit 6d406c1 for the original single-trigger implementation.")
+    @MainActor
+    func test_FCM_E2E_loginAndChatterMentionDeliversNotificationOnDevice() {
+        // Delegate to the batched test. If anything in B-1..B-5 fails this
+        // wrapper also fails — slightly broader than the original, but the
+        // batched test's per-trigger summary makes it easy to see whether
+        // the B-2 case (the one this test name describes) was the failure.
+        test_FCM_E2E_all_broadcast_triggers()
+    }
+
     // MARK: - R-05 Phase B: broadcast trigger helpers
 
     /// Dispatches to the per-trigger poster. Centralizing the switch here
@@ -781,15 +807,100 @@ final class FCMPushE2ETests: XCTestCase {
     /// marker. Uses 30s by default (push has been observed up to ~20m in
     /// degraded states; 30s is the tolerated upper bound for this test).
     private func _waitForNotification(containing marker: String, timeout: TimeInterval) -> Bool {
-        // Re-pull notification center so any banner posted since the last
-        // wipe is visible. Cheap and idempotent.
+        // Port of the 4-strategy verifyNotification algorithm from
+        // E2E_MediumPriority_Tests.swift::verifyNotification (UX-44).
+        // iOS folds notifications from the same app (ODOO) into a single
+        // collapsed group cell in notification center. A naive
+        // springboard.otherElements lookup misses notifications hidden
+        // inside the folded group. We try four strategies in order:
+        //   1. Direct match on scrollViews + buttons (top-level cells)
+        //   2. Find the ODOO app group, tap to expand the folded stack
+        //   3. Dismiss focus-mode banner (Sleep/睡眠/專注) then retry expansion
+        //   4. Swipe up to reveal hidden notifications + expand
+        // The marker is unique per sub-trigger so the predicate only checks
+        // the marker substring (not app name). After each strategy we
+        // re-check; first success returns true.
+
         let top = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01))
         let mid = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         top.press(forDuration: 0.1, thenDragTo: mid)
+        Thread.sleep(forTimeInterval: 1.0)
 
-        let predicate = NSPredicate(format: "label CONTAINS[c] %@", marker)
-        let element = springboard.otherElements.matching(predicate).firstMatch
-        return element.waitForExistence(timeout: timeout)
+        let markerPredicate = NSPredicate(format: "label CONTAINS[c] %@", marker)
+        let appPredicate = NSPredicate(
+            format: "label CONTAINS[c] %@ OR label CONTAINS[c] %@",
+            "ODOO", "Odoo"
+        )
+
+        func findNotification() -> Bool {
+            springboard.scrollViews.matching(markerPredicate).count > 0
+                || springboard.buttons.matching(markerPredicate).count > 0
+                || springboard.otherElements.matching(markerPredicate).count > 0
+                || springboard.staticTexts.matching(markerPredicate).count > 0
+                || springboard.cells.matching(markerPredicate).count > 0
+        }
+
+        func findAppGroup() -> XCUIElement? {
+            let scrollGroups = springboard.scrollViews.matching(appPredicate)
+            if scrollGroups.count > 0 { return scrollGroups.firstMatch }
+            let buttonGroups = springboard.buttons.matching(appPredicate)
+            if buttonGroups.count > 0 { return buttonGroups.firstMatch }
+            let cellGroups = springboard.cells.matching(appPredicate)
+            if cellGroups.count > 0 { return cellGroups.firstMatch }
+            return nil
+        }
+
+        let deadline = Date().addingTimeInterval(timeout)
+
+        while Date() < deadline {
+            // Strategy 1: direct match
+            if findNotification() { return true }
+
+            // Strategy 2: tap the ODOO group to expand the folded stack
+            if let group = findAppGroup() {
+                group.tap()
+                Thread.sleep(forTimeInterval: 1.5)
+                if findNotification() { return true }
+            }
+
+            // Strategy 3: focus-mode banner (Do Not Disturb) hides notifications
+            let focusPredicate = NSPredicate(
+                format: "label CONTAINS '睡眠' OR label CONTAINS 'Sleep' OR label CONTAINS '專注' OR label CONTAINS 'Focus' OR label CONTAINS '勿擾'"
+            )
+            let focusScroll = springboard.scrollViews.matching(focusPredicate)
+            let focusBtn = springboard.buttons.matching(focusPredicate)
+            let focusElement: XCUIElement? = focusScroll.count > 0
+                ? focusScroll.firstMatch
+                : (focusBtn.count > 0 ? focusBtn.firstMatch : nil)
+            if let focus = focusElement {
+                focus.tap()
+                Thread.sleep(forTimeInterval: 1.0)
+                if let group = findAppGroup() {
+                    group.tap()
+                    Thread.sleep(forTimeInterval: 1.0)
+                }
+                if findNotification() { return true }
+            }
+
+            // Strategy 4: swipe up to reveal hidden notifications + retry expand
+            let swipeFrom = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9))
+            let swipeTo = springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+            swipeFrom.press(forDuration: 0.1, thenDragTo: swipeTo)
+            Thread.sleep(forTimeInterval: 1.5)
+            if let group = findAppGroup() {
+                group.tap()
+                Thread.sleep(forTimeInterval: 1.0)
+            }
+            if findNotification() { return true }
+
+            // Poll cadence — wait before re-checking the strategies; the
+            // notification may simply not have arrived yet.
+            Thread.sleep(forTimeInterval: 2.0)
+        }
+
+        // Final attempt + diagnostic capture before returning false.
+        if findNotification() { return true }
+        return false
     }
 
     // B-1: @mention on a res.partner record's chatter.
@@ -827,35 +938,70 @@ final class FCMPushE2ETests: XCTestCase {
         )
     }
 
-    // B-3: Direct message demo→admin. We use channel_get to fetch-or-create
-    // the 1:1 DM channel, then message_post into it. The body has no @-tag
-    // — DM delivery is on the recipient side regardless of mention.
+    // B-3: Direct message demo→admin. Odoo 18 wrapped `channel_get` result
+    // into `{Thread: [...]}` or returned `{}` in some configs, so we
+    // instead search for an existing chat channel between demo and admin
+    // and create one if not found. This is what `channel_get` does under
+    // the hood but avoids the unstable return shape.
     private func _postDirectMessage(serverURL: String, marker: String) throws {
         let cookie = try _authenticate(serverURL: serverURL, login: "demo", password: "demo")
-        // channel_get expects partners_to as a list of partner ids; returns the channel record.
-        let channel = try _callKw(
+        // Search for an existing chat between the current user (demo) and
+        // admin (partner_id=3). Odoo 18 stores channel_type='chat' for DMs.
+        // We filter by member partner_ids containing both parties.
+        let existing = try _callKw(
             serverURL: serverURL, cookie: cookie,
-            model: "discuss.channel", method: "channel_get",
+            model: "discuss.channel", method: "search_read",
             args: [],
-            kwargs: ["partners_to": [3]]
+            kwargs: [
+                "domain": [
+                    ["channel_type", "=", "chat"],
+                    ["channel_partner_ids", "in", [3]]
+                ],
+                "fields": ["id"],
+                "limit": 5
+            ]
         )
-        // Result shape varies across Odoo versions. We look for an `id` field
-        // in either the top-level result dict or the first record of an array.
-        let channelId: Int
-        if let dict = channel as? [String: Any], let id = dict["id"] as? Int {
-            channelId = id
-        } else if let arr = channel as? [[String: Any]], let id = arr.first?["id"] as? Int {
-            channelId = id
-        } else {
-            throw BroadcastHelperError.rpcFailed(
+        var channelId: Int? = nil
+        if let rows = existing as? [[String: Any]] {
+            for row in rows {
+                if let id = row["id"] as? Int { channelId = id; break }
+            }
+        }
+        // Fall back to channel_get (Odoo's canonical 1:1 lookup).
+        if channelId == nil {
+            let channelInfo = try _callKw(
+                serverURL: serverURL, cookie: cookie,
                 model: "discuss.channel", method: "channel_get",
-                reason: "unrecognized result shape: \(channel)"
+                args: [],
+                kwargs: ["partners_to": [3]]
+            )
+            // Odoo 18 may wrap as {"Thread": [{...}]} or {"channel_info": {...}}
+            // or return the raw dict. Probe all known shapes.
+            if let dict = channelInfo as? [String: Any] {
+                if let id = dict["id"] as? Int {
+                    channelId = id
+                } else if let thread = dict["Thread"] as? [[String: Any]], let id = thread.first?["id"] as? Int {
+                    channelId = id
+                } else if let info = dict["channel_info"] as? [String: Any], let id = info["id"] as? Int {
+                    channelId = id
+                }
+            } else if let arr = channelInfo as? [[String: Any]], let id = arr.first?["id"] as? Int {
+                channelId = id
+            }
+        }
+        guard let resolvedId = channelId else {
+            throw BroadcastHelperError.rpcFailed(
+                model: "discuss.channel", method: "channel_get/search_read",
+                reason: "could not resolve DM channel between demo and admin (partner_id=3)"
             )
         }
+        // Post into the DM. Note: H' broadcast in discuss_channel.py fires
+        // on message_post for channel_type='chat' — no partner_ids needed
+        // since channel membership defines recipients.
         try _callKw(
             serverURL: serverURL, cookie: cookie,
             model: "discuss.channel", method: "message_post",
-            args: [[channelId]],
+            args: [[resolvedId]],
             kwargs: [
                 "body": "<p>\(marker)</p>",
                 "message_type": "comment",
@@ -864,23 +1010,35 @@ final class FCMPushE2ETests: XCTestCase {
         )
     }
 
-    // B-4: Follower notification. Admin follows admin's own partner record
-    // (already true by default in Odoo demo data); demo posts a plain
-    // comment (no @-tag) — admin should receive via follower subscription.
+    // B-4: Follower notification. Admin (partner_id=3) subscribes to Marc
+    // Demo's partner record (id=7); demo (the user) posts a plain comment
+    // on partner 7. demo is the author → excluded from FCM targets; admin
+    // remains as follower → notification fires. The prior implementation
+    // had admin subscribe to admin's OWN partner record and demo comment
+    // there — Odoo skips notifying the author so admin (=== record owner
+    // in that case via cascading rules) was being skipped. Using a
+    // distinct partner (Marc Demo, id=7) cleanly separates author from
+    // follower.
     private func _postFollowerComment(serverURL: String, marker: String) throws {
-        let cookie = try _authenticate(serverURL: serverURL, login: "demo", password: "demo")
-        // Ensure admin (partner_id=3) is a follower of partner id=3 itself.
-        // message_subscribe is idempotent so re-subscribing is safe.
-        try _callKw(
-            serverURL: serverURL, cookie: cookie,
-            model: "res.partner", method: "message_subscribe",
-            args: [[3]],
-            kwargs: ["partner_ids": [3]]
+        // Subscribe step requires admin auth (subscribing one user to a
+        // record on behalf of another is access-checked in Odoo).
+        let adminCookie = try _authenticate(
+            serverURL: serverURL,
+            login: TestConfig.adminUser,
+            password: TestConfig.adminPass
         )
         try _callKw(
-            serverURL: serverURL, cookie: cookie,
+            serverURL: serverURL, cookie: adminCookie,
+            model: "res.partner", method: "message_subscribe",
+            args: [[7]],
+            kwargs: ["partner_ids": [3]]  // admin's partner
+        )
+        // Demo posts the comment as a separate session.
+        let demoCookie = try _authenticate(serverURL: serverURL, login: "demo", password: "demo")
+        try _callKw(
+            serverURL: serverURL, cookie: demoCookie,
             model: "res.partner", method: "message_post",
-            args: [[3]],
+            args: [[7]],
             kwargs: [
                 "body": "<p>\(marker)</p>",
                 "message_type": "comment",
@@ -895,12 +1053,16 @@ final class FCMPushE2ETests: XCTestCase {
     // an FCM push for admin's registered device.
     private func _createActivityForAdmin(serverURL: String, marker: String) throws {
         let cookie = try _authenticate(serverURL: serverURL, login: "demo", password: "demo")
-        // Look up the activity_type id for "To Do" (default in Odoo demo data).
+        // Look up the FIRST available activity type. Odoo 18 demo data uses
+        // hyphenated "To-Do" (not "To Do") in some locales and translates
+        // the name in others, so searching by exact name is fragile. The
+        // identity of the activity type doesn't matter for FCM — we just
+        // need an activity row to exist so the H' broadcast layer fires.
         let typeResult = try _callKw(
             serverURL: serverURL, cookie: cookie,
             model: "mail.activity.type", method: "search_read",
             args: [],
-            kwargs: ["domain": [["name", "=", "To Do"]], "fields": ["id"], "limit": 1]
+            kwargs: ["domain": [], "fields": ["id", "name"], "limit": 1, "order": "sequence, id"]
         )
         let activityTypeId: Int
         if let rows = typeResult as? [[String: Any]], let first = rows.first, let id = first["id"] as? Int {
@@ -908,7 +1070,7 @@ final class FCMPushE2ETests: XCTestCase {
         } else {
             throw BroadcastHelperError.rpcFailed(
                 model: "mail.activity.type", method: "search_read",
-                reason: "no 'To Do' activity type found"
+                reason: "no activity types exist at all in this Odoo database"
             )
         }
         // Look up res_model_id for res.partner (mail.activity requires it).
