@@ -101,6 +101,11 @@ final class FCMPushChaosTests: XCTestCase {
         XCUIDevice.shared.press(.home)
         Thread.sleep(forTimeInterval: 1.0)
 
+        // The chaos block uses Foundation.Process which is unavailable on
+        // iOS — the iOS branch is unreachable because _skipIfNotMacOSRunner
+        // already threw XCTSkip above. The explicit guard satisfies the
+        // type checker.
+        #if os(macOS)
         // Run the chaos: SIGKILL sidecar, sleep 15s (enough to span the
         // plugin's 3-retry backoff window + the 30s notification timeout
         // below), then EXIT trap restores. We launch the script in the
@@ -143,6 +148,7 @@ final class FCMPushChaosTests: XCTestCase {
             app.state, .runningForeground,
             "iOS app did not survive sidecar SIGKILL — final state=\(app.state.rawValue)"
         )
+        #endif
     }
 
     // ───────────────────────────────────────────────────────────────────
@@ -163,6 +169,8 @@ final class FCMPushChaosTests: XCTestCase {
         XCUIDevice.shared.press(.home)
         Thread.sleep(forTimeInterval: 1.0)
 
+        // See C-1 for the os(macOS) guard rationale.
+        #if os(macOS)
         // Scale TVS to 0 for 90s (60s NFC-1 window + 30s slack to allow
         // the notification timeout below to complete before restore).
         let chaosProc = try _runChaosScript(
@@ -195,6 +203,7 @@ final class FCMPushChaosTests: XCTestCase {
             app.state, .runningForeground,
             "iOS app did not survive central TVS 503 — final state=\(app.state.rawValue)"
         )
+        #endif
     }
 
     // ───────────────────────────────────────────────────────────────────
@@ -214,6 +223,8 @@ final class FCMPushChaosTests: XCTestCase {
         XCUIDevice.shared.press(.home)
         Thread.sleep(forTimeInterval: 1.0)
 
+        // See C-1 for the os(macOS) guard rationale.
+        #if os(macOS)
         // Poison the token in the DB; trap restores after 60s + script exit.
         // The script idles for the given duration so it stays alive long
         // enough for our 2-mention sequence + the H' failure-counter to
@@ -263,6 +274,7 @@ final class FCMPushChaosTests: XCTestCase {
             app.state, .runningForeground,
             "iOS app did not survive token poison — final state=\(app.state.rawValue)"
         )
+        #endif
     }
 
     // ───────────────────────────────────────────────────────────────────
@@ -287,9 +299,15 @@ final class FCMPushChaosTests: XCTestCase {
     /// has elapsed. The script's own EXIT trap is responsible for restoring
     /// the chaos'd service, so even an XCTest abort leaves the cluster
     /// healthy.
+    ///
+    /// macOS-only by construction: Foundation.Process and its return type
+    /// don't exist in the iOS SDK, so the entire symbol is gated. iOS-side
+    /// test methods never reach a call site — they throw XCTSkip first via
+    /// `_skipIfNotMacOSRunner()`, and the chaos-script blocks themselves
+    /// are wrapped in matching `#if os(macOS)` guards.
+    #if os(macOS)
     @discardableResult
     private func _runChaosScript(name: String, arguments: [String]) throws -> Process {
-        #if os(macOS)
         let scriptPath = "\(Self.chaosScriptsDir)/\(name)"
         guard FileManager.default.isExecutableFile(atPath: scriptPath) else {
             throw NSError(
@@ -308,10 +326,8 @@ final class FCMPushChaosTests: XCTestCase {
         task.standardOutput = stdoutPipe
         try task.run()
         return task
-        #else
-        throw XCTSkip("Process() unavailable on iOS target")
-        #endif
     }
+    #endif
 
     /// Drives the launch + login + FCM registration flow so a chaos test
     /// has a registered device row to push to. Aborts the test (via
