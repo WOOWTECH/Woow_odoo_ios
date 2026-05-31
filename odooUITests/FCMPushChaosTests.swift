@@ -35,8 +35,14 @@ final class FCMPushChaosTests: XCTestCase {
     private var app: XCUIApplication!
     private var springboard: XCUIApplication!
 
-    private static let chaosScriptsDir =
-        "/Users/alanlin/woow_fcm_central/central/scripts/chaos"
+    /// P6: chaos scripts directory resolved from the environment variable
+    /// `FCM_CHAOS_SCRIPTS_DIR` so CI runners with different home directories
+    /// don't need to edit source. Falls back to the known local path when the
+    /// env var is unset (developer convenience; not committed to CI config).
+    private static let chaosScriptsDir: String = {
+        ProcessInfo.processInfo.environment["FCM_CHAOS_SCRIPTS_DIR"]
+            ?? "/Users/alanlin/woow_fcm_central/central/scripts/chaos"
+    }()
 
     override func setUp() {
         super.setUp()
@@ -62,16 +68,19 @@ final class FCMPushChaosTests: XCTestCase {
     }
 
     override func tearDown() {
-        // R-05 survival gate: every chaos test must leave the iOS app in
-        // the foreground state, no matter what the central-side chaos did.
-        // A push that arrives but kills the app is still a P0 defect.
+        // P10: R-05 survival gate — chaos tests deliberately background the
+        // app (XCUIDevice.shared.press(.home)) so `.runningBackground` is a
+        // valid end state alongside `.runningForeground`. Both indicate the
+        // app is alive and not crashed. Only states that indicate termination
+        // (e.g. `.notRunning`, `.terminated`) are failures.
         if let app = app {
             let endState = app.state
-            XCTAssertEqual(
-                endState,
-                .runningForeground,
-                "iOS app crashed or backgrounded during chaos test "
-                + "(final state=\(endState.rawValue)). Expected .runningForeground (rawValue=4)."
+            let alive = endState == .runningForeground || endState == .runningBackground
+            XCTAssertTrue(
+                alive,
+                "iOS app crashed or terminated during chaos test "
+                + "(final state=\(endState.rawValue)). "
+                + "Expected .runningForeground (4) or .runningBackground (3)."
             )
         }
         super.tearDown()
@@ -106,20 +115,20 @@ final class FCMPushChaosTests: XCTestCase {
         // already threw XCTSkip above. The explicit guard satisfies the
         // type checker.
         #if os(macOS)
-        // Run the chaos: SIGKILL sidecar, sleep 15s (enough to span the
-        // plugin's 3-retry backoff window + the 30s notification timeout
-        // below), then EXIT trap restores. We launch the script in the
-        // background; the EXIT trap fires when the script process exits,
-        // not when our test method returns.
+        // P8: raise downtime from 15s to 35s so the sidecar stays down for
+        // the full 30s notification-wait window below. At 15s the sidecar
+        // could restart mid-window, allowing a late delivery that makes the
+        // "should NOT arrive" assertion flaky. 35s = 30s wait + 5s margin.
         let chaosProc = try _runChaosScript(
             name: "kill-sidecar.sh",
-            arguments: ["15"]
+            arguments: ["35"]
         )
 
         // Wait 100ms so the kill takes effect before the mention fires.
         Thread.sleep(forTimeInterval: 0.1)
 
-        let marker = "C1-sidecar-killed-\(Int(Date().timeIntervalSince1970))"
+        // P1: UUID nonce prevents marker collision between concurrent or back-to-back runs.
+        let marker = "C1-sidecar-killed-\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.prefix(8))"
         // Best-effort post — the plugin may queue this and ultimately error
         // with "socket-missing". We tolerate POST errors here; the assertion
         // is about the absence of notification + app survival.
@@ -142,11 +151,13 @@ final class FCMPushChaosTests: XCTestCase {
             + "sidecar may not have been restored; check manually."
         )
 
-        // Final app-state check is duplicated in tearDown for safety, but
-        // we inline it here so a failure points at this specific scenario.
-        XCTAssertEqual(
-            app.state, .runningForeground,
-            "iOS app did not survive sidecar SIGKILL — final state=\(app.state.rawValue)"
+        // P10: final app-state check (duplicated in tearDown for safety).
+        // Accept both .runningForeground and .runningBackground — chaos tests
+        // deliberately press home to background the app.
+        let stateC1 = app.state
+        XCTAssertTrue(
+            stateC1 == .runningForeground || stateC1 == .runningBackground,
+            "iOS app crashed or terminated during sidecar SIGKILL — final state=\(stateC1.rawValue)"
         )
         #endif
     }
@@ -181,7 +192,8 @@ final class FCMPushChaosTests: XCTestCase {
         // Give kubectl scale a moment to propagate.
         Thread.sleep(forTimeInterval: 2.0)
 
-        let marker = "C2-central-503-\(Int(Date().timeIntervalSince1970))"
+        // P1: UUID nonce prevents marker collision between concurrent or back-to-back runs.
+        let marker = "C2-central-503-\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.prefix(8))"
         try _postChannelMention(serverURL: serverURL, marker: marker)
 
         // 60s notification timeout — cached-bearer path should still deliver.
@@ -199,9 +211,11 @@ final class FCMPushChaosTests: XCTestCase {
             + "TVS may not have been restored; check 'kubectl get deploy -n woow-fcm-central'."
         )
 
-        XCTAssertEqual(
-            app.state, .runningForeground,
-            "iOS app did not survive central TVS 503 — final state=\(app.state.rawValue)"
+        // P10: accept both .runningForeground and .runningBackground.
+        let stateC2 = app.state
+        XCTAssertTrue(
+            stateC2 == .runningForeground || stateC2 == .runningBackground,
+            "iOS app crashed or terminated during central TVS 503 — final state=\(stateC2.rawValue)"
         )
         #endif
     }
@@ -237,12 +251,13 @@ final class FCMPushChaosTests: XCTestCase {
         // Give the poison-write time to land before mention #1.
         Thread.sleep(forTimeInterval: 2.0)
 
-        let marker1 = "C3-poison-1-\(Int(Date().timeIntervalSince1970))"
+        // P1: UUID nonce prevents marker collision between concurrent or back-to-back runs.
+        let marker1 = "C3-poison-1-\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.prefix(8))"
         try _postChannelMention(serverURL: serverURL, marker: marker1)
         // Wait long enough for the sidecar/central to surface the failure.
         Thread.sleep(forTimeInterval: 10.0)
 
-        let marker2 = "C3-poison-2-\(Int(Date().timeIntervalSince1970))"
+        let marker2 = "C3-poison-2-\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.prefix(8))"
         try _postChannelMention(serverURL: serverURL, marker: marker2)
         Thread.sleep(forTimeInterval: 10.0)
 
@@ -270,9 +285,11 @@ final class FCMPushChaosTests: XCTestCase {
             + "'psql -d odoo18_ecpay -c \"SELECT fcm_token FROM woow_fcm_device WHERE user_id=2;\"'"
         )
 
-        XCTAssertEqual(
-            app.state, .runningForeground,
-            "iOS app did not survive token poison — final state=\(app.state.rawValue)"
+        // P10: accept both .runningForeground and .runningBackground.
+        let stateC3 = app.state
+        XCTAssertTrue(
+            stateC3 == .runningForeground || stateC3 == .runningBackground,
+            "iOS app crashed or terminated during token poison — final state=\(stateC3.rawValue)"
         )
         #endif
     }
@@ -320,10 +337,32 @@ final class FCMPushChaosTests: XCTestCase {
         let task = Process()
         task.launchPath = "/bin/bash"
         task.arguments = [scriptPath] + arguments
+
+        // P14: drain stderr and stdout via readabilityHandler so the kernel
+        // pipe buffer (typically 64 KB) never fills and blocks the child.
+        // Without draining, a verbose chaos script can deadlock the test
+        // runner if its stderr output exceeds the pipe capacity before
+        // waitUntilExit() is called.
         let stderrPipe = Pipe()
         task.standardError = stderrPipe
+        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if !data.isEmpty, let text = String(data: data, encoding: .utf8) {
+                // Route chaos-script stderr to the test runner stdout so
+                // Xcode's test log captures it without extra attachment overhead.
+                print("[chaos-stderr:\(name)] \(text)", terminator: "")
+            }
+        }
+
         let stdoutPipe = Pipe()
         task.standardOutput = stdoutPipe
+        stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if !data.isEmpty, let text = String(data: data, encoding: .utf8) {
+                print("[chaos-stdout:\(name)] \(text)", terminator: "")
+            }
+        }
+
         try task.run()
         return task
     }
@@ -499,6 +538,11 @@ final class FCMPushChaosTests: XCTestCase {
         }
     }
 
+    /// P12 threading contract: DispatchSemaphore bridges async URLSession into
+    /// a synchronous test helper. The semaphore is signaled exactly once — by
+    /// the URLSession completion handler on the normal path, or by sem.wait
+    /// timeout (10s > request timeout 8s) on the failure path. Do not call
+    /// from the main thread; URLSession's delegate queue is separate.
     private func _authenticate(serverURL: String, login: String, password: String) throws -> String {
         let sem = DispatchSemaphore(value: 0)
         var cookie: String?
@@ -513,7 +557,9 @@ final class FCMPushChaosTests: XCTestCase {
             "jsonrpc": "2.0",
             "params": ["db": TestConfig.database, "login": login, "password": password]
         ]
-        req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        // P11: propagate JSON serialization errors (was try?) so callers see
+        // the real failure rather than silently sending an empty body.
+        req.httpBody = try JSONSerialization.data(withJSONObject: payload)
         URLSession.shared.dataTask(with: req) { _, response, _ in
             defer { sem.signal() }
             guard let httpResp = response as? HTTPURLResponse else { return }
@@ -530,6 +576,7 @@ final class FCMPushChaosTests: XCTestCase {
         return c
     }
 
+    /// P12 threading contract: see `_authenticate` for the semaphore contract.
     @discardableResult
     private func _callKw(
         serverURL: String,
@@ -554,7 +601,9 @@ final class FCMPushChaosTests: XCTestCase {
             "jsonrpc": "2.0",
             "params": ["model": model, "method": method, "args": args, "kwargs": kwargs]
         ]
-        req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        // P11: propagate JSON serialization errors (was try?) so callers see
+        // the real failure rather than silently sending an empty body.
+        req.httpBody = try JSONSerialization.data(withJSONObject: payload)
         URLSession.shared.dataTask(with: req) { data, response, error in
             defer { sem.signal() }
             if let e = error { failureReason = e.localizedDescription; return }

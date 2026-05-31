@@ -633,7 +633,8 @@ final class FCMPushE2ETests: XCTestCase {
                 _clearNotificationCenter()
             }
 
-            let marker = "E2E-\(trigger.rawValue)-\(Int(Date().timeIntervalSince1970))"
+            // UUID nonce (P1) prevents marker collision between concurrent or back-to-back runs.
+            let marker = "E2E-\(trigger.rawValue)-\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.prefix(8))"
             do {
                 try _postTrigger(trigger, serverURL: serverURL, marker: marker)
                 let appeared = _waitForNotification(containing: marker, timeout: 30)
@@ -752,8 +753,9 @@ final class FCMPushE2ETests: XCTestCase {
         XCUIDevice.shared.press(.home)
         Thread.sleep(forTimeInterval: 1.0)
 
-        // 4. Post B-2 trigger (channel mention)
-        let marker = "E2E-B-2-\(Int(Date().timeIntervalSince1970))"
+        // 4. Post B-2 trigger (channel mention). UUID nonce (P1) prevents marker
+        //    collision between concurrent or back-to-back runs.
+        let marker = "E2E-B-2-\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.prefix(8))"
         do {
             try _postChannelMention(serverURL: serverURL, marker: marker)
         } catch {
@@ -776,6 +778,83 @@ final class FCMPushE2ETests: XCTestCase {
         XCTAssertTrue(
             appeared,
             "B-2 channel mention: notification with marker '\(marker)' "
+            + "did not appear in notification center within 30s. "
+            + "devices_registered=\(devicesFound). "
+            + "Check pipeline: Odoo plugin → sidecar → central → FCM → APNs → iPhone."
+        )
+
+        // 6. Bring app back to foreground (satisfies tearDown app-state assertion)
+        app.activate()
+        Thread.sleep(forTimeInterval: 1.0)
+    }
+
+    // MARK: - R-05 single-trigger focused E2E test (B-1 record mention)
+
+    /// Focused single-trigger E2E test that proves the end-to-end pipeline
+    /// for B-1 (record chatter @mention). Mirrors `test_FCM_E2E_singleChannelMention`
+    /// but calls `_postRecordMention` instead of `_postChannelMention`.
+    ///
+    /// Marker prefix: `E2E-B-1-` + unix timestamp + UUID nonce.
+    @MainActor
+    func test_FCM_E2E_singleRecordMention() {
+        let serverURL = TestConfig.serverURL
+
+        // 1. Launch + login
+        app.launch()
+        app.activate()
+        let loginField = app.textFields["example.odoo.com"]
+        if loginField.waitForExistence(timeout: 5) {
+            app.loginWithTestCredentials(
+                server: serverURL,
+                database: TestConfig.database,
+                username: TestConfig.adminUser,
+                password: TestConfig.adminPass
+            )
+        }
+        app.tap()
+        XCTAssertTrue(
+            app.buttons["line.3.horizontal"].waitForExistence(timeout: 15),
+            "B-1: main screen never loaded (login failed)"
+        )
+
+        // 2. Wait for FCM device registration
+        let regDeadline = Date().addingTimeInterval(30)
+        var devicesFound = 0
+        while Date() < regDeadline {
+            devicesFound = _countFCMDevicesForAdmin(serverURL: serverURL)
+            if devicesFound > 0 { break }
+            Thread.sleep(forTimeInterval: 2.0)
+        }
+        XCTAssertGreaterThan(devicesFound, 0, "B-1: FCM device never registered")
+
+        // 3. Background app so notification banners surface
+        XCUIDevice.shared.press(.home)
+        Thread.sleep(forTimeInterval: 1.0)
+
+        // 4. Post B-1 trigger (record mention). UUID nonce (P1) prevents marker
+        //    collision between concurrent or back-to-back runs.
+        let marker = "E2E-B-1-\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.prefix(8))"
+        do {
+            try _postRecordMention(serverURL: serverURL, marker: marker)
+        } catch {
+            XCTFail("B-1: _postRecordMention failed: \(error)")
+            return
+        }
+        print("B-1: posted record mention marker='\(marker)', devices=\(devicesFound)")
+
+        // 5. Wait for notification (30s timeout)
+        let appeared = _waitForNotification(containing: marker, timeout: 30)
+
+        // Capture screenshot for CI evidence regardless of pass/fail.
+        let screenshot = XCUIScreen.main.screenshot()
+        let att = XCTAttachment(screenshot: screenshot)
+        att.name = "B-1-singleRecordMention-result"
+        att.lifetime = .keepAlways
+        add(att)
+
+        XCTAssertTrue(
+            appeared,
+            "B-1 record mention: notification with marker '\(marker)' "
             + "did not appear in notification center within 30s. "
             + "devices_registered=\(devicesFound). "
             + "Check pipeline: Odoo plugin → sidecar → central → FCM → APNs → iPhone."
@@ -999,6 +1078,15 @@ final class FCMPushE2ETests: XCTestCase {
     /// Authenticates as the given Odoo user and returns the `session_id`
     /// cookie line (`session_id=…`). Throws `BroadcastHelperError.authFailed`
     /// if the response carries no session_id (wrong creds, db, or RPC body).
+    ///
+    /// Threading contract (P12): uses DispatchSemaphore to bridge async
+    /// URLSession into a synchronous test helper. The semaphore is always
+    /// signaled exactly once — either by the URLSession completion handler
+    /// (normal path) or by `sem.wait` timeout (defensive; avoids the
+    /// semaphore leak if the completion handler is never called). The timeout
+    /// is 10s, chosen to exceed the request's own 8s timeoutInterval.
+    /// WARNING: do not call from the main thread; URLSession uses a shared
+    /// delegate queue and the main thread may not be blocked here in tests.
     private func _authenticate(serverURL: String, login: String, password: String) throws -> String {
         let sem = DispatchSemaphore(value: 0)
         var cookie: String?
@@ -1013,7 +1101,9 @@ final class FCMPushE2ETests: XCTestCase {
             "jsonrpc": "2.0",
             "params": ["db": TestConfig.database, "login": login, "password": password]
         ]
-        req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        // P11: propagate JSON serialization errors (was try?) so callers see
+        // the real failure rather than silently sending an empty body.
+        req.httpBody = try JSONSerialization.data(withJSONObject: payload)
         URLSession.shared.dataTask(with: req) { _, response, _ in
             defer { sem.signal() }
             guard let httpResp = response as? HTTPURLResponse else { return }
@@ -1033,6 +1123,9 @@ final class FCMPushE2ETests: XCTestCase {
     /// Generic `call_kw` invocation. Returns the parsed `result` field on
     /// success, throws `BroadcastHelperError.rpcFailed` on any failure
     /// (non-200, missing result, or non-nil error envelope).
+    ///
+    /// Threading contract (P12): see `_authenticate` for the semaphore contract.
+    /// Same 10s wait / 8s request timeout applies here.
     @discardableResult
     private func _callKw(
         serverURL: String,
@@ -1057,7 +1150,9 @@ final class FCMPushE2ETests: XCTestCase {
             "jsonrpc": "2.0",
             "params": ["model": model, "method": method, "args": args, "kwargs": kwargs]
         ]
-        req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        // P11: propagate JSON serialization errors (was try?) so callers see
+        // the real failure rather than silently sending an empty body.
+        req.httpBody = try JSONSerialization.data(withJSONObject: payload)
         URLSession.shared.dataTask(with: req) { data, response, error in
             defer { sem.signal() }
             if let e = error { failureReason = e.localizedDescription; return }
@@ -1338,15 +1433,26 @@ final class FCMPushE2ETests: XCTestCase {
     // admin (user_id=2) to follow up on partner id=3. The activity model
     // raises an Odoo notification that the H' broadcast layer turns into
     // an FCM push for admin's registered device.
+    //
+    // Key design (P3 fix): ir.model.search_read is admin-only in Odoo 18's
+    // access rules. We resolve the res_model_id via admin auth, then create
+    // the activity as demo so demo is the author (excluded from FCM targets)
+    // and admin is the assignee (receives the push). Mail.activity.type is
+    // also read via admin auth for the same reason.
     private func _createActivityForAdmin(serverURL: String, marker: String) throws {
-        let cookie = try _authenticate(serverURL: serverURL, login: "demo", password: "demo")
+        // Admin auth needed for ir.model + mail.activity.type reads.
+        let adminCookie = try _authenticate(
+            serverURL: serverURL,
+            login: TestConfig.adminUser,
+            password: TestConfig.adminPass
+        )
         // Look up the FIRST available activity type. Odoo 18 demo data uses
         // hyphenated "To-Do" (not "To Do") in some locales and translates
         // the name in others, so searching by exact name is fragile. The
         // identity of the activity type doesn't matter for FCM — we just
         // need an activity row to exist so the H' broadcast layer fires.
         let typeResult = try _callKw(
-            serverURL: serverURL, cookie: cookie,
+            serverURL: serverURL, cookie: adminCookie,
             model: "mail.activity.type", method: "search_read",
             args: [],
             kwargs: ["domain": [], "fields": ["id", "name"], "limit": 1, "order": "sequence, id"]
@@ -1361,8 +1467,9 @@ final class FCMPushE2ETests: XCTestCase {
             )
         }
         // Look up res_model_id for res.partner (mail.activity requires it).
+        // ir.model is admin-only: use adminCookie (P3 fix).
         let modelResult = try _callKw(
-            serverURL: serverURL, cookie: cookie,
+            serverURL: serverURL, cookie: adminCookie,
             model: "ir.model", method: "search_read",
             args: [],
             kwargs: ["domain": [["model", "=", "res.partner"]], "fields": ["id"], "limit": 1]
@@ -1376,8 +1483,11 @@ final class FCMPushE2ETests: XCTestCase {
                 reason: "no res.partner ir.model row"
             )
         }
+        // Create the activity as demo (demo = author → excluded from FCM targets;
+        // user_id=2 (admin) = assignee → receives the push notification).
+        let demoCookie = try _authenticate(serverURL: serverURL, login: "demo", password: "demo")
         try _callKw(
-            serverURL: serverURL, cookie: cookie,
+            serverURL: serverURL, cookie: demoCookie,
             model: "mail.activity", method: "create",
             args: [[
                 [
