@@ -1225,12 +1225,37 @@ final class FCMPushE2ETests: XCTestCase {
             "ODOO", "Odoo"
         )
 
+        // R-05 MATCH-PROOF instrumentation: when an element matches the unique
+        // marker, print the collection it was found in + the matched element's
+        // full label so xcresult console output proves XCUITest's matcher
+        // actually saw the notification (vs. only the test framework's PASS
+        // verdict). Also attaches a screenshot at the instant of match for
+        // visual confirmation. Both are diagnostic-only and do not change
+        // pass/fail logic — `findNotification()` still returns Bool.
         func findNotification() -> Bool {
-            springboard.scrollViews.matching(markerPredicate).count > 0
-                || springboard.buttons.matching(markerPredicate).count > 0
-                || springboard.otherElements.matching(markerPredicate).count > 0
-                || springboard.staticTexts.matching(markerPredicate).count > 0
-                || springboard.cells.matching(markerPredicate).count > 0
+            let probes: [(String, XCUIElementQuery)] = [
+                ("scrollViews", springboard.scrollViews.matching(markerPredicate)),
+                ("buttons", springboard.buttons.matching(markerPredicate)),
+                ("otherElements", springboard.otherElements.matching(markerPredicate)),
+                ("staticTexts", springboard.staticTexts.matching(markerPredicate)),
+                ("cells", springboard.cells.matching(markerPredicate)),
+            ]
+            for (name, q) in probes {
+                let n = q.count
+                if n > 0 {
+                    let label = q.firstMatch.label
+                    print("R-05 MATCH PROOF: marker='\(marker)' "
+                        + "found \(n) match(es) in springboard.\(name); "
+                        + "firstMatch.label='\(label)'")
+                    let matchShot = XCUIScreen.main.screenshot()
+                    let att = XCTAttachment(screenshot: matchShot)
+                    att.name = "match-proof-\(marker)"
+                    att.lifetime = .keepAlways
+                    self.add(att)
+                    return true
+                }
+            }
+            return false
         }
 
         func findAppGroup() -> XCUIElement? {
