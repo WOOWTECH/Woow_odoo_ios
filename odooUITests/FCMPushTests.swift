@@ -441,24 +441,23 @@ final class FCMPushE2ETests: XCTestCase {
     }
 
     override func tearDown() {
-        // R-05 Phase A: app crash-survival assertion. Any test that returns
-        // with the AUT no longer in `.runningForeground` is treated as a
-        // hard failure even if the notification matcher already passed —
-        // a push that arrives but takes the iOS app down is still a P0
-        // defect for the H' pipeline.
-        //
-        // We capture state into a local first so the message can name the
-        // observed state (helps triage when the runner logs only the first
-        // failing assertion).
+        // P10: R-05 Phase A crash-survival assertion. Tests deliberately
+        // background the app (XCUIDevice.shared.press(.home)) so the app is
+        // expected to be in either .runningForeground (if app.activate() was
+        // called at the end) or .runningBackground (if the test ended with the
+        // home-press still in effect). Both states indicate the app is alive.
+        // Only states indicating termination (.notRunning, .terminated) are
+        // failures — they indicate a crash triggered by the push payload or
+        // the in-app notification handler.
         if let app = app, !skipAppStateTearDownAssert {
             let endState = app.state
-            XCTAssertEqual(
-                endState,
-                .runningForeground,
-                "iOS app crashed or backgrounded during test (final state=\(endState.rawValue)). "
-                + "Expected .runningForeground (rawValue=4). A crash here means the push payload "
-                + "or the in-app handler killed the process — investigate AppDelegate "
-                + "didReceiveRemoteNotification + the FCM background-mode entitlement."
+            let alive = endState == .runningForeground || endState == .runningBackground
+            XCTAssertTrue(
+                alive,
+                "iOS app crashed or terminated during test (final state=\(endState.rawValue)). "
+                + "Expected .runningForeground (4) or .runningBackground (3). "
+                + "A crash here means the push payload or the in-app handler killed the process "
+                + "— investigate AppDelegate didReceiveRemoteNotification + FCM background entitlement."
             )
         }
 
