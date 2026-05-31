@@ -504,9 +504,21 @@ final class FCMPushE2ETests: XCTestCase {
         // Attempt 1 (2026-05-31): identifier='clear-button', label='確認清除',
         // value='通知中心'. This is the ellipsis/kebab clear affordance shown
         // next to the app-group stacked header in iOS 18 notification center.
-        let clearById = springboard.buttons["clear-button"]
-        if clearById.waitForExistence(timeout: 2) {
-            clearById.tap()
+        //
+        // When multiple app-groups are in the center (e.g. after a prior test
+        // left notifications), each group has its own 'clear-button'. We tap
+        // ALL of them in sequence using .allElementsBoundByIndex iteration to
+        // avoid "multiple matching elements" ambiguity from a single .tap().
+        let clearButtons = springboard.buttons.matching(identifier: "clear-button")
+        let clearCount = clearButtons.count
+        if clearCount > 0 {
+            for i in (0..<clearCount).reversed() {
+                let btn = clearButtons.element(boundBy: i)
+                if btn.exists {
+                    btn.tap()
+                    Thread.sleep(forTimeInterval: 0.3)
+                }
+            }
             Thread.sleep(forTimeInterval: 0.5)
         } else {
             // Fallback: match by label. Include both English and zh-TW (Traditional
