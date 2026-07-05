@@ -1,6 +1,27 @@
 import Foundation
 import UIKit
 
+/// Serializes token-registration passes and drops a redundant pass when an
+/// identical token is already being registered. Both `didReceiveRegistrationToken`
+/// and `onLoginSuccess` can fire for the SAME token within milliseconds at launch;
+/// without this guard they race the same N `register_device` calls twice (MA-1).
+actor TokenRegistrationGate {
+    static let shared = TokenRegistrationGate()
+
+    private var inFlightToken: String?
+
+    /// Runs `body` unless an identical `token` pass is already in flight.
+    /// Returns `false` (work skipped) when deduplicated, `true` when it ran.
+    @discardableResult
+    func run(token: String, _ body: @Sendable () async -> Void) async -> Bool {
+        if inFlightToken == token { return false }
+        inFlightToken = token
+        defer { inFlightToken = nil }
+        await body()
+        return true
+    }
+}
+
 /// Manages FCM token registration with Odoo servers.
 /// Ported from Android: FcmTokenRepository.kt
 protocol PushTokenRepositoryProtocol {
@@ -34,9 +55,26 @@ final class PushTokenRepository: PushTokenRepositoryProtocol {
         secureStorage.getFcmToken()
     }
 
-    /// Registers FCM token with all active Odoo accounts.
-    /// Posts to /woow_fcm_push/register with platform: "ios".
+    /// Registers the FCM token with all active Odoo accounts (register_device, platform: "ios").
+    ///
+    /// If a DIFFERENT token was previously stored (Firebase rotated it), the OLD token is
+    /// first unregistered from every account's server so no "ghost" device row can keep an
+    /// old company able to push across the N Odoo DBs (MA-1 / FR-MA-4).
+    ///
+    /// Deduplicated via `TokenRegistrationGate`: concurrent calls for the same token
+    /// (login + Firebase callback at launch) run the network work once.
     func registerTokenWithAllAccounts(_ token: String) async {
+        await TokenRegistrationGate.shared.run(token: token) { [self] in
+            await performRegistration(token)
+        }
+    }
+
+    private func performRegistration(_ token: String) async {
+        let oldToken = getToken()
+        if let oldToken, oldToken != token {
+            await unregisterOldTokenFromAllAccounts(oldToken)
+        }
+
         saveToken(token)
 
         let accounts = accountRepository.getAllAccounts()
@@ -55,6 +93,25 @@ final class PushTokenRepository: PushTokenRepositoryProtocol {
                 )
             } catch {
                 AppLogger.push.error("Failed to register token with \(account.serverUrl): \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    /// Unregisters a specific (old) FCM token from every account's server on rotation.
+    /// Best-effort per account — a failure is logged and never blocks the new token's
+    /// registration. Uses `fullServerUrl` to match the register call form (MA-1).
+    private func unregisterOldTokenFromAllAccounts(_ oldToken: String) async {
+        for account in accountRepository.getAllAccounts() {
+            do {
+                _ = try await apiClient.callKw(
+                    serverUrl: account.fullServerUrl,
+                    model: "woow.fcm.device",
+                    method: "unregister_device",
+                    args: [],
+                    kwargs: ["fcm_token": oldToken]
+                )
+            } catch {
+                AppLogger.push.error("Failed to unregister rotated token from \(account.serverUrl): \(error.localizedDescription, privacy: .public)")
             }
         }
     }
