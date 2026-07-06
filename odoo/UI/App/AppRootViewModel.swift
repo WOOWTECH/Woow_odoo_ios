@@ -21,11 +21,18 @@ final class AppRootViewModel: ObservableObject {
 
     private let accountRepository: AccountRepositoryProtocol
 
+    private let pushTokenRepository: PushTokenRepositoryProtocol
+
     /// Creates the root ViewModel.
-    /// - Parameter accountRepository: Repository to query for the active account.
-    ///   Defaults to the production `AccountRepository`.
-    init(accountRepository: AccountRepositoryProtocol = AccountRepository()) {
+    /// - Parameters:
+    ///   - accountRepository: Repository to query for the active account.
+    ///   - pushTokenRepository: Repository used to (re-)register the FCM token after login.
+    init(
+        accountRepository: AccountRepositoryProtocol = AccountRepository(),
+        pushTokenRepository: PushTokenRepositoryProtocol = PushTokenRepository()
+    ) {
         self.accountRepository = accountRepository
+        self.pushTokenRepository = pushTokenRepository
     }
 
     /// Checks Core Data for an active account and transitions launch state accordingly.
@@ -36,8 +43,19 @@ final class AppRootViewModel: ObservableObject {
     }
 
     /// Transitions to the authenticated state after a successful login.
+    ///
+    /// Also re-registers the stored FCM token with all accounts. This is
+    /// required because Firebase can deliver the FCM token at launch — BEFORE
+    /// this account is saved — in which case `didReceiveRegistrationToken`
+    /// registers it to zero accounts and nothing else retries. That path covers
+    /// account-before-token; this covers token-before-account.
     func onLoginSuccess() {
         launchState = .authenticated
+        Task { [pushTokenRepository] in
+            if let token = pushTokenRepository.getToken() {
+                await pushTokenRepository.registerTokenWithAllAccounts(token)
+            }
+        }
     }
 
     /// Transitions back to the login state when the session expires
