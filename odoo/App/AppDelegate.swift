@@ -24,9 +24,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         // Request notification permission
         UNUserNotificationCenter.current().delegate = self
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
-            #if DEBUG
-            print("[AppDelegate] Notification permission: \(granted)")
-            #endif
+            AppLogger.lifecycle.info("Notification permission: \(granted, privacy: .public)")
         }
 
         // Register notification category with hidden previews placeholder (G7).
@@ -209,10 +207,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         #if canImport(FirebaseMessaging)
         Messaging.messaging().apnsToken = deviceToken
         #endif
-        #if DEBUG
         let token = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
-        print("[AppDelegate] APNs token: \(token)")
-        #endif
+        AppLogger.push.debug("APNs token registered: \(token)")
     }
 
     // MARK: - Remote Notification Handler
@@ -233,10 +229,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         let aps = userInfo["aps"] as? [String: Any]
         let hasSystemAlert = aps?["alert"] != nil
 
-        #if DEBUG
         let dataKeys = userInfo.keys.compactMap { $0 as? String }.sorted()
-        print("[AppDelegate] Received remote notification (keys: \(dataKeys), systemAlert: \(hasSystemAlert))")
-        #endif
+        AppLogger.push.info("Received remote notification (keys: \(dataKeys, privacy: .public), systemAlert: \(hasSystemAlert, privacy: .public))")
 
         if hasSystemAlert {
             // System already showed the notification — just acknowledge
@@ -302,9 +296,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 extension AppDelegate: MessagingDelegate {
     func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
         guard let token = fcmToken else { return }
-        #if DEBUG
-        print("[AppDelegate] FCM token: \(token)")
-        #endif
+        AppLogger.push.debug("FCM token received: \(token)")
 
         Task {
             let repo = PushTokenRepository()

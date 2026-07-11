@@ -144,9 +144,7 @@ final class LocationCoordinator: NSObject, CLLocationManagerDelegate {
         }
 
         if manager.accuracyAuthorization == .reducedAccuracy {
-            #if DEBUG
-            print("[LocationCoordinator] Delivering reduced-accuracy location (~1-3km centroid)")
-            #endif
+            AppLogger.location.info("Delivering reduced-accuracy location (~1-3km centroid)")
         }
 
         let lat = location.coordinate.latitude
@@ -160,11 +158,9 @@ final class LocationCoordinator: NSObject, CLLocationManagerDelegate {
             guard let webView = request.webView else { continue }
             let js = "__woowResolveGeo('\(requestId)', \(lat), \(lng), \(accuracy));"
             webView.evaluateJavaScript(js) { _, error in
-                #if DEBUG
                 if let error {
-                    print("[LocationCoordinator] evaluateJavaScript resolve failed: \(error.localizedDescription)")
+                    AppLogger.location.error("evaluateJavaScript resolve failed: \(error.localizedDescription, privacy: .public)")
                 }
-                #endif
             }
         }
     }
@@ -193,11 +189,9 @@ final class LocationCoordinator: NSObject, CLLocationManagerDelegate {
         let safeMessage = message.replacingOccurrences(of: "'", with: "\\'")
         let js = "__woowRejectGeo('\(requestId)', \(code), '\(safeMessage)');"
         webView.evaluateJavaScript(js) { _, error in
-            #if DEBUG
             if let error {
-                print("[LocationCoordinator] evaluateJavaScript reject failed: \(error.localizedDescription)")
+                AppLogger.location.error("evaluateJavaScript reject failed: \(error.localizedDescription, privacy: .public)")
             }
-            #endif
         }
     }
 

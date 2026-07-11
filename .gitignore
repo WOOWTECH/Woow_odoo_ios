@@ -31,3 +31,12 @@ Podfile.lock
 # IDE
 .idea/
 .vscode/
+
+# BMad — personal/generated; project-shared config (_bmad/config.yaml,
+# _bmad/module-help.csv, _bmad/bmm/) stays tracked.
+_bmad/config.user.yaml
+_bmad-output/
+
+# P5: TestConfig.plist contains live tunnel URLs and credentials — never commit.
+# Operators copy TestConfig.plist.example → TestConfig.plist and fill in values.
+odooUITests/TestConfig.plist

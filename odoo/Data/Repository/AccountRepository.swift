@@ -132,9 +132,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
             case .success:
                 break // Session valid, proceed
             case .error:
-                #if DEBUG
-                print("[AccountRepository] Session validation failed for \(account.username)")
-                #endif
+                AppLogger.auth.info("Session validation failed for \(account.username)")
                 return false
             }
         }
@@ -204,9 +202,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
                 kwargs: ["fcm_token": token]
             )
         } catch {
-            #if DEBUG
-            print("[AccountRepository] FCM unregister failed for \(serverUrl): \(error)")
-            #endif
+            AppLogger.push.error("FCM unregister failed for \(serverUrl): \(error.localizedDescription, privacy: .public)")
         }
     }
 

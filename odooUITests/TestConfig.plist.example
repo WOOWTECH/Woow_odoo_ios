@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+    TestConfig.plist.example — R-05 operator setup guide.
+
+    USAGE:
+      cp odooUITests/TestConfig.plist.example odooUITests/TestConfig.plist
+      # Edit TestConfig.plist with your live Cloudflare tunnel URL and credentials.
+      # Do NOT commit TestConfig.plist — it is gitignored (P5).
+
+    FIELDS:
+      ServerURL   — Cloudflare tunnel host WITHOUT https:// prefix
+                    (e.g. "abc-def-ghi.trycloudflare.com").
+                    Run `cloudflared tunnel` and read the assigned URL from the log.
+      Database    — Odoo database name (e.g. "odoo18_ecpay").
+      AdminUser   — Odoo admin username (default: "admin").
+      AdminPass   — Odoo admin password (default: "admin").
+      SecondUser  — Optional second test-account login.
+      SecondPass  — Optional second test-account password.
+      TestUser    — Optional additional test-account login.
+      TestPass    — Optional additional test-account password.
+      SenderEmail — Optional email-based test sender.
+      SenderPass  — Optional email-based test sender password.
+-->
+<plist version="1.0">
+<dict>
+    <key>AdminPass</key>
+    <string>REPLACE_WITH_ADMIN_PASSWORD</string>
+    <key>AdminUser</key>
+    <string>admin</string>
+    <key>Database</key>
+    <string>REPLACE_WITH_DB_NAME</string>
+    <key>SecondPass</key>
+    <string>REPLACE_WITH_SECOND_PASS</string>
+    <key>SecondUser</key>
+    <string>REPLACE_WITH_SECOND_USER</string>
+    <key>SenderEmail</key>
+    <string>REPLACE_WITH_SENDER_EMAIL</string>
+    <key>SenderPass</key>
+    <string>REPLACE_WITH_SENDER_PASS</string>
+    <key>ServerURL</key>
+    <string>localhost</string>
+    <key>TestPass</key>
+    <string>REPLACE_WITH_TEST_PASS</string>
+    <key>TestUser</key>
+    <string>REPLACE_WITH_TEST_USER</string>
+</dict>
+</plist>

@@ -48,6 +48,13 @@ enum SharedTestConfig {
     static let secondPass = ProcessInfo.processInfo.environment["TEST_SECOND_PASS"]
         ?? plist["SecondPass"] as? String
         ?? "XCTest2026!"
+
+    // E8-S2: Target device for FCM push E2E tests.
+    // AC4: no UDID is hardcoded here; the value comes from env or plist only.
+    // AC5: set TEST_DEVICE_UDID env var or TestConfig.plist "DeviceUDID" key.
+    // AC6: nil means "use the single paired device automatically".
+    static let deviceUDID: String? = ProcessInfo.processInfo.environment["TEST_DEVICE_UDID"]
+        ?? plist["DeviceUDID"] as? String
 }
 
 /// Dummy class to locate the test bundle
