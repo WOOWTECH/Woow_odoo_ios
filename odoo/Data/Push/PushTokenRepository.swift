@@ -80,7 +80,7 @@ final class PushTokenRepository: PushTokenRepositoryProtocol {
         let accounts = accountRepository.getAllAccounts()
         for account in accounts {
             do {
-                _ = try await apiClient.callKw(
+                let response = try await apiClient.callKw(
                     serverUrl: account.fullServerUrl,
                     model: "woow.fcm.device",
                     method: "register_device",
@@ -91,9 +91,35 @@ final class PushTokenRepository: PushTokenRepositoryProtocol {
                         "platform": "ios"
                     ]
                 )
+                // Persist the server-issued tenant id so future push notifications for
+                // this server can be routed to this account. Backward-compatible: an
+                // older plugin that returns no tenant id leaves the field untouched.
+                if let tenantId = Self.parseTenantId(from: response) {
+                    accountRepository.setTenantId(tenantId, forServerUrl: account.serverUrl)
+                }
             } catch {
                 AppLogger.push.error("Failed to register token with \(account.serverUrl): \(error.localizedDescription, privacy: .public)")
             }
+        }
+    }
+
+    /// Extracts the opaque tenant id from a `register_device` response.
+    ///
+    /// Accepts the value under either `tenant_id` or `odoo_tenant_id`, coercing numeric
+    /// ids to their string form. Returns `nil` for any other shape (older plugin, boolean
+    /// `true`, etc.) so registration stays backward-compatible.
+    static func parseTenantId(from response: Any?) -> String? {
+        guard let dict = response as? [String: Any] else { return nil }
+        let raw = dict["tenant_id"] ?? dict["odoo_tenant_id"]
+        switch raw {
+        case let value as String where !value.isEmpty:
+            return value
+        case let value as Int:
+            return String(value)
+        case let value as Int64:
+            return String(value)
+        default:
+            return nil
         }
     }
 

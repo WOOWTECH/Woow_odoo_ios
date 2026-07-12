@@ -885,6 +885,25 @@ final class ConfigViewModelTests: XCTestCase {
 
         func getAllAccounts() -> [OdooAccount] { accounts }
 
+        func getAccount(byTenantId tenantId: String) -> OdooAccount? {
+            guard !tenantId.isEmpty else { return nil }
+            return accounts.first(where: { $0.tenantId == tenantId })
+        }
+
+        func activateAccount(id: String) -> Bool {
+            guard accounts.contains(where: { $0.id == id }) else { return false }
+            accounts = accounts.map { account in
+                OdooAccount(
+                    id: account.id, serverUrl: account.serverUrl, database: account.database,
+                    username: account.username, displayName: account.displayName,
+                    userId: account.userId, isActive: account.id == id, tenantId: account.tenantId
+                )
+            }
+            return true
+        }
+
+        func setTenantId(_ tenantId: String, forServerUrl serverUrl: String) {}
+
         func switchAccount(id: String) async -> Bool {
             if switchResult {
                 accounts = accounts.map { account in
@@ -1168,6 +1187,9 @@ final class MainViewModelTests: XCTestCase {
         }
         func getActiveAccount() -> OdooAccount? { activeAccount }
         func getAllAccounts() -> [OdooAccount] { activeAccount.map { [$0] } ?? [] }
+        func getAccount(byTenantId tenantId: String) -> OdooAccount? { nil }
+        func activateAccount(id: String) -> Bool { true }
+        func setTenantId(_ tenantId: String, forServerUrl serverUrl: String) {}
         func switchAccount(id: String) async -> Bool { false }
         func logout(accountId: String?) async {}
         func removeAccount(id: String) async {}

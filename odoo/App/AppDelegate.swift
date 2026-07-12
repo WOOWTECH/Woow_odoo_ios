@@ -274,18 +274,47 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         completionHandler()
     }
 
-    /// Extracted for testability — processes notification tap deep link.
+    /// Processes a notification tap and routes its deep link to the correct account.
     ///
-    /// Reads the active account's server host from Core Data to pass into the validator.
-    /// The `hasPrefix("/web")` short-circuit is intentionally absent — validation must always
-    /// run through `DeepLinkValidator.isValid` to enforce the strict path regex and prevent
-    /// path-traversal or host-override payloads from bypassing validation.
+    /// Multi-account routing (P0 cross-tenant isolation):
+    /// - Reads the opaque `odoo_tenant_id` from the payload and resolves it to a local
+    ///   account. On a match it switches the active account to that target **synchronously**
+    ///   (so the UI never renders account A during the transition) and stores the pending
+    ///   deep link **bound to the target account id**.
+    /// - A tenant id that resolves to no local account is dropped — the active account is
+    ///   never touched and the link is never applied to it.
+    /// - A payload with no tenant id (older plugin) keeps the current behaviour: validate
+    ///   against the active account and store the link bound to it.
+    ///
+    /// Validation always runs through `DeepLinkValidator.isValid` against the *target*
+    /// account's host, so path-traversal or host-override payloads cannot bypass it.
+    ///
+    /// - Parameters:
+    ///   - userInfo: The raw notification payload.
+    ///   - accountRepository: Injected for testability; defaults to a live repository.
     @MainActor
-    func handleNotificationTap(userInfo: [AnyHashable: Any]) {
-        guard let actionUrl = userInfo["odoo_action_url"] as? String else { return }
-        let serverHost = AccountRepository().getActiveAccount()?.serverHost ?? ""
-        if DeepLinkValidator.isValid(url: actionUrl, serverHost: serverHost) {
-            DeepLinkManager.shared.setPending(actionUrl)
+    func handleNotificationTap(
+        userInfo: [AnyHashable: Any],
+        accountRepository: AccountRepositoryProtocol = AccountRepository()
+    ) {
+        let decision = NotificationDeepLinkRouter.decide(
+            userInfo: userInfo,
+            resolveTenant: { accountRepository.getAccount(byTenantId: $0) },
+            activeAccount: accountRepository.getActiveAccount()
+        )
+
+        switch decision {
+        case .switchAndRoute(let accountId, let url):
+            // Switch BEFORE storing the link so the observed active account is already the
+            // target — the WebView never loads account A during a cross-account tap.
+            accountRepository.activateAccount(id: accountId)
+            DeepLinkManager.shared.setPending(url, accountId: accountId)
+
+        case .useActive(let accountId, let url):
+            DeepLinkManager.shared.setPending(url, accountId: accountId)
+
+        case .drop(let reason):
+            AppLogger.push.info("Notification deep link dropped: \(String(describing: reason), privacy: .public)")
         }
     }
 }

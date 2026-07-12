@@ -12,6 +12,14 @@ struct OdooAccount: Identifiable, Codable, Equatable, Hashable, Sendable {
     let avatarBase64: String?
     let lastLogin: Date
     let isActive: Bool
+    /// Opaque tenant identifier issued by the Odoo server at device registration.
+    ///
+    /// This is the routing key for multi-account push notifications: an incoming FCM
+    /// payload carries the originating server's `odoo_tenant_id`, and the app matches it
+    /// against this value to find the local account that owns the notification. It is
+    /// `nil` for accounts registered before this field existed (lightweight-migration
+    /// default) or before the server has returned a tenant id.
+    let tenantId: String?
 
     init(
         id: String = UUID().uuidString,
@@ -22,7 +30,8 @@ struct OdooAccount: Identifiable, Codable, Equatable, Hashable, Sendable {
         userId: Int? = nil,
         avatarBase64: String? = nil,
         lastLogin: Date = Date(),
-        isActive: Bool = false
+        isActive: Bool = false,
+        tenantId: String? = nil
     ) {
         self.id = id
         self.serverUrl = serverUrl
@@ -33,6 +42,7 @@ struct OdooAccount: Identifiable, Codable, Equatable, Hashable, Sendable {
         self.avatarBase64 = avatarBase64
         self.lastLogin = lastLogin
         self.isActive = isActive
+        self.tenantId = tenantId
     }
 
     /// Returns server URL with https:// prefix guaranteed.

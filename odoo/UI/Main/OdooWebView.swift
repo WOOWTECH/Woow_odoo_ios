@@ -5,9 +5,18 @@ import WebKit
 /// WKWebView wrapper for displaying Odoo web UI.
 /// Ported from Android: MainScreen.kt OdooWebView composable.
 /// UX-25 through UX-34.
+///
+/// Single-view account switching (P0 cross-tenant fix): this representable is **never**
+/// recreated on account change (no `.id(account)`). Instead `updateUIView` drives all
+/// transitions through the coordinator, which hosts a per-account child `WKWebView` inside a
+/// stable container. Switching accounts swaps the child WebView so each account gets its own
+/// `WKWebsiteDataStore` (isolated cookies), while the SwiftUI identity — and the location
+/// bridge — persists.
 struct OdooWebView: UIViewRepresentable {
     let serverUrl: String
     let database: String
+    /// The active account's id. Drives per-account data-store isolation and deep-link binding.
+    let accountId: String
     let sessionId: String?
     let deepLinkUrl: String?
     let onSessionExpired: () -> Void
@@ -21,17 +30,173 @@ struct OdooWebView: UIViewRepresentable {
         )
     }
 
-    func makeUIView(context: Context) -> WKWebView {
+    func makeUIView(context: Context) -> UIView {
+        let container = UIView()
+        context.coordinator.attach(to: container)
+        context.coordinator.apply(
+            serverUrl: serverUrl,
+            database: database,
+            accountId: accountId,
+            sessionId: sessionId,
+            deepLink: deepLinkUrl
+        )
+        return container
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        // The single mutation entry point: reload on account/server change, or drive a
+        // warm same-account deep-link navigation. All logic lives in the coordinator.
+        context.coordinator.apply(
+            serverUrl: serverUrl,
+            database: database,
+            accountId: accountId,
+            sessionId: sessionId,
+            deepLink: deepLinkUrl
+        )
+    }
+}
+
+/// WKWebView delegate handling navigation policy, OWL fixes, security, and — new for the
+/// multi-account fix — per-account WebView lifecycle and load-gated deep-link application.
+final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+    let onSessionExpired: () -> Void
+    @Binding var isLoading: Bool
+
+    /// Owns the location coordinator for the lifetime of this WebView coordinator.
+    /// `lazy` so its `activeAccountHost` closure can capture `self` and always report the
+    /// current account's host after a switch (avoids the Android stale-closure bug).
+    private(set) lazy var locationCoordinator: LocationCoordinator = LocationCoordinator(
+        gate: LocationPermissionGate(),
+        activeAccountHost: { [weak self] in self?.currentServerHost }
+    )
+
+    /// Stable host container; the per-account child WebView is swapped inside it.
+    private weak var container: UIView?
+    /// The child WebView for the current account, or nil before the first `apply`.
+    private var webView: WKWebView?
+
+    // Current account state — mutated only in `apply` on the main thread.
+    private var currentAccountId: String?
+    private var currentServerUrl: String
+    private(set) var currentServerHost: String
+    private var currentDatabase: String = ""
+
+    /// A deep link captured on account switch, applied once in `didFinish` when the loaded
+    /// host matches the target (load-gated). Cleared on apply so it fires exactly once.
+    private var pendingDeepLink: String?
+    /// The last deep link seen, to detect a NEW warm same-account link.
+    private var lastDeepLink: String?
+
+    #if DEBUG
+    private var testProxy: JSBridgeMessageHandlerProxy?
+    #endif
+
+    init(serverUrl: String, onSessionExpired: @escaping () -> Void, isLoading: Binding<Bool>) {
+        self.onSessionExpired = onSessionExpired
+        self._isLoading = isLoading
+        self.currentServerUrl = serverUrl
+        self.currentServerHost = URL(string: serverUrl)?.host ?? ""
+        super.init()
+    }
+
+    // MARK: - Container wiring
+
+    /// Records the stable container view the child WebViews are hosted inside.
+    func attach(to container: UIView) {
+        self.container = container
+    }
+
+    // MARK: - Single mutation entry point
+
+    /// Reconciles the WebView with the desired account state.
+    ///
+    /// - On account or server change (or first call): builds a fresh child WebView with the
+    ///   target account's isolated data store, injects that account's session cookie, loads
+    ///   the base page, and captures any deep link to apply once the load finishes.
+    /// - On the same account with a NEW deep link (warm foreground tap): drives navigation
+    ///   directly — a `#fragment`-only change uses `evaluateJavaScript` (a plain `load()` is a
+    ///   no-op inside the running OWL SPA), otherwise a full load.
+    func apply(serverUrl: String, database: String, accountId: String, sessionId: String?, deepLink: String?) {
+        let switched = webView == nil
+            || accountId != currentAccountId
+            || serverUrl != currentServerUrl
+
+        if switched {
+            currentAccountId = accountId
+            currentServerUrl = serverUrl
+            currentServerHost = URL(string: serverUrl)?.host ?? ""
+            currentDatabase = database
+            lastDeepLink = deepLink
+            pendingDeepLink = (deepLink?.isEmpty == false) ? deepLink : nil
+            rebuildWebView(accountId: accountId, serverUrl: serverUrl, database: database, sessionId: sessionId)
+        } else if let deepLink, !deepLink.isEmpty, deepLink != lastDeepLink {
+            lastDeepLink = deepLink
+            applyDeepLink(deepLink)
+            consumePending(for: accountId)
+        }
+    }
+
+    // MARK: - Per-account WebView construction
+
+    private func rebuildWebView(accountId: String, serverUrl: String, database: String, sessionId: String?) {
+        let config = makeConfiguration(accountId: accountId)
+        let newWebView = WKWebView(frame: .zero, configuration: config)
+        newWebView.navigationDelegate = self
+        newWebView.uiDelegate = self
+        newWebView.allowsBackForwardNavigationGestures = true
+
+        #if DEBUG
+        testProxy?.webView = newWebView
+        #endif
+
+        // Swap the child WebView inside the stable container.
+        webView?.removeFromSuperview()
+        webView = newWebView
+        if let container {
+            newWebView.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(newWebView)
+            NSLayoutConstraint.activate([
+                newWebView.topAnchor.constraint(equalTo: container.topAnchor),
+                newWebView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+                newWebView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                newWebView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            ])
+        }
+
+        // Inject the target account's session cookie into ITS OWN data store before loading,
+        // then load the base page. The deep link (if any) is applied load-gated in didFinish.
+        let store = config.websiteDataStore
+        if let sessionId,
+           let host = URL(string: serverUrl)?.host,
+           let cookie = HTTPCookie(properties: [
+               .name: "session_id",
+               .value: sessionId,
+               .domain: host,
+               .path: "/",
+               .secure: "TRUE",
+           ]) {
+            store.httpCookieStore.setCookie(cookie) { [weak self] in
+                self?.loadBase(into: newWebView, serverUrl: serverUrl, database: database)
+            }
+        } else {
+            loadBase(into: newWebView, serverUrl: serverUrl, database: database)
+        }
+    }
+
+    private func makeConfiguration(accountId: String) -> WKWebViewConfiguration {
         let config = WKWebViewConfiguration()
         config.defaultWebpagePreferences.allowsContentJavaScript = true
-        // App Store hardening: do NOT let pages spawn popup windows via
-        // window.open() without user gesture. The `WKUIDelegate` below
-        // still routes legitimate `target="_blank"` clicks back into the
-        // same WebView, so user-initiated links keep working.
+        // App Store hardening: do NOT let pages spawn popup windows via window.open()
+        // without a user gesture. The WKUIDelegate below still routes legitimate
+        // target="_blank" clicks back into the same WebView.
         config.preferences.javaScriptCanOpenWindowsAutomatically = false
 
-        // Install the geolocation shim as a WKUserScript so it runs before any
-        // page JavaScript, overriding navigator.geolocation with the native bridge.
+        // Per-account isolated cookie/data store — account A's cookies can never load under
+        // account B (P0 cross-tenant isolation). iOS 17+ gets a durable per-identifier store;
+        // older OSes and legacy/empty account ids fall back to the shared default store.
+        config.websiteDataStore = Self.dataStore(forAccountId: accountId)
+
+        // Install the geolocation shim so it runs before any page JavaScript.
         if let shimURL = Bundle.main.url(forResource: "geolocation_shim", withExtension: "js"),
            let shimSource = try? String(contentsOf: shimURL, encoding: .utf8) {
             let userScript = WKUserScript(
@@ -43,9 +208,6 @@ struct OdooWebView: UIViewRepresentable {
         }
 
         // Register the location message handler proxy (avoids retain cycle).
-        // The proxy holds coordinator weakly; the coordinator's activeAccountHost
-        // closure always resolves the current serverUrl, not a snapshot.
-        let locationCoordinator = context.coordinator.locationCoordinator
         let proxy = LocationMessageHandlerProxy(coordinator: locationCoordinator)
         config.userContentController.add(proxy, name: "requestLocation")
 
@@ -53,114 +215,116 @@ struct OdooWebView: UIViewRepresentable {
         // Debug-only test bridge: lets XCUITests inject JS via "__woowTestEval" handler.
         let testProxy = JSBridgeMessageHandlerProxy()
         config.userContentController.add(testProxy, name: "__woowTestEval")
+        self.testProxy = testProxy
         #endif
 
-        let webView = WKWebView(frame: .zero, configuration: config)
-        // Give the test bridge a reference to the webView so it can evaluateJavaScript.
-        #if DEBUG
-        testProxy.webView = webView
-        #endif
-
-        webView.navigationDelegate = context.coordinator
-        webView.uiDelegate = context.coordinator
-        webView.allowsBackForwardNavigationGestures = true
-
-        // Sync session cookie before loading
-        if let sessionId {
-            let cookie = HTTPCookie(properties: [
-                .name: "session_id",
-                .value: sessionId,
-                .domain: URL(string: serverUrl)?.host ?? "",
-                .path: "/",
-                .secure: "TRUE",
-            ])
-            if let cookie {
-                webView.configuration.websiteDataStore.httpCookieStore.setCookie(cookie) {
-                    self.loadInitialUrl(webView: webView)
-                }
-            } else {
-                loadInitialUrl(webView: webView)
-            }
-        } else {
-            loadInitialUrl(webView: webView)
-        }
-
-        return webView
+        return config
     }
 
-    func updateUIView(_ webView: WKWebView, context: Context) {
-        // No dynamic updates needed — WebView manages its own state
+    private func loadBase(into webView: WKWebView, serverUrl: String, database: String) {
+        guard let url = Self.baseURL(serverUrl: serverUrl, database: database) else { return }
+        webView.load(URLRequest(url: url))
     }
 
-    private func loadInitialUrl(webView: WKWebView) {
-        let urlString: String
-        if let deepLinkUrl, !deepLinkUrl.isEmpty,
-           DeepLinkValidator.isValid(url: deepLinkUrl, serverHost: URL(string: serverUrl)?.host ?? "") {
-            // Build safe URL from deep link
-            if deepLinkUrl.hasPrefix("/") {
-                urlString = "\(serverUrl)\(deepLinkUrl)"
-            } else {
-                urlString = deepLinkUrl
-            }
-        } else {
-            urlString = "\(serverUrl)/web?db=\(database)"
-        }
+    // MARK: - Deep-link application
 
-        if let url = URL(string: urlString) {
+    /// Applies `deepLink` to the current WebView. Same-host `#fragment` changes are driven via
+    /// `evaluateJavaScript` (setting `location.hash` + dispatching `hashchange`) because a plain
+    /// `load()` is a no-op inside the running OWL SPA; anything else is a full navigation.
+    private func applyDeepLink(_ deepLink: String) {
+        guard let webView else { return }
+        guard let plan = Self.deepLinkApplyPlan(
+            currentURL: webView.url,
+            targetServerUrl: currentServerUrl,
+            deepLink: deepLink
+        ) else { return }
+
+        switch plan {
+        case .fragment(let hash):
+            let escaped = hash.replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "'", with: "\\'")
+            let js = """
+            location.hash = '\(escaped)';
+            window.dispatchEvent(new HashChangeEvent('hashchange'));
+            """
+            webView.evaluateJavaScript(js, completionHandler: nil)
+        case .load(let url):
             webView.load(URLRequest(url: url))
         }
     }
-}
 
-/// WKWebView delegate handling navigation policy, OWL fixes, and security.
-final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
-    let serverUrl: String
-    let onSessionExpired: () -> Void
-    @Binding var isLoading: Bool
+    /// Clears the pending link from the shared manager on the main actor (single-consume).
+    private func consumePending(for accountId: String) {
+        Task { @MainActor in
+            _ = DeepLinkManager.shared.consume(for: accountId)
+        }
+    }
 
-    private let serverHost: String
+    // MARK: - Pure navigation helpers (unit-tested)
 
-    /// Owns the location coordinator for the lifetime of this WebView coordinator.
-    /// Declared as a stored property so it is created once and reused across
-    /// WKWebView updates (UIViewRepresentable lifecycle).
-    let locationCoordinator: LocationCoordinator
+    /// The base Odoo web URL for an account.
+    static func baseURL(serverUrl: String, database: String) -> URL? {
+        URL(string: "\(serverUrl)/web?db=\(database)")
+    }
 
-    init(serverUrl: String, onSessionExpired: @escaping () -> Void, isLoading: Binding<Bool>) {
-        self.serverUrl = serverUrl
-        self.onSessionExpired = onSessionExpired
-        self._isLoading = isLoading
-        self.serverHost = URL(string: serverUrl)?.host ?? ""
+    /// Resolves a deep-link path/URL against a server. Relative paths are joined to the server;
+    /// absolute URLs are returned as-is (already validated by `DeepLinkValidator`).
+    static func resolveDeepLinkURL(serverUrl: String, deepLink: String) -> URL? {
+        if deepLink.hasPrefix("/") {
+            return URL(string: serverUrl + deepLink)
+        }
+        return URL(string: deepLink)
+    }
 
-        // The activeAccountHost closure captures serverUrl by VALUE here because
-        // OdooWebViewCoordinator is recreated whenever serverUrl changes (SwiftUI
-        // lifecycle). A new coordinator — and therefore a new closure — is created
-        // for every account switch, so the value is always current.
-        let host = URL(string: serverUrl)?.host
-        let gate = LocationPermissionGate()
-        self.locationCoordinator = LocationCoordinator(
-            gate: gate,
-            activeAccountHost: { host }
-        )
+    /// How a validated deep link should be applied to a WebView already showing `currentURL`.
+    enum DeepLinkApplyPlan: Equatable {
+        /// Set `location.hash` to this value (includes the leading `#`) and fire `hashchange`.
+        case fragment(String)
+        /// Perform a full navigation to this URL.
+        case load(URL)
+    }
+
+    /// Decides how to apply `deepLink`, returning `nil` if it fails validation.
+    ///
+    /// Warm case (the reported bug): when the WebView is already on the target host and the
+    /// deep link carries a `#fragment`, a hash navigation is required — a full `load()` of the
+    /// same host+fragment does not re-route the running SPA.
+    static func deepLinkApplyPlan(currentURL: URL?, targetServerUrl: String, deepLink: String) -> DeepLinkApplyPlan? {
+        let targetHost = URL(string: targetServerUrl)?.host ?? ""
+        guard DeepLinkValidator.isValid(url: deepLink, serverHost: targetHost) else { return nil }
+        guard let target = resolveDeepLinkURL(serverUrl: targetServerUrl, deepLink: deepLink) else { return nil }
+
+        if let currentURL,
+           let curHost = currentURL.host,
+           let tHost = target.host,
+           curHost.caseInsensitiveCompare(tHost) == .orderedSame,
+           let fragment = target.fragment,
+           !fragment.isEmpty {
+            return .fragment("#\(fragment)")
+        }
+        return .load(target)
+    }
+
+    /// The data store for an account. iOS 17+ real (UUID) account ids get an isolated
+    /// per-identifier store; otherwise the shared default store is used.
+    static func dataStore(forAccountId id: String) -> WKWebsiteDataStore {
+        if #available(iOS 17.0, *), let uuid = UUID(uuidString: id) {
+            return WKWebsiteDataStore(forIdentifier: uuid)
+        }
+        return .default()
     }
 
     // MARK: - Navigation Decision (extracted for testability)
 
     /// The result of evaluating a URL against the WebView navigation policy.
-    /// Extracted from `decidePolicyFor` so the logic can be unit-tested without
-    /// requiring a live WKWebView or UIApplication.
     enum NavigationDecision: Equatable {
-        /// URL is allowed to load inside the WebView.
         case allow
-        /// URL is blocked — session expiry detected, app should show login screen.
         case sessionExpired
-        /// URL is blocked — external host, app should open it in Safari.
         case openInSafari(URL)
-        /// URL is blocked — no URL provided.
         case cancel
     }
 
-    /// Pure function that decides what to do with a navigation URL.
-    /// Does NOT have side effects — caller is responsible for acting on the result.
+    /// Pure function that decides what to do with a navigation URL. No side effects.
     func decideNavigation(for url: URL?) -> NavigationDecision {
         guard let url else { return .cancel }
 
@@ -170,7 +334,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         }
 
         // Same-host: allow
-        if let host = url.host, host.caseInsensitiveCompare(serverHost) == .orderedSame {
+        if let host = url.host, host.caseInsensitiveCompare(currentServerHost) == .orderedSame {
             return .allow
         }
 
@@ -200,6 +364,16 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         #if DEBUG
         injectTestAutoTapIfRequested(webView: webView)
         #endif
+
+        // Load-gated deep-link apply: only when the finished page is on the TARGET host.
+        // This closes the async race and guarantees a link never applies to account A.
+        if let pending = pendingDeepLink,
+           let host = webView.url?.host,
+           host.caseInsensitiveCompare(currentServerHost) == .orderedSame {
+            pendingDeepLink = nil
+            applyDeepLink(pending)
+            consumePending(for: currentAccountId ?? "")
+        }
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
@@ -233,28 +407,15 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
 
     // MARK: - Test Auto-Tap (DEBUG only)
 
-    /// Performs a JS click on the element described by `WOOW_TEST_AUTOTAP` launch env var
-    /// after each page load. Used by XCUITest when WKWebView accessibility queries are
-    /// unreliable (OWL renders icon-only systray items that don't propagate aria-label to
-    /// the AX tree). Compiled out of Release builds.
-    ///
-    /// The env var value is a selector tag that encodes what to click:
-    /// - `"systray-attendance"` → clicks the first `[aria-label="Attendance"]` element.
-    /// - `"clock-checkin"` → clicks the first button containing "Check in" text.
-    /// - `"clock-checkout"` → clicks the first button containing "Check out" text.
+    /// Performs a JS click on the element described by `WOOW_TEST_AUTOTAP` after each page
+    /// load. Used by XCUITest when WKWebView accessibility queries are unreliable. Compiled
+    /// out of Release builds.
     #if DEBUG
     private func injectTestAutoTapIfRequested(webView: WKWebView) {
-        // Belt-and-suspenders gate: even in a Debug binary the JS-injection
-        // hook is inert unless the runtime `-WoowTestRunner` marker is also
-        // present. Without this second factor, `WOOW_TEST_AUTOTAP` would
-        // permit arbitrary script execution against any page the WebView
-        // has loaded — equivalent to RCE in a shipped binary. App Store
-        // Review Guideline 2.3.1 + CLAUDE.md § "Debug Test Hooks".
         guard TestHookGate.testHooksEnabled,
               let selector = ProcessInfo.processInfo.environment["WOOW_TEST_AUTOTAP"],
               !selector.isEmpty else { return }
 
-        // Delay slightly so OWL has time to render the systray after page load.
         let js: String
         switch selector {
         case "systray-attendance":
@@ -271,8 +432,6 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
             }, 2000);
             """
         case "clock-checkin":
-            // Two-step: open the Attendance systray dropdown first, then click "Check in"
-            // after the OWL popover has had time to render (~1000ms).
             js = """
             setTimeout(function() {
                 function openAttendanceThen(callback) {
@@ -300,7 +459,6 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
             }, 2000);
             """
         case "clock-checkout":
-            // Two-step: open the Attendance systray dropdown first, then click "Check out".
             js = """
             setTimeout(function() {
                 function openAttendanceThen(callback) {

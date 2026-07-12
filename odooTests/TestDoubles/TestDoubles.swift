@@ -21,15 +21,32 @@ final class MockAccountRepository: AccountRepositoryProtocol, @unchecked Sendabl
     /// explicitly opt in to the success path.
     var stubbedAuthResult: AuthResult = .error("stub", .unknown)
 
+    /// Accounts resolvable by tenant id via `getAccount(byTenantId:)`.
+    var stubbedTenantAccounts: [String: OdooAccount] = [:]
+
+    /// Records ids passed to `activateAccount(id:)`, most-recent last.
+    private(set) var activatedAccountIds: [String] = []
+
     func getActiveAccount() -> OdooAccount? { stubbedActiveAccount }
 
     func getAllAccounts() -> [OdooAccount] { [] }
+
+    func getAccount(byTenantId tenantId: String) -> OdooAccount? {
+        tenantId.isEmpty ? nil : stubbedTenantAccounts[tenantId]
+    }
 
     func authenticate(serverUrl: String, database: String, username: String, password: String) async -> AuthResult {
         stubbedAuthResult
     }
 
     func switchAccount(id: String) async -> Bool { false }
+
+    func activateAccount(id: String) -> Bool {
+        activatedAccountIds.append(id)
+        return true
+    }
+
+    func setTenantId(_ tenantId: String, forServerUrl serverUrl: String) {}
 
     func logout(accountId: String?) async {}
 

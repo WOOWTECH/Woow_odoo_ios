@@ -12,6 +12,9 @@ public class OdooAccountEntity: NSManagedObject {
     @NSManaged public var userId: Int32
     @NSManaged public var isActive: Bool
     @NSManaged public var createdAt: Date
+    /// Opaque tenant id from device registration. Optional — nil for accounts
+    /// persisted before this attribute was added (lightweight migration).
+    @NSManaged public var tenantId: String?
 }
 
 extension OdooAccountEntity {
@@ -26,7 +29,8 @@ extension OdooAccountEntity {
             displayName: displayName,
             userId: userId > 0 ? Int(userId) : nil,
             lastLogin: createdAt,
-            isActive: isActive
+            isActive: isActive,
+            tenantId: tenantId
         )
     }
 
@@ -40,6 +44,7 @@ extension OdooAccountEntity {
         userId = Int32(account.userId ?? 0)
         isActive = account.isActive
         createdAt = account.lastLogin
+        tenantId = account.tenantId
     }
 
     /// Fetch request for all accounts ordered by last login.
@@ -61,6 +66,14 @@ extension OdooAccountEntity {
     static func fetchByIdRequest(id: String) -> NSFetchRequest<OdooAccountEntity> {
         let request = NSFetchRequest<OdooAccountEntity>(entityName: "OdooAccountEntity")
         request.predicate = NSPredicate(format: "id == %@", id)
+        request.fetchLimit = 1
+        return request
+    }
+
+    /// Fetch request by opaque tenant id (the push-routing key).
+    static func fetchByTenantIdRequest(tenantId: String) -> NSFetchRequest<OdooAccountEntity> {
+        let request = NSFetchRequest<OdooAccountEntity>(entityName: "OdooAccountEntity")
+        request.predicate = NSPredicate(format: "tenantId == %@", tenantId)
         request.fetchLimit = 1
         return request
     }

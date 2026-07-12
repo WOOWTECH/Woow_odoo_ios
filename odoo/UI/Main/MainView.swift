@@ -23,11 +23,15 @@ struct MainView: View {
         NavigationStack {
             ZStack(alignment: .bottom) {
                 if let account = viewModel.activeAccount {
+                    // No `.id(account)` — the single OdooWebView reconciles account switches
+                    // through updateUIView (P0 cross-tenant fix). The deep link is passed
+                    // (not consumed here); the WebView applies it load-gated and consumes once.
                     OdooWebView(
                         serverUrl: account.fullServerUrl,
                         database: account.database,
+                        accountId: account.id,
                         sessionId: viewModel.sessionId,
-                        deepLinkUrl: viewModel.consumePendingDeepLink(),
+                        deepLinkUrl: viewModel.pendingDeepLink,
                         onSessionExpired: onSessionExpired,
                         isLoading: $isLoading
                     )

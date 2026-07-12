@@ -7,7 +7,10 @@ protocol AccountRepositoryProtocol: Sendable {
     func authenticate(serverUrl: String, database: String, username: String, password: String) async -> AuthResult
     func getActiveAccount() -> OdooAccount?
     func getAllAccounts() -> [OdooAccount]
+    func getAccount(byTenantId tenantId: String) -> OdooAccount?
     func switchAccount(id: String) async -> Bool
+    func activateAccount(id: String) -> Bool
+    func setTenantId(_ tenantId: String, forServerUrl serverUrl: String)
     func logout(accountId: String?) async
     func removeAccount(id: String) async
     func getSessionId(for serverUrl: String) -> String?
@@ -108,6 +111,58 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         let context = persistence.container.viewContext
         let request = OdooAccountEntity.fetchAllRequest()
         return (try? context.fetch(request))?.map { $0.toDomainModel() } ?? []
+    }
+
+    /// Resolves the locally-stored account whose tenant id matches `tenantId`.
+    ///
+    /// This is the push-routing lookup: an incoming notification's opaque
+    /// `odoo_tenant_id` is matched against persisted accounts. Returns `nil` when no
+    /// account carries that tenant id — the caller MUST drop the deep link in that case
+    /// and never fall back to the active account (cross-tenant isolation invariant).
+    ///
+    /// An empty `tenantId` never matches (guards against accounts with a nil/empty
+    /// tenant id being selected by an empty payload value).
+    func getAccount(byTenantId tenantId: String) -> OdooAccount? {
+        guard !tenantId.isEmpty else { return nil }
+        let context = persistence.container.viewContext
+        let request = OdooAccountEntity.fetchByTenantIdRequest(tenantId: tenantId)
+        return (try? context.fetch(request))?.first?.toDomainModel()
+    }
+
+    /// Marks the account with `id` active and every other account inactive, without any
+    /// network round-trip. Returns `false` if no account with that id exists.
+    ///
+    /// Unlike `switchAccount(id:)`, this performs no session re-validation — it is the
+    /// fast, synchronous switch used on a notification tap so the UI can render the target
+    /// account's WebView immediately. Session validity is enforced later by the WebView's
+    /// `/web/login` redirect detection. Must be called from the main actor (Core Data
+    /// `viewContext`).
+    @discardableResult
+    func activateAccount(id: String) -> Bool {
+        let context = persistence.container.viewContext
+        let allRequest = OdooAccountEntity.fetchAllRequest()
+        guard let all = try? context.fetch(allRequest),
+              let target = all.first(where: { $0.id == id }) else { return false }
+        all.forEach { $0.isActive = false }
+        target.isActive = true
+        return (try? context.save()) != nil
+    }
+
+    /// Persists the opaque `tenantId` for the account matching `serverUrl`.
+    ///
+    /// Called at device registration once the server returns the tenant id, so later
+    /// push notifications can be routed to this account. The match is by `serverUrl`
+    /// (the registration is per-server); a no-op if no matching account exists or the
+    /// tenant id is already stored.
+    func setTenantId(_ tenantId: String, forServerUrl serverUrl: String) {
+        guard !tenantId.isEmpty else { return }
+        let context = persistence.container.viewContext
+        let request = OdooAccountEntity.fetchAllRequest()
+        request.predicate = NSPredicate(format: "serverUrl == %@", serverUrl)
+        guard let entity = (try? context.fetch(request))?.first else { return }
+        guard entity.tenantId != tenantId else { return }
+        entity.tenantId = tenantId
+        try? context.save()
     }
 
     /// Switches to the specified account after validating the session.

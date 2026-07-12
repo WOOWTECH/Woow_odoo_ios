@@ -102,8 +102,16 @@ final class PersistenceController: @unchecked Sendable {
         createdAtAttr.name = "createdAt"
         createdAtAttr.attributeType = .dateAttributeType
 
+        // Opaque tenant id (push-routing key). Optional so lightweight migration
+        // can add it to stores created before this attribute existed.
+        let tenantIdAttr = NSAttributeDescription()
+        tenantIdAttr.name = "tenantId"
+        tenantIdAttr.attributeType = .stringAttributeType
+        tenantIdAttr.isOptional = true
+
         entity.properties = [idAttr, serverUrlAttr, databaseAttr, usernameAttr,
-                            displayNameAttr, userIdAttr, isActiveAttr, createdAtAttr]
+                            displayNameAttr, userIdAttr, isActiveAttr, createdAtAttr,
+                            tenantIdAttr]
 
         model.entities = [entity]
         return model
