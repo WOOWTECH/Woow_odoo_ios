@@ -82,8 +82,9 @@ Each row = one user-visible behavior. Both platforms must pass every row.
 | UX-39 | Notification shows sender name | "John Doe" as title | DONE (E2E-10) | M6 | Rich payload, not generic text |
 | UX-40 | Notification shows message preview | "Please review SO-2026..." as body | DONE (E2E-10) | M6 | |
 | UX-41 | Chinese content in notification | Chinese characters display correctly | DONE (E2E-10) | M6 | |
-| UX-42 | Tap notification | App opens → navigates to Odoo record | DONE (E2E-01c, E2E-05) | M6 | Deep link via DeepLinkManager |
-| UX-43 | Tap notification while locked | Auth first → then deep link restored | DONE (code) | M6 | DeepLinkManager persists across auth |
+| UX-42 | Tap notification | App opens → navigates to Odoo record on the **originating** server | FIXED 2026-07-13 (fix/multi-account-deeplink) | FIXED 2026-07-13 | Was false-DONE: cross-account tap opened wrong server. Now load-gated apply on originating host |
+| UX-42b | Tap account B's notif while A active | App switches to B, opens B's server + room; NEVER opens A's data | FIXED 2026-07-13 (S3) | FIXED 2026-07-13 (S2) | NEW cross-account AC. Routing key = opaque `odoo_tenant_id` from payload (plugin S1). Unresolved → drop, never fall back to A |
+| UX-43 | Tap notification while locked | Auth first → then deep link restored (bound to target account) | FIXED 2026-07-13 | FIXED 2026-07-13 | PendingDeepLink now account-bound + TTL + single-consume; dropped if a non-target account logs in |
 | UX-44 | Multiple notifications | Grouped by event type (chatter/discuss/activity) | DONE (E2E-11) | M6 | Android: setGroup, iOS: threadIdentifier |
 | UX-45 | Notification on lock screen | Content hidden (VISIBILITY_PRIVATE) | DONE (unit test) | M6 | Android: VISIBILITY_PRIVATE, iOS: hiddenPreviewsDeclaration |
 | UX-46 | App in foreground + notification | Heads-up notification shown (not auto-navigate) | DONE | M6 | Let user choose to tap |
@@ -138,7 +139,7 @@ Each row = one user-visible behavior. Both platforms must pass every row.
 | # | User Action | Expected Behavior | Android | iOS | Notes |
 |---|------------|-------------------|---------|-----|-------|
 | UX-67 | Tap "Add Account" | Login screen for new account | DONE | M7 | |
-| UX-68 | Switch between accounts | WebView reloads with new account's session | DONE | M7 | |
+| UX-68 | Switch between accounts | WebView reloads with new account's session (isolated cookies) | FIXED 2026-07-13 | FIXED 2026-07-13 | Was false-DONE: update{}/updateUIView were empty → no reload. Now single-view reload on serverUrl change + per-account cookie isolation |
 | UX-69 | Logout | Account removed, return to login | DONE (unit test) | M7 | Cookies + password cleared |
 | UX-70 | Delete account | Account removed from list | DONE (unit test) | M7 | |
 
@@ -225,6 +226,41 @@ Each row = one user-visible behavior. Both platforms must pass every row.
 | D3 | San Francisco font instead of Sans Serif | Platform default font | Visually very similar |
 | D4 | Notification grouping is automatic | iOS groups by threadIdentifier, no manual summary | Slightly different grouping UI |
 | D5 | iPad sidebar/split view | iPad-specific layout | Android has no tablet equivalent |
+| D6 | **Per-account WebView data isolation mechanism** | iOS uses `WKWebsiteDataStore(forIdentifier:)` (iOS 17+, one persistent store per account UUID; falls back to `.default()` on iOS 16) to keep each account's cookies in a separate store. Android has a single process-global `CookieManager`, so it clears + re-scopes cookies per-account on each load (`removeAllCookies` before loading the target account). | **Functionally equivalent**: account B never loads with account A's cookies. Mechanism differs because iOS exposes multi-store isolation natively and Android does not. |
+| D7 | **Warm same-server fragment navigation** | Both drive `location.hash` + a `hashchange` event via `evaluateJavaScript`/`evaluateJavascript` when only the room fragment changes on an already-loaded target host (avoids a no-op reload). Same behavior, platform-specific JS bridge call. | None — identical user-visible result (room changes without full reload). |
+
+---
+
+## Multi-Account Deep-Link Routing — Cross-Platform Equivalence (2026-07-13)
+
+This documents the contract for the P0 fix (`fix/multi-account-deeplink`, spec
+`spec-multi-account-deeplink-routing.md`). **Behavior is identical on both platforms;
+only the underlying isolation primitive differs (see D6).**
+
+**Shared contract (both platforms MUST honor):**
+1. The FCM payload carries an opaque `odoo_tenant_id` (plugin S1). The app maps it → local account.
+2. Tap account B's notif while A is active → switch to B → open B's server + B's room.
+3. Deep-link apply is **load-gated**: applied only after the WebView finishes loading a page whose host == the target account's server, then consumed exactly once.
+4. `odoo_tenant_id` present-but-unresolvable → **drop** the link (never fall back to the active account).
+5. Target account not logged in → drop (do not navigate on A).
+6. Old-plugin payload (no `odoo_tenant_id`) → current behavior, no crash (back-compat).
+7. Account B always loads with B's cookies only — never A's.
+
+**Intentional implementation differences (functionally equivalent, per user directive
+"實作可能有些差異這是可以接受的 只要在文檔裡面標明就行了"):**
+
+| Concern | iOS | Android |
+|---------|-----|---------|
+| Account switch reload | `updateUIView` reloads on `serverUrl` change (single view, no `.id()` recreate) | `update{}` reloads on `serverUrl` change (single view, no `key()` recreate) |
+| Per-account cookie isolation | `WKWebsiteDataStore(forIdentifier:)` per account UUID (iOS 17+), `.default()` fallback iOS 16 | Process-global `CookieManager`: `removeAllCookies` + re-scope per load |
+| Routing decision layer | `NotificationDeepLinkRouter` (pure) | `DeepLinkRouter` (pure) |
+| Pending link store | `DeepLinkManager` (account-bound + TTL) | `DeepLinkManager` (account-bound + TTL) |
+| Warm fragment nav | `evaluateJavaScript(location.hash + hashchange)` | `evaluateJavascript(location.hash + hashchange)` |
+
+**Test parity:** both platforms pass the same cross-account fixture (active=A, tap B →
+host ends on B, never A during transition) plus same-account regression, not-logged-in→drop,
+unresolved-tenant→drop, old-payload→back-compat, and warm-start. iOS: 67/67 in the fix suites;
+Android: 310 unit tests green.
 
 ---
 
