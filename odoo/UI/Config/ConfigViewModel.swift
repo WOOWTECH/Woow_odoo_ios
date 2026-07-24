@@ -26,9 +26,14 @@ final class ConfigViewModel: ObservableObject {
         return result
     }
 
-    func logout() async {
+    /// Logs out the CURRENT (active) account. Returns whether the app should STAY authenticated:
+    /// `true` when another account was promoted (multi-account fallback), `false` when no accounts
+    /// remain and the caller should return to the login screen.
+    @discardableResult
+    func logout() async -> Bool {
         await accountRepository.logout(accountId: nil)
         loadAccounts()
+        return accountRepository.getActiveAccount() != nil
     }
 
     func removeAccount(id: String) async {

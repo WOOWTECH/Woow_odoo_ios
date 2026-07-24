@@ -9,7 +9,7 @@
 //   - Same-account tap regression.
 //   - Target not-logged-in / unresolved tenant id → DROP (A untouched).
 //   - Old-plugin payload (no tenant id) → current behaviour.
-//   - Warm same-host different-#fragment → JS hash navigation, not a no-op load().
+//   - Deep-link application always resolves to a full `.load()` (Odoo 18 path router ignores hash).
 //   - Per-account deep-link binding: single-consume, TTL, drop-on-foreign-login.
 //   - Tenant-id parsing from the device-registration response.
 //
@@ -320,16 +320,41 @@ final class OdooWebViewDeepLinkPlanTests: XCTestCase {
 
     private let serverB = "https://b-odoo.woowtech.io"
 
-    /// Warm case: already on B's host, only the #fragment changes → JS hash navigation.
-    /// This is the reported bug — a plain load() would be a no-op in the running SPA.
-    func test_warmSameHost_fragmentChange_usesHashNavigation() {
-        let current = URL(string: "\(serverB)/web?db=dbB#active_id=mail.channel_1")!
+    /// Even when the WebView appears to be on the same `/web` path, the plan must be a full `.load`,
+    /// never a `.fragment` hash-poke: that path is a timing race (the `/web`→`/odoo` redirect may not
+    /// have completed) and Odoo 18's path router ignores the hash. Always a full load.
+    func test_sameHostSamePath_stillUsesFullLoad_noFragmentRace() {
+        let current = URL(string: "\(serverB)/web?db=dbB")!
         let plan = OdooWebViewCoordinator.deepLinkApplyPlan(
             currentURL: current,
             targetServerUrl: serverB,
-            deepLink: "/web#active_id=mail.channel_9"
+            deepLink: "/web#action=mail.action_discuss&active_id=discuss.channel_9"
         )
-        XCTAssertEqual(plan, .fragment("#active_id=mail.channel_9"))
+        guard case .load(let url) = plan else {
+            return XCTFail("must always full-load, never hash-poke. Got: \(String(describing: plan))")
+        }
+        XCTAssertTrue(url.absoluteString.contains("discuss.channel_9"))
+    }
+
+    /// Odoo 18 (path router — the reported "always lands on Inbox" bug): the running SPA is on
+    /// `/odoo` (the `/web`→`/odoo` redirect landed there), while the deep link targets `/web#…`.
+    /// Because the PATHS differ (`/odoo` vs `/web`), this MUST be a full cross-document `load()`,
+    /// not a `.fragment` hash-poke — Odoo 18's path router ignores `location.hash`/`hashchange`.
+    /// The full load re-boots Odoo, whose web router parses the legacy
+    /// `#action=…&active_id=discuss.channel_<id>` hash at startup and migrates it to the right route.
+    func test_odoo18SameHostDifferentPath_usesFullLoad() {
+        let current = URL(string: "\(serverB)/odoo")!
+        let plan = OdooWebViewCoordinator.deepLinkApplyPlan(
+            currentURL: current,
+            targetServerUrl: serverB,
+            deepLink: "/web#action=mail.action_discuss&active_id=discuss.channel_10"
+        )
+        guard case .load(let url) = plan else {
+            return XCTFail("Odoo 18 (current /odoo, target /web) must use a full load, not a hash-poke. Got: \(String(describing: plan))")
+        }
+        XCTAssertEqual(url.host, "b-odoo.woowtech.io")
+        XCTAssertTrue(url.absoluteString.contains("discuss.channel_10"),
+                      "The full-load URL must carry the channel fragment so Odoo migrates it at boot")
     }
 
     /// Cold/cross-host case: no current URL → full load onto the target host.
@@ -352,6 +377,30 @@ final class OdooWebViewDeepLinkPlanTests: XCTestCase {
             serverUrl: serverB, deepLink: "/web#active_id=mail.channel_9"
         )
         XCTAssertEqual(url?.host, "b-odoo.woowtech.io")
+    }
+
+    /// A serverUrl WITH a trailing slash must not produce a double slash before `/web`
+    /// (parity with Android's `fullLoadUrl` `trimEnd('/')`).
+    func test_resolvedDeepLinkURL_trailingSlashServer_yieldsSingleSlash() {
+        let url = OdooWebViewCoordinator.resolveDeepLinkURL(
+            serverUrl: serverB + "/", deepLink: "/web#active_id=mail.channel_9"
+        )
+        XCTAssertEqual(url?.absoluteString, "\(serverB)/web#active_id=mail.channel_9")
+        XCTAssertFalse(url?.absoluteString.contains("//web") ?? true, "Must not contain a double slash before /web")
+    }
+
+    /// The base URL must likewise collapse a trailing slash rather than emit `//web`.
+    func test_baseURL_trailingSlashServer_yieldsSingleSlash() {
+        let url = OdooWebViewCoordinator.baseURL(serverUrl: serverB + "/", database: "dbB")
+        XCTAssertEqual(url?.absoluteString, "\(serverB)/web?db=dbB")
+    }
+
+    /// A `/web@evil.com` lookalike must be rejected by the validator gate (no plan produced).
+    func test_webAtEvilLookalike_returnsNil() {
+        let plan = OdooWebViewCoordinator.deepLinkApplyPlan(
+            currentURL: nil, targetServerUrl: serverB, deepLink: "/web@evil.com"
+        )
+        XCTAssertNil(plan, "/web@evil.com is not a canonical /web path and must be rejected")
     }
 
     /// An invalid deep link yields no plan.

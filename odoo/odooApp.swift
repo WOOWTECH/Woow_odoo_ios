@@ -61,6 +61,9 @@ struct AppRootView: View {
     /// LoginView can start at the server info step instead of pre-filling the
     /// existing active account's credentials.
     @State private var isAddingAccount = false
+    /// Non-nil while a "Switched to <account>" landing toast is shown after a multi-account logout
+    /// promoted a remaining account. Auto-clears after a few seconds.
+    @State private var fallbackToastAccount: String?
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -126,10 +129,20 @@ struct AppRootView: View {
                                 pendingAddAccount = true
                                 showConfig = false
                             },
-                            onLogout: {
+                            onLogout: { stayAuthenticated in
                                 showConfig = false
-                                rootViewModel.onSessionExpired()
-                                authViewModel.setAuthenticated(false)
+                                if stayAuthenticated {
+                                    // Multi-account fallback: another account was promoted. Stay on
+                                    // the main screen — the promoted account's WebView reloads via
+                                    // `.activeAccountDidChange` (MainViewModel observes it). Surface a
+                                    // landing toast so the user (and VoiceOver) know which account
+                                    // they've landed in.
+                                    fallbackToastAccount = AccountRepository().getActiveAccount()?.displayName
+                                } else {
+                                    // Last account logged out — return to the login screen.
+                                    rootViewModel.onSessionExpired()
+                                    authViewModel.setAuthenticated(false)
+                                }
                             }
                         )
                     }
@@ -143,6 +156,25 @@ struct AppRootView: View {
         // .identity means the swap is instantaneous — no overlap in the tree.
         .transaction { $0.animation = nil }
         .preferredColorScheme(theme.colorSchemeOverride)
+        .overlay(alignment: .top) {
+            // Landing toast after a multi-account logout promoted a remaining account, so the user
+            // knows WHICH account they're now in (the WebView content changes underneath them).
+            if let account = fallbackToastAccount {
+                let switchedMessage = String(format: String(localized: "account_switched_to"), account)
+                Text(switchedMessage)
+                    .font(.subheadline).fontWeight(.medium)
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                    .background(.thinMaterial, in: Capsule())
+                    .shadow(radius: 4)
+                    .padding(.top, 12)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .task(id: account) {
+                        UIAccessibility.post(notification: .announcement, argument: switchedMessage)
+                        try? await Task.sleep(nanoseconds: 3_000_000_000)
+                        fallbackToastAccount = nil
+                    }
+            }
+        }
         .overlay {
             // H4: Privacy overlay — hides sensitive content in task switcher
             if showPrivacyOverlay {

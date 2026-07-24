@@ -1233,6 +1233,35 @@ final class MainViewModelTests: XCTestCase {
         XCTAssertEqual(url, "/web#action=contacts")
         XCTAssertNil(vm.consumePendingDeepLink(), "Second consume must return nil")
     }
+
+    // Regression (account-switch bug): a switch made OUTSIDE the ViewModel (Config sheet) posts
+    // `.activeAccountDidChange`; MainViewModel must reload so the WebView follows the new account.
+    func test_activeAccountDidChangeNotification_reloadsActiveAccount() {
+        let repo = FakeAccountRepository()
+        repo.activeAccount = OdooAccount(
+            id: "A", serverUrl: "https://a.example.com", database: "a",
+            username: "u", displayName: "U", isActive: true
+        )
+        let vm = MainViewModel(accountRepository: repo, deepLinkManager: DeepLinkManager())
+        vm.loadActiveAccount()
+        XCTAssertEqual(vm.activeAccount?.id, "A")
+
+        // Simulate the Config-sheet switch: the repository now reports account B active.
+        repo.activeAccount = OdooAccount(
+            id: "B", serverUrl: "https://b.example.com", database: "b",
+            username: "u", displayName: "U", isActive: true
+        )
+        NotificationCenter.default.post(name: .activeAccountDidChange, object: nil)
+
+        // The observer is delivered on RunLoop.main; wait for it to fire.
+        let exp = expectation(description: "activeAccount reloads to B")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            if vm.activeAccount?.id == "B" { exp.fulfill() }
+        }
+        wait(for: [exp], timeout: 2)
+        XCTAssertEqual(vm.activeAccount?.id, "B",
+                       "MainViewModel must reload the active account when a switch is broadcast")
+    }
 }
 
 // MARK: - M2: PinHasher — Missing edge cases

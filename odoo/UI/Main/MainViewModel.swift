@@ -36,6 +36,14 @@ final class MainViewModel: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.loadActiveAccount() }
             .store(in: &cancellables)
+
+        // A plain account switch (Config sheet → tap another account) does NOT set a pending deep
+        // link, so the observer above never fires and the WebView used to stay on the old account.
+        // Reacting to `activeAccountDidChange` reloads the active account for EVERY switch path.
+        NotificationCenter.default.publisher(for: .activeAccountDidChange)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.loadActiveAccount() }
+            .store(in: &cancellables)
     }
 
     func loadActiveAccount() {

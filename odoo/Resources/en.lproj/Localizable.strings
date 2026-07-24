@@ -133,3 +133,10 @@
 /* Settings -- Privacy */
 "settings_location_title" = "Record GPS on Clock-In";
 "settings_location_description" = "When enabled, your GPS coordinates are attached to each clock-in and clock-out record on your Odoo server.";
+
+// Multi-account logout (story: fix multi-account logout)
+"logout_current_account" = "Log out current account";
+"logout_action" = "Log out";
+"logout_stay_signed_in" = "You'll stay signed in to %@.";
+"logout_last_account_message" = "This is your last account — you'll return to the login screen.";
+"account_switched_to" = "Switched to %@";

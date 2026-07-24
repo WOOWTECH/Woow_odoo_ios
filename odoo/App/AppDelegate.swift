@@ -120,6 +120,22 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             accountRepo.replaceAccountsForTesting(seeded)
         }
 
+        // Seed MULTIPLE pre-authenticated accounts on different servers (cross-tenant deep-link
+        // E2E). JSON array of SeededAccount; each carries its own tenantId + isActive so a
+        // cross-account notification tap can resolve a target. Wins over WOOW_SEED_ACCOUNT.
+        if let json = ProcessInfo.processInfo.environment["WOOW_SEED_ACCOUNTS"],
+           !json.isEmpty,
+           let data = json.data(using: .utf8),
+           let seededAccounts = try? JSONDecoder().decode([SeededAccount].self, from: data),
+           !seededAccounts.isEmpty {
+            AccountRepository().replaceAccountsForTesting(seededAccounts)
+        }
+
+        // Arm a deferred synthetic notification tap. It fires once, through the production
+        // handleNotificationTap path, after the active account's WebView first loads — the
+        // cross-tenant deep-link E2E uses this to reproduce "tap B's notif while A is showing".
+        TestNotificationTapInjector.shared.armFromEnvironment(delegate: self)
+
         // Pre-seed app-lock + biometric/PIN state so XCUITests can land
         // directly on `BiometricView` / `PinView` for visual verification.
         //   WOOW_TEST_FORCE_BIOMETRIC=1     → app lock ON + biometric ON
@@ -302,6 +318,16 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             resolveTenant: { accountRepository.getAccount(byTenantId: $0) },
             activeAccount: accountRepository.getActiveAccount()
         )
+
+        #if DEBUG
+        // Expose what a REAL notification tap actually delivered + decided, so an out-of-process
+        // XCUITest can read it (the on-device push path can't be inspected via os_log easily).
+        let tenantSeen = (userInfo["odoo_tenant_id"] as? String) ?? "<nil>"
+        let actionSeen = userInfo["odoo_action_url"] != nil ? "yes" : "no"
+        E2EWebViewProbe.shared.publish(
+            id: "e2e-tap-decision",
+            value: "tenant=\(tenantSeen) action=\(actionSeen) decision=\(String(describing: decision))")
+        #endif
 
         switch decision {
         case .switchAndRoute(let accountId, let url):

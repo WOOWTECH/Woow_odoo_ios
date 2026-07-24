@@ -1,6 +1,14 @@
 import CoreData
 import Foundation
 
+extension Notification.Name {
+    /// Posted whenever the active account changes (account switch, or the fast activate-on-tap
+    /// used for a notification deep link). Observers such as `MainViewModel` react by reloading the
+    /// WebView onto the new active account — this is the fix for "multi-account switch left the UI
+    /// on the previous account" (iOS Problem #1).
+    static let activeAccountDidChange = Notification.Name("io.woowtech.odoo.activeAccountDidChange")
+}
+
 /// Manages Odoo account lifecycle — auth, switch, logout, CRUD.
 /// Ported from Android: AccountRepository.kt
 protocol AccountRepositoryProtocol: Sendable {
@@ -145,7 +153,11 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
               let target = all.first(where: { $0.id == id }) else { return false }
         all.forEach { $0.isActive = false }
         target.isActive = true
-        return (try? context.save()) != nil
+        let saved = (try? context.save()) != nil
+        // Broadcast so MainViewModel reloads the WebView onto the newly active account (the fast,
+        // synchronous switch used on a notification deep-link tap).
+        if saved { NotificationCenter.default.post(name: .activeAccountDidChange, object: nil) }
+        return saved
     }
 
     /// Persists the opaque `tenantId` for the account matching `serverUrl`.
@@ -195,7 +207,10 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         // Activate the target account
         all.forEach { $0.isActive = false }
         target.isActive = true
-        return (try? context.save()) != nil
+        let saved = (try? context.save()) != nil
+        // Broadcast so MainViewModel reloads the WebView onto the newly active account.
+        if saved { NotificationCenter.default.post(name: .activeAccountDidChange, object: nil) }
+        return saved
     }
 
     func logout(accountId: String? = nil) async {
@@ -209,8 +224,9 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         }
 
         guard let account else { return }
+        let wasActive = account.isActive
 
-        // Unregister FCM token from Odoo server (G9 — best-effort, never blocks logout)
+        // Unregister FCM token from THIS account's server (G9 — best-effort, never blocks logout).
         await unregisterFcmToken(serverUrl: account.serverUrl)
 
         await apiClient.clearCookies(for: account.serverUrl)
@@ -220,10 +236,22 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         context.delete(account)
         try? context.save()
 
-        // If no accounts remain, clear the local FCM token
         let remaining = (try? context.fetch(OdooAccountEntity.fetchAllRequest())) ?? []
         if remaining.isEmpty {
+            // Last account logged out — clear the shared local token; the UI returns to login.
             secureStorage.deleteFcmToken()
+            return
+        }
+
+        // Multi-account fallback (fix for "logout stranded the user on the login screen"): if we
+        // logged out the ACTIVE account (or none is active), promote the most-recently-used remaining
+        // account so the app falls back to it and stays authenticated. `fetchAllRequest` is ordered
+        // createdAt DESC, so `.first` is the most recent. Broadcast so MainViewModel reloads onto it.
+        if wasActive || remaining.first(where: { $0.isActive }) == nil {
+            remaining.forEach { $0.isActive = false }
+            remaining.first?.isActive = true
+            try? context.save()
+            NotificationCenter.default.post(name: .activeAccountDidChange, object: nil)
         }
     }
 
@@ -246,18 +274,33 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
     }
 
     /// Unregisters FCM token from Odoo server. Best-effort — errors logged, never blocks.
+    /// Best-effort unregister of THIS phone's FCM token from ONE account's server (the account is
+    /// the subject; the token is a shared device constant). Never blocks logout.
+    ///
+    /// Bug fix (iOS Problem "logged-out tenant keeps pushing"): the previous implementation built
+    /// the URL as `"https://\(serverUrl)"`, but `serverUrl` is already stored https-prefixed, so it
+    /// produced `https://https://…` — a malformed URL that made every unregister throw and get
+    /// swallowed, leaving the logged-out tenant's device row active. `ensureHTTPS` is idempotent, so
+    /// it fixes the double-prefix without breaking a rare non-prefixed value.
     private func unregisterFcmToken(serverUrl: String) async {
-        guard let token = secureStorage.getFcmToken() else { return }
+        guard let token = secureStorage.getFcmToken() else {
+            // Not an error, but must not be silent — a missing local token means we cannot tell the
+            // server to stop pushing, so the row stays active until the token rotates.
+            AppLogger.push.info("FCM unregister skipped for \(serverUrl, privacy: .public): no local token")
+            return
+        }
         do {
             _ = try await apiClient.callKw(
-                serverUrl: "https://\(serverUrl)",
+                serverUrl: serverUrl.ensureHTTPS,
                 model: "woow.fcm.device",
                 method: "unregister_device",
                 args: [],
                 kwargs: ["fcm_token": token]
             )
         } catch {
-            AppLogger.push.error("FCM unregister failed for \(serverUrl): \(error.localizedDescription, privacy: .public)")
+            // Best-effort: logout still completes. Logged for retry/reconciliation — the server keeps
+            // the row active until a later unregister succeeds or the token rotates.
+            AppLogger.push.error("FCM unregister failed for \(serverUrl, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -278,6 +321,15 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
     ///
     /// - Parameter seeded: The account to install, including the raw `sessionCookie` value.
     func replaceAccountsForTesting(_ seeded: SeededAccount) {
+        replaceAccountsForTesting([seeded])
+    }
+
+    /// Replaces all persisted accounts with the given pre-authenticated test accounts, marking one
+    /// active (the first with `isActive == true`, else the first). Used by the multi-account
+    /// cross-tenant deep-link E2E, which seeds two accounts on different servers — each with its own
+    /// isolated session cookie and opaque `tenantId` — so a cross-account notification tap can
+    /// resolve a target account by matching the push's `odoo_tenant_id`.
+    func replaceAccountsForTesting(_ seededAccounts: [SeededAccount]) {
         let context = persistence.container.viewContext
 
         // Wipe all existing accounts and their Keychain credentials.
@@ -292,7 +344,21 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
             }
         }
 
-        // Insert the test account entity.
+        // If no account is explicitly marked active, the first one is (single-seed default).
+        let activeIndex = seededAccounts.firstIndex { $0.isActive == true } ?? 0
+        for (index, seeded) in seededAccounts.enumerated() {
+            installSeededAccount(seeded, isActive: index == activeIndex, into: context)
+        }
+        try? context.save()
+    }
+
+    /// Installs one seeded account entity, plants its session cookie, and stores its tenant id.
+    /// Does NOT save the context (the caller saves once after installing every account).
+    private func installSeededAccount(
+        _ seeded: SeededAccount,
+        isActive: Bool,
+        into context: NSManagedObjectContext
+    ) {
         let entity = OdooAccountEntity(context: context)
         entity.id = UUID().uuidString
         entity.serverUrl = seeded.serverURL
@@ -300,9 +366,13 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         entity.username = seeded.username
         entity.displayName = seeded.username
         entity.userId = 1
-        entity.isActive = true
+        entity.isActive = isActive
         entity.createdAt = Date()
-        try? context.save()
+        // Seed the tenant id the app would normally learn during FCM registration, so a
+        // cross-account notification tap can resolve THIS account as the target.
+        if let tenantId = seeded.tenantId, !tenantId.isEmpty {
+            entity.tenantId = tenantId
+        }
 
         // Plant the session_id cookie in HTTPCookieStorage so WKWebView picks it up.
         let host = URL(string: seeded.serverURL.ensureHTTPS)?.host ?? seeded.serverURL
@@ -324,7 +394,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
             sessionId: seeded.sessionCookie
         )
 
-        print("[TestHook] replaceAccountsForTesting: installed account for \(seeded.username)@\(host)")
+        print("[TestHook] replaceAccountsForTesting: installed \(seeded.username)@\(host) active=\(isActive) tenant=\(seeded.tenantId ?? "nil")")
     }
 #endif
 }

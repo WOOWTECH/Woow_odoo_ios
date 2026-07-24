@@ -89,6 +89,9 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
 
     #if DEBUG
     private var testProxy: JSBridgeMessageHandlerProxy?
+    /// Hidden accessibility element carrying the currently-loaded WebView URL, so an
+    /// out-of-process XCUITest can assert which server/room the WebView landed on.
+    private var e2eProbeLabel: UILabel?
     #endif
 
     init(serverUrl: String, onSessionExpired: @escaping () -> Void, isLoading: Binding<Bool>) {
@@ -114,8 +117,9 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     ///   target account's isolated data store, injects that account's session cookie, loads
     ///   the base page, and captures any deep link to apply once the load finishes.
     /// - On the same account with a NEW deep link (warm foreground tap): drives navigation
-    ///   directly — a `#fragment`-only change uses `evaluateJavaScript` (a plain `load()` is a
-    ///   no-op inside the running OWL SPA), otherwise a full load.
+    ///   directly with a full `load()` of the `/web#…` URL. Odoo 18's path router ignores
+    ///   `location.hash`, so a full load is required for the deep link to take effect (see
+    ///   `deepLinkApplyPlan`).
     func apply(serverUrl: String, database: String, accountId: String, sessionId: String?, deepLink: String?) {
         let switched = webView == nil
             || accountId != currentAccountId
@@ -228,9 +232,10 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
 
     // MARK: - Deep-link application
 
-    /// Applies `deepLink` to the current WebView. Same-host `#fragment` changes are driven via
-    /// `evaluateJavaScript` (setting `location.hash` + dispatching `hashchange`) because a plain
-    /// `load()` is a no-op inside the running OWL SPA; anything else is a full navigation.
+    /// Applies `deepLink` to the current WebView via a full navigation to the resolved `/web#…`
+    /// URL. There is no `location.hash` fast-path: Odoo 18's path router (`/odoo/...`) ignores
+    /// `location.hash`/`hashchange`, so a full `load()` is the only reliable way to apply a deep
+    /// link. Odoo migrates the legacy hash to the correct `/odoo/...` route at boot.
     private func applyDeepLink(_ deepLink: String) {
         guard let webView else { return }
         guard let plan = Self.deepLinkApplyPlan(
@@ -240,14 +245,6 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         ) else { return }
 
         switch plan {
-        case .fragment(let hash):
-            let escaped = hash.replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: "'", with: "\\'")
-            let js = """
-            location.hash = '\(escaped)';
-            window.dispatchEvent(new HashChangeEvent('hashchange'));
-            """
-            webView.evaluateJavaScript(js, completionHandler: nil)
         case .load(let url):
             webView.load(URLRequest(url: url))
         }
@@ -263,45 +260,48 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     // MARK: - Pure navigation helpers (unit-tested)
 
     /// The base Odoo web URL for an account.
+    ///
+    /// A single trailing `/` on `serverUrl` is trimmed before concatenation so a configured
+    /// `https://host/` does not produce a double slash (`https://host//web?...`), matching
+    /// Android's `fullLoadUrl` (`trimEnd('/')`).
     static func baseURL(serverUrl: String, database: String) -> URL? {
-        URL(string: "\(serverUrl)/web?db=\(database)")
+        let base = serverUrl.hasSuffix("/") ? String(serverUrl.dropLast()) : serverUrl
+        return URL(string: "\(base)/web?db=\(database)")
     }
 
     /// Resolves a deep-link path/URL against a server. Relative paths are joined to the server;
     /// absolute URLs are returned as-is (already validated by `DeepLinkValidator`).
+    ///
+    /// A single trailing `/` on `serverUrl` is trimmed before joining a leading-slash `deepLink`
+    /// so `https://host/` + `/web#…` yields a single-slash `https://host/web#…` (not `//web`),
+    /// matching Android's `fullLoadUrl` (`trimEnd('/')`).
     static func resolveDeepLinkURL(serverUrl: String, deepLink: String) -> URL? {
         if deepLink.hasPrefix("/") {
-            return URL(string: serverUrl + deepLink)
+            let base = serverUrl.hasSuffix("/") ? String(serverUrl.dropLast()) : serverUrl
+            return URL(string: base + deepLink)
         }
         return URL(string: deepLink)
     }
 
-    /// How a validated deep link should be applied to a WebView already showing `currentURL`.
+    /// How a validated deep link should be applied to a WebView.
     enum DeepLinkApplyPlan: Equatable {
-        /// Set `location.hash` to this value (includes the leading `#`) and fire `hashchange`.
-        case fragment(String)
         /// Perform a full navigation to this URL.
         case load(URL)
     }
 
     /// Decides how to apply `deepLink`, returning `nil` if it fails validation.
     ///
-    /// Warm case (the reported bug): when the WebView is already on the target host and the
-    /// deep link carries a `#fragment`, a hash navigation is required — a full `load()` of the
-    /// same host+fragment does not re-route the running SPA.
+    /// Always resolves to a full `.load()` of the `/web#…` URL; there is no `location.hash` poke.
+    /// Odoo 18's path router (`/odoo/discuss`, `/odoo/<model>/<id>`) IGNORES
+    /// `location.hash`/`hashchange` entirely, so poking the hash does nothing and every tap would
+    /// stay on the default `/odoo` (Discuss Inbox). A full cross-document load of `/web#action=…`
+    /// is correct everywhere: the `/web`→`/odoo` redirect preserves the URL fragment, and Odoo
+    /// parses the legacy `#action=…&active_id=discuss.channel_<id>` hash at boot (web router
+    /// `parseHash`/`sanitizeHash`) and migrates it to the correct `/odoo/...` path route.
     static func deepLinkApplyPlan(currentURL: URL?, targetServerUrl: String, deepLink: String) -> DeepLinkApplyPlan? {
         let targetHost = URL(string: targetServerUrl)?.host ?? ""
         guard DeepLinkValidator.isValid(url: deepLink, serverHost: targetHost) else { return nil }
         guard let target = resolveDeepLinkURL(serverUrl: targetServerUrl, deepLink: deepLink) else { return nil }
-
-        if let currentURL,
-           let curHost = currentURL.host,
-           let tHost = target.host,
-           curHost.caseInsensitiveCompare(tHost) == .orderedSame,
-           let fragment = target.fragment,
-           !fragment.isEmpty {
-            return .fragment("#\(fragment)")
-        }
         return .load(target)
     }
 
@@ -358,11 +358,33 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         isLoading = true
     }
 
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        // The URL is committed here (before the page fully finishes). Publish it to the XCUITest
+        // probe now so the test can read the landed host even if `didFinish` is delayed by
+        // Odoo's long-lived bus/longpolling connection.
+        #if DEBUG
+        publishE2EWebViewProbe(url: webView.url)
+        // Fire any armed synthetic notification tap here (not only in didFinish): Odoo's OWL SPA
+        // holds a long-poll connection that can delay `didFinish` indefinitely, so relying on
+        // didFinish meant the cross-account tap never fired. `fireOnceAfterActiveLoad` is guarded
+        // to run exactly once (on the active account's first commit).
+        TestNotificationTapInjector.shared.fireOnceAfterActiveLoad()
+        // In button mode, expose the hidden `e2e-fire-tap` element so the test can trigger the
+        // cross-account tap on demand once it has logged in + selected the active account.
+        MainActor.assumeIsolated { TestNotificationTapInjector.shared.installFireButtonIfNeeded() }
+        #endif
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         isLoading = false
         injectOWLLayoutFixes(webView: webView)
         #if DEBUG
         injectTestAutoTapIfRequested(webView: webView)
+        // Expose the loaded URL to XCUITest, then (once) fire any armed synthetic notification
+        // tap now that the active account's page is on screen. Order matters: publish A's URL
+        // first so a test that asserts "was on A before the tap" can observe it.
+        publishE2EWebViewProbe(url: webView.url)
+        TestNotificationTapInjector.shared.fireOnceAfterActiveLoad()
         #endif
 
         // Load-gated deep-link apply: only when the finished page is on the TARGET host.
@@ -411,6 +433,29 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     /// load. Used by XCUITest when WKWebView accessibility queries are unreliable. Compiled
     /// out of Release builds.
     #if DEBUG
+    /// Publishes the currently-loaded WebView URL to a hidden accessibility element
+    /// (`identifier == "e2e-webview-url"`) that an out-of-process XCUITest can read.
+    ///
+    /// This is the ONLY reliable way for XCUITest to assert which server/room the WebView
+    /// actually landed on: WKWebView does not surface its URL through the accessibility tree,
+    /// and the `__woowTestEval` bridge returns results into the *page's* JavaScript, not to the
+    /// test process. Gated by `TestHookGate`; the label is invisible to real users.
+    func publishE2EWebViewProbe(url: URL?) {
+        // Delegate to a key-window-hosted singleton so the probe survives the WebView rebuild
+        // that happens on an account switch (a container-scoped label would be destroyed exactly
+        // during the cross-account transition we need to observe).
+        E2EWebViewProbe.shared.update(url?.absoluteString ?? "")
+        // Also expose each account's stored tenantId so a test can wait until FCM registration has
+        // persisted it before firing a cross-account notification tap (the real-login → register →
+        // tap path drops as `unresolvedTenant` if the tap arrives before registration completes).
+        if TestHookGate.testHooksEnabled {
+            let tenants = AccountRepository().getAllAccounts()
+                .map { $0.tenantId ?? "nil" }
+                .joined(separator: ",")
+            E2EWebViewProbe.shared.publish(id: "e2e-account-tenants", value: tenants)
+        }
+    }
+
     private func injectTestAutoTapIfRequested(webView: WKWebView) {
         guard TestHookGate.testHooksEnabled,
               let selector = ProcessInfo.processInfo.environment["WOOW_TEST_AUTOTAP"],

@@ -12,7 +12,10 @@ struct ConfigView: View {
     let onBackClick: () -> Void
     let onSettingsClick: () -> Void
     let onAddAccountClick: () -> Void
-    let onLogout: () -> Void
+    /// Called after the CURRENT account is logged out. The `Bool` is `true` when another account was
+    /// promoted (stay authenticated on the main screen) and `false` when no accounts remain (return
+    /// to the login screen).
+    let onLogout: (Bool) -> Void
 
     @State private var showLogoutAlert = false
     @State private var showSettings = false
@@ -77,7 +80,7 @@ struct ConfigView: View {
                 // Logout
                 Section {
                     Button(role: .destructive) { showLogoutAlert = true } label: {
-                        Label("Logout", systemImage: "rectangle.portrait.and.arrow.right")
+                        Label(String(localized: "logout_current_account"), systemImage: "rectangle.portrait.and.arrow.right")
                     }
                 }
             }
@@ -89,16 +92,21 @@ struct ConfigView: View {
                     }
                 }
             }
-            .alert("Logout", isPresented: $showLogoutAlert) {
-                Button("Cancel", role: .cancel) {}
-                Button("Logout", role: .destructive) {
+            .alert(String(localized: "logout_current_account"), isPresented: $showLogoutAlert) {
+                Button(String(localized: "Cancel"), role: .cancel) {}
+                Button(String(localized: "logout_action"), role: .destructive) {
                     Task {
-                        await viewModel.logout()
-                        onLogout()
+                        let stayAuthenticated = await viewModel.logout()
+                        onLogout(stayAuthenticated)
                     }
                 }
             } message: {
-                Text(String(localized: "logout_confirm_message"))
+                // Account-aware copy: reassure when another account remains; warn when it's the last.
+                if let other = viewModel.accounts.first(where: { !$0.isActive }) {
+                    Text(String(format: String(localized: "logout_stay_signed_in"), other.displayName))
+                } else {
+                    Text(String(localized: "logout_last_account_message"))
+                }
             }
             .onAppear { viewModel.loadAccounts() }
             .navigationDestination(isPresented: $showSettings) {
@@ -115,6 +123,6 @@ struct ConfigView: View {
         onBackClick: {},
         onSettingsClick: {},
         onAddAccountClick: {},
-        onLogout: {}
+        onLogout: { _ in }
     )
 }

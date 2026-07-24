@@ -133,3 +133,10 @@
 /* Settings -- Privacy */
 "settings_location_title" = "打卡時記錄 GPS";
 "settings_location_description" = "啟用後，您的 GPS 座標將附加到 Odoo 伺服器上的每筆打卡紀錄中。";
+
+// Multi-account logout (story: fix multi-account logout)
+"logout_current_account" = "登出目前帳號";
+"logout_action" = "登出";
+"logout_stay_signed_in" = "你將維持登入 %@。";
+"logout_last_account_message" = "這是你最後一個帳號 —— 將返回登入畫面。";
+"account_switched_to" = "已切換至 %@";
