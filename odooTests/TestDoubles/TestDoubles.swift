@@ -21,6 +21,10 @@ final class MockAccountRepository: AccountRepositoryProtocol, @unchecked Sendabl
     /// explicitly opt in to the success path.
     var stubbedAuthResult: AuthResult = .error("stub", .unknown)
 
+    /// The result returned by `switchAccount(id:)`. Defaults to `false` so tests must
+    /// explicitly opt in to a successful switch.
+    var stubbedSwitchResult: Bool = false
+
     /// Accounts resolvable by tenant id via `getAccount(byTenantId:)`.
     var stubbedTenantAccounts: [String: OdooAccount] = [:]
 
@@ -39,7 +43,7 @@ final class MockAccountRepository: AccountRepositoryProtocol, @unchecked Sendabl
         stubbedAuthResult
     }
 
-    func switchAccount(id: String) async -> Bool { false }
+    func switchAccount(id: String) async -> Bool { stubbedSwitchResult }
 
     func activateAccount(id: String) -> Bool {
         activatedAccountIds.append(id)
@@ -97,5 +101,48 @@ final class MockSecureStorage: SecureStorageProtocol, @unchecked Sendable {
     func deleteSessionId(serverUrl: String, username: String) {
         let host = URL(string: serverUrl)?.host ?? serverUrl
         store.removeValue(forKey: "session_\(host)_\(username)")
+    }
+}
+
+// MARK: - MockPushTokenRepository
+
+/// In-memory stub conforming to `PushTokenRepositoryProtocol`.
+///
+/// Records every `registerTokenWithAllAccounts` / `unregisterToken` call so a test can
+/// assert that an event-driven reconcile (token-arrived, account-restored, login, switch)
+/// upserted the current token — without any real network / DNS. The reconcile triggers run
+/// on a detached `Task`, so `onRegister` lets a test `fulfill` an expectation and await it
+/// deterministically.
+final class MockPushTokenRepository: PushTokenRepositoryProtocol, @unchecked Sendable {
+
+    /// The token returned by `getToken()`. Set this to simulate a token Firebase already
+    /// delivered (possibly BEFORE any account existed — the AC8.b race).
+    var storedToken: String?
+
+    /// Every token passed to `registerTokenWithAllAccounts`, in call order.
+    private(set) var registeredTokens: [String] = []
+
+    /// Every server URL passed to `unregisterToken(for:)`, in call order.
+    private(set) var unregisteredServerUrls: [String] = []
+
+    /// Invoked at the end of each `registerTokenWithAllAccounts` call so a test can
+    /// fulfill an `XCTestExpectation` and await the detached reconcile Task.
+    var onRegister: (@Sendable () -> Void)?
+
+    init(storedToken: String? = nil) {
+        self.storedToken = storedToken
+    }
+
+    func saveToken(_ token: String) { storedToken = token }
+
+    func getToken() -> String? { storedToken }
+
+    func registerTokenWithAllAccounts(_ token: String) async {
+        registeredTokens.append(token)
+        onRegister?()
+    }
+
+    func unregisterToken(for serverUrl: String) async {
+        unregisteredServerUrls.append(serverUrl)
     }
 }

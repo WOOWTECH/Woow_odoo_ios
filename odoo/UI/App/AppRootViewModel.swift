@@ -37,20 +37,37 @@ final class AppRootViewModel: ObservableObject {
 
     /// Checks Core Data for an active account and transitions launch state accordingly.
     /// Called once from `.task` when `AppRootView` appears.
+    ///
+    /// When an account is restored (cold start), this also fires the token-registration
+    /// reconcile (AC8.b) so a token Firebase delivered BEFORE any account existed — the
+    /// iOS token-arrives-before-account race — is registered now that an account is present.
     func checkSession() {
         let activeAccount = accountRepository.getActiveAccount()
-        launchState = (activeAccount != nil) ? .authenticated : .login
+        if activeAccount != nil {
+            launchState = .authenticated
+            reconcileTokenRegistration()
+        } else {
+            launchState = .login
+        }
     }
 
-    /// Transitions to the authenticated state after a successful login.
-    ///
-    /// Also re-registers the stored FCM token with all accounts. This is
-    /// required because Firebase can deliver the FCM token at launch — BEFORE
-    /// this account is saved — in which case `didReceiveRegistrationToken`
-    /// registers it to zero accounts and nothing else retries. That path covers
-    /// account-before-token; this covers token-before-account.
+    /// Transitions to the authenticated state after a successful login and reconciles
+    /// the token registration (covers account-before-token: Firebase may have delivered
+    /// the token before this account was saved).
     func onLoginSuccess() {
         launchState = .authenticated
+        reconcileTokenRegistration()
+    }
+
+    /// Upserts the current FCM token for every logged-in account.
+    ///
+    /// Fires on the account-restored (cold-start) and login events, in addition to
+    /// `didReceiveRegistrationToken`, so a token that arrived before any account existed
+    /// is registered as soon as an account appears (AC8.b). Relies on the server-side
+    /// upsert early-return, so a redundant re-post of an already-current `(token, user)`
+    /// pair is a cheap no-op — the client keeps NO persisted diff-set, NO tri-state result,
+    /// and runs NO full reconcile against a canonical endpoint (AC8.c).
+    private func reconcileTokenRegistration() {
         Task { [pushTokenRepository] in
             if let token = pushTokenRepository.getToken() {
                 await pushTokenRepository.registerTokenWithAllAccounts(token)

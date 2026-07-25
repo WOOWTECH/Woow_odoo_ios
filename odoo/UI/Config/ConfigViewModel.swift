@@ -9,9 +9,14 @@ final class ConfigViewModel: ObservableObject {
     @Published var activeAccount: OdooAccount?
 
     private let accountRepository: AccountRepositoryProtocol
+    private let pushTokenRepository: PushTokenRepositoryProtocol
 
-    init(accountRepository: AccountRepositoryProtocol = AccountRepository()) {
+    init(
+        accountRepository: AccountRepositoryProtocol = AccountRepository(),
+        pushTokenRepository: PushTokenRepositoryProtocol = PushTokenRepository()
+    ) {
         self.accountRepository = accountRepository
+        self.pushTokenRepository = pushTokenRepository
         loadAccounts()
     }
 
@@ -22,7 +27,15 @@ final class ConfigViewModel: ObservableObject {
 
     func switchAccount(id: String) async -> Bool {
         let result = await accountRepository.switchAccount(id: id)
-        if result { loadAccounts() }
+        if result {
+            loadAccounts()
+            // Account-switch is an "account-available" event (AC8.b): upsert the current
+            // token for all accounts so the newly-active account is covered. Redundant for
+            // already-registered accounts thanks to the server upsert early-return.
+            if let token = pushTokenRepository.getToken() {
+                await pushTokenRepository.registerTokenWithAllAccounts(token)
+            }
+        }
         return result
     }
 
