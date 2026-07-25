@@ -23,16 +23,22 @@ final class AppRootViewModel: ObservableObject {
 
     private let pushTokenRepository: PushTokenRepositoryProtocol
 
+    private let reauthenticator: SessionReauthenticator
+
     /// Creates the root ViewModel.
     /// - Parameters:
     ///   - accountRepository: Repository to query for the active account.
     ///   - pushTokenRepository: Repository used to (re-)register the FCM token after login.
+    ///   - reauthenticator: Guardrail'd engine used to silently re-auth an expired session before
+    ///     bouncing the user to login (WI-3 parity, AC7.b).
     init(
         accountRepository: AccountRepositoryProtocol = AccountRepository(),
-        pushTokenRepository: PushTokenRepositoryProtocol = PushTokenRepository()
+        pushTokenRepository: PushTokenRepositoryProtocol = PushTokenRepository(),
+        reauthenticator: SessionReauthenticator = SessionReauthenticator.shared
     ) {
         self.accountRepository = accountRepository
         self.pushTokenRepository = pushTokenRepository
+        self.reauthenticator = reauthenticator
     }
 
     /// Checks Core Data for an active account and transitions launch state accordingly.
@@ -58,9 +64,29 @@ final class AppRootViewModel: ObservableObject {
         }
     }
 
-    /// Transitions back to the login state when the session expires
-    /// (e.g., the WebView detects a redirect to `/web/login`).
+    /// Handles a session-expired signal (e.g., the WebView detected a redirect to `/web/login`).
+    ///
+    /// Self-heal first (AC7.b, WI-3 parity): instead of unconditionally bouncing to login, it attempts
+    /// one silent, guardrail'd re-auth of the active account's expired session and STAYS
+    /// `.authenticated` when that succeeds — so token updates keep working and the user is not forced
+    /// to log in again. It transitions to `.login` only when re-auth is impossible (no active/https
+    /// account, credentials rejected, unsafe host — every guardrail is enforced inside
+    /// `SessionReauthenticator`; see `attemptSelfHealOrLogin`).
     func onSessionExpired() {
-        launchState = .login
+        Task { await attemptSelfHealOrLogin() }
+    }
+
+    /// The awaitable core of `onSessionExpired`, exposed for deterministic unit testing. Attempts a
+    /// single silent re-auth of the active account and sets `launchState` to `.authenticated` on
+    /// success, `.login` otherwise. Returns the resulting state.
+    @discardableResult
+    func attemptSelfHealOrLogin() async -> LaunchState {
+        guard let account = accountRepository.getActiveAccount(),
+              await reauthenticator.reauthenticateForHost(account.serverHost) else {
+            launchState = .login
+            return .login
+        }
+        launchState = .authenticated
+        return .authenticated
     }
 }

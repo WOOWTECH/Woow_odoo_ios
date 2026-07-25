@@ -111,7 +111,18 @@ actor OdooAPIClient {
         let params = CallKwParams(model: model, method: method, args: args, kwargs: kwargs)
         let request = JsonRpcRequest(id: nextRequestId(authenticated: true), params: params)
 
-        let (data, _) = try await post(url: url, body: request)
+        let (data, response) = try await post(url: url, body: request)
+
+        // WI-3 self-heal detection: an expired Odoo session arrives on these `type='json'` routes as
+        // HTTP 200 with a `SessionExpiredException` error envelope (not HTTP 401), so body inspection
+        // — not a status-code check — is required. A genuine transport 401 is honoured too. Throwing a
+        // dedicated `.sessionExpired` lets the healing layer re-auth once and retry (see
+        // SessionReauthenticator); every other error stays a `serverError`.
+        let httpCode = (response as? HTTPURLResponse)?.statusCode ?? 200
+        if SessionExpiry.isSessionExpired(httpCode: httpCode, body: data) {
+            throw OdooAPIError.sessionExpired
+        }
+
         let decoded = try JSONDecoder().decode(
             JsonRpcResponse<AnyCodable>.self,
             from: data
@@ -210,11 +221,14 @@ actor OdooAPIClient {
 }
 
 /// Errors thrown by OdooAPIClient.
-enum OdooAPIError: Error, LocalizedError {
+enum OdooAPIError: Error, LocalizedError, Equatable {
     case invalidUrl
     case invalidResponse
     case httpsRequired
     case serverError(String)
+    /// The Odoo session cookie has expired (HTTP-200 `SessionExpiredException` envelope or a genuine
+    /// 401). Distinct so the WI-3 self-heal layer can re-authenticate once and retry the request.
+    case sessionExpired
 
     var errorDescription: String? {
         switch self {
@@ -222,6 +236,7 @@ enum OdooAPIError: Error, LocalizedError {
         case .invalidResponse: return "Invalid response from server"
         case .httpsRequired: return "HTTPS connection required"
         case .serverError(let msg): return msg
+        case .sessionExpired: return "Session expired"
         }
     }
 }
