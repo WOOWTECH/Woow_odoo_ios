@@ -213,6 +213,22 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         return saved
     }
 
+    /// Honest logout (FCM token-lifecycle S4 / AC9): logging out an account must leave **no trace**
+    /// of it that a later reconcile could resurrect.
+    ///
+    /// The order matters and is guaranteed here:
+    /// 1. issue a best-effort remote `unregister_device` so the server **hard-deletes** the
+    ///    `(fcm_token, user_id)` row (it never blocks logout — a dead/unreachable host is swallowed), THEN
+    /// 2. **remove the local account row** and clear its stored password + session id — not merely the
+    ///    session cookie. This is the demo444 fix: a decommissioned tenant used to linger in the local
+    ///    DB after "logout" (which only cleared the cookie) and poison every launch reconcile.
+    ///
+    /// Multi-account is preserved: only the logged-out account's row + credentials + server
+    /// registration are removed; a sibling on the same device keeps its row, credentials, and push.
+    /// A still-logged-in sibling is promoted to active; the login screen appears only on the last logout.
+    ///
+    /// This is deliberately minimal — there is no pruning counter or state machine (that was the
+    /// abandoned option-A machinery). Honest row removal is the whole story.
     func logout(accountId: String? = nil) async {
         let context = persistence.container.viewContext
         let account: OdooAccountEntity?
