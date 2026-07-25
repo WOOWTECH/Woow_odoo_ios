@@ -36,15 +36,24 @@ final class PushTokenRepository: PushTokenRepositoryProtocol {
     private let secureStorage: SecureStorage
     private let accountRepository: AccountRepositoryProtocol
     private let apiClient: OdooAPIClient
+    private let healingRegistrar: SessionHealingRegistrar
 
     init(
         secureStorage: SecureStorage = .shared,
         accountRepository: AccountRepositoryProtocol = AccountRepository(),
-        apiClient: OdooAPIClient = OdooAPIClient()
+        apiClient: OdooAPIClient = OdooAPIClient(),
+        reauthenticator: SessionReauthenticator = SessionReauthenticator.shared
     ) {
         self.secureStorage = secureStorage
         self.accountRepository = accountRepository
         self.apiClient = apiClient
+        // The register call self-heals an expired session (WI-3 parity): re-auth once against the
+        // account's own https host and retry once, so an expired session never silently stops token
+        // updates. Shares the same api client so the refreshed cookie applies to the retry.
+        self.healingRegistrar = SessionHealingRegistrar(
+            apiClient: apiClient,
+            reauthenticator: reauthenticator
+        )
     }
 
     func saveToken(_ token: String) {
@@ -80,8 +89,10 @@ final class PushTokenRepository: PushTokenRepositoryProtocol {
         let accounts = accountRepository.getAllAccounts()
         for account in accounts {
             do {
-                let response = try await apiClient.callKw(
-                    serverUrl: account.fullServerUrl,
+                // Routed through the self-heal registrar (WI-3 parity): a session-expired response
+                // triggers exactly one re-auth against the account's own https host + one retry.
+                let response = try await healingRegistrar.callKwHealing(
+                    account: account,
                     model: "woow.fcm.device",
                     method: "register_device",
                     args: [],

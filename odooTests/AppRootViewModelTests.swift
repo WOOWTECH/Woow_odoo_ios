@@ -89,19 +89,25 @@ final class AppRootViewModelTests: XCTestCase {
 
     // MARK: - ARV-06
 
-    /// ARV-06: `onSessionExpired()` transitions the state back to `.login` so that
-    /// `LoginView` appears with pre-filled credentials. Verifies the callback is not
-    /// accidentally disconnected during any refactor.
-    func test_onSessionExpired_givenAuthenticatedState_transitionsToLogin() {
+    /// ARV-06: `onSessionExpired()` transitions the state back to `.login` when the expired session
+    /// CANNOT be silently self-healed (WI-3 parity, AC7.b) — so `LoginView` appears with pre-filled
+    /// credentials. The reauthenticator here has no resolvable account, so self-heal declines and the
+    /// state falls back to `.login`. (Self-heal SUCCESS staying `.authenticated` is covered in
+    /// SessionReauthenticatorTests.)
+    func test_onSessionExpired_givenAuthenticatedState_selfHealImpossible_transitionsToLogin() async {
         let repo = MockAccountRepository()
         repo.stubbedActiveAccount = makeAccount(username: "alan@woow.com")
-        let sut = AppRootViewModel(accountRepository: repo)
+        // A reauthenticator whose account source is empty -> no https host matches -> self-heal declines
+        // before any network call, so the expiry surfaces login (hermetic: no DNS, no credential sent).
+        let reauth = SessionReauthenticator(accountRepository: MockAccountRepository())
+        let sut = AppRootViewModel(accountRepository: repo, reauthenticator: reauth)
         sut.checkSession() // transitions to .authenticated
 
-        sut.onSessionExpired()
+        let state = await sut.attemptSelfHealOrLogin()
 
+        XCTAssertEqual(state, .login)
         XCTAssertEqual(sut.launchState, .login,
-                       "launchState must return to .login after onSessionExpired()")
+                       "launchState must return to .login when self-heal is impossible")
     }
 
     // MARK: - EC-01
