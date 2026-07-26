@@ -532,11 +532,14 @@ final class AuthViewModelLockoutTests: XCTestCase {
         settings.resetFailedAttempts()
     }
 
-    // isLockedOut reflects repository state.
+    // isLockedOut reflects repository state. Lockout is counter-gated (WI-2): it requires the
+    // failure counter at the tier threshold AND the wall-clock window to be open.
     func test_isLockedOut_givenLockoutSet_returnsTrue() {
-        let settings = SettingsRepository()
-        let farFuture = ProcessInfo.processInfo.systemUptime + 3600
-        settings.setLockout(until: farFuture)
+        let fixedNow: TimeInterval = 1000
+        let settings = SettingsRepository(now: { fixedNow })
+        settings.resetFailedAttempts()
+        for _ in 0..<PinHasher.maxAttemptsPerTier { _ = settings.incrementFailedAttempts() }
+        settings.setLockout(until: fixedNow + 3600)
         let vm = AuthViewModel(settingsRepository: settings)
         XCTAssertTrue(vm.isLockedOut())
         settings.resetFailedAttempts()
@@ -571,16 +574,22 @@ final class SettingsRepositoryLockoutTests: XCTestCase {
     }
 
     // verifyPin when locked out must return false WITHOUT incrementing failed attempts.
+    // Counter-gated lockout (WI-2): the counter must be at the tier threshold with the window open.
     func test_verifyPin_whenLockedOut_returnsFalseWithoutIncrementing() {
-        repo.setPin("432100")
-        let farFuture = ProcessInfo.processInfo.systemUptime + 3600
-        repo.setLockout(until: farFuture)
+        let fixedNow: TimeInterval = 1000
+        let lockedRepo = SettingsRepository(now: { fixedNow })
+        lockedRepo.removePin()
+        lockedRepo.setPin("432100") // setPin resets the counter, so build lockout state AFTER it
+        for _ in 0..<PinHasher.maxAttemptsPerTier { _ = lockedRepo.incrementFailedAttempts() }
+        lockedRepo.setLockout(until: fixedNow + 3600)
 
-        let countBefore = repo.getFailedAttempts()
-        let result = repo.verifyPin("432100") // correct pin, but locked out
+        let countBefore = lockedRepo.getFailedAttempts()
+        let result = lockedRepo.verifyPin("432100") // correct pin, but locked out
         XCTAssertFalse(result, "Locked out session must reject even the correct PIN")
-        XCTAssertEqual(repo.getFailedAttempts(), countBefore,
+        XCTAssertEqual(lockedRepo.getFailedAttempts(), countBefore,
                        "Failed attempt counter must NOT increment during lockout")
+        lockedRepo.resetFailedAttempts()
+        lockedRepo.removePin()
     }
 
     // 5 failures must trigger a 30-second lockout (first tier).

@@ -94,9 +94,7 @@ final class AuthViewModel: ObservableObject {
     }
 
     func getLockoutRemainingSeconds() -> Int {
-        guard let end = settingsRepository.getLockoutEndTime() else { return 0 }
-        let remaining = end - ProcessInfo.processInfo.systemUptime
-        return max(0, Int(remaining))
+        settingsRepository.getLockoutRemainingSeconds()
     }
 }
 

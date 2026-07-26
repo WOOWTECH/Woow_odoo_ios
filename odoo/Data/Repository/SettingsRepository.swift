@@ -19,15 +19,23 @@ protocol SettingsRepositoryProtocol {
     func resetFailedAttempts()
     func isLockedOut() -> Bool
     func getLockoutEndTime() -> TimeInterval?
+    func getLockoutRemainingSeconds() -> Int
     func setLockout(until: TimeInterval)
 }
 
 final class SettingsRepository: SettingsRepositoryProtocol {
 
     private let secureStorage: SecureStorage
+    /// Injectable wall-clock (seconds since 1970) so lockout is deterministic in tests and survives
+    /// reboots correctly (systemUptime resets on reboot — the bug this replaces).
+    private let now: () -> TimeInterval
 
-    init(secureStorage: SecureStorage = .shared) {
+    init(
+        secureStorage: SecureStorage = .shared,
+        now: @escaping () -> TimeInterval = { Date().timeIntervalSince1970 }
+    ) {
         self.secureStorage = secureStorage
+        self.now = now
     }
 
     func getSettings() -> AppSettings {
@@ -75,6 +83,9 @@ final class SettingsRepository: SettingsRepositoryProtocol {
         var settings = secureStorage.getSettings()
         settings.pinEnabled = true
         settings.pinHash = hash
+        // Setting a (new) PIN clears any stale lockout so it can't leak into the fresh credential.
+        settings.failedPinAttempts = 0
+        settings.pinLockoutUntil = nil
         secureStorage.saveSettings(settings)
         return true
     }
@@ -93,7 +104,7 @@ final class SettingsRepository: SettingsRepositoryProtocol {
             let attempts = incrementFailedAttempts()
             if attempts >= PinHasher.maxAttemptsPerTier {
                 let duration = PinHasher.lockoutDuration(failedAttempts: attempts)
-                let lockoutEnd = ProcessInfo.processInfo.systemUptime + duration
+                let lockoutEnd = now() + duration
                 setLockout(until: lockoutEnd)
             }
             return false
@@ -104,6 +115,9 @@ final class SettingsRepository: SettingsRepositoryProtocol {
         var settings = secureStorage.getSettings()
         settings.pinEnabled = false
         settings.pinHash = nil
+        // Clearing the PIN also clears its lockout state so it can't strand a later re-set.
+        settings.failedPinAttempts = 0
+        settings.pinLockoutUntil = nil
         secureStorage.saveSettings(settings)
     }
 
@@ -126,8 +140,16 @@ final class SettingsRepository: SettingsRepositoryProtocol {
     }
 
     func isLockedOut() -> Bool {
-        guard let lockoutEnd = secureStorage.getSettings().pinLockoutUntil else { return false }
-        return ProcessInfo.processInfo.systemUptime < lockoutEnd
+        let settings = secureStorage.getSettings()
+        return isPinLockedOut(
+            failedAttempts: settings.failedPinAttempts,
+            lockoutUntil: settings.pinLockoutUntil,
+            now: now()
+        )
+    }
+
+    func getLockoutRemainingSeconds() -> Int {
+        pinLockoutRemainingSeconds(lockoutUntil: secureStorage.getSettings().pinLockoutUntil, now: now())
     }
 
     func getLockoutEndTime() -> TimeInterval? {
