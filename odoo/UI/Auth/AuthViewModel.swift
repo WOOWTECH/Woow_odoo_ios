@@ -100,10 +100,6 @@ final class AuthViewModel: ObservableObject {
         relock()
     }
 
-    /// TEMPORARY alias kept so the pre-refactor `AppRootView` still compiles until Task 4 rewires it.
-    /// Remove once `AppRootView` forwards `appDidEnterBackground`/`appDidBecomeActive`.
-    func onAppBackgrounded() { appDidEnterBackground() }
-
     /// Force a re-lock — background, session expiry, or logout (AC9). Bumps the generation so an
     /// in-flight biometric/passcode success cannot unlock after the fact (AC8).
     func relock() {
@@ -164,6 +160,12 @@ final class AuthViewModel: ObservableObject {
     /// User tapped "Use PIN" (only offered in the biometric+PIN combination).
     func usePin() {
         showPin = true
+        recomputeUIState()
+    }
+
+    /// User tapped back on the PIN keypad (only reachable in biometric+PIN) — return to biometric.
+    func backFromPin() {
+        showPin = false
         recomputeUIState()
     }
 

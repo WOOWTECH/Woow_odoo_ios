@@ -10,6 +10,8 @@ struct PinView: View {
     @ObservedObject private var theme = WoowTheme.shared
     let onPinVerified: () -> Void
     let onBackClick: () -> Void
+    /// Hidden when PIN is the only method (nothing to go back to); shown in biometric+PIN.
+    var showBack: Bool = true
 
     @State private var pin: String = ""
     @State private var error: String?
@@ -21,11 +23,13 @@ struct PinView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Back button
+            // Back button — hidden when PIN is the only method (nothing to go back to).
             HStack {
-                Button(action: onBackClick) {
-                    Image(systemName: "chevron.left")
-                        .font(.title3)
+                if showBack {
+                    Button(action: onBackClick) {
+                        Image(systemName: "chevron.left")
+                            .font(.title3)
+                    }
                 }
                 Spacer()
             }

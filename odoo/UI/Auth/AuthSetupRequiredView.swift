@@ -1,16 +1,14 @@
-import LocalAuthentication
 import SwiftUI
 
-/// Fail-closed screen shown when App Lock is ON but no in-app method is usable — e.g. a
-/// biometric-only lock whose Face ID permission was revoked in Settings, or after an OS
-/// biometry-lockout. It must NEVER fall through to the unlocked app: the only way past it is the
-/// **device passcode** (`.deviceOwnerAuthentication`, which also accepts biometric if it recovers).
-/// The user is also told to set up an unlock method in Settings.
+/// Fail-closed screen when App Lock is ON but no in-app method is usable — RENDER ONLY. The
+/// device-passcode evaluation lives in the `AuthViewModel` (via `BiometricAuthenticator`); this view
+/// draws the state and forwards the unlock tap. It must NEVER fall through to the unlocked app.
 struct AuthSetupRequiredView: View {
-    @ObservedObject var authViewModel: AuthViewModel
     @ObservedObject private var theme = WoowTheme.shared
 
-    @State private var errorMessage: String?
+    let prompting: Bool
+    let error: String?
+    let onUnlock: () -> Void
 
     var body: some View {
         VStack(spacing: 32) {
@@ -28,14 +26,14 @@ struct AuthSetupRequiredView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
-            if let error = errorMessage {
+            if let error {
                 ErrorBannerView(message: error)
             }
 
             Spacer()
 
             Button {
-                authenticateWithDevicePasscode()
+                onUnlock()
             } label: {
                 Text(String(localized: "Unlock with Passcode"))
                     .fontWeight(.semibold)
@@ -45,40 +43,15 @@ struct AuthSetupRequiredView: View {
             .buttonStyle(.borderedProminent)
             .tint(theme.primaryColor)
             .clipShape(RoundedRectangle(cornerRadius: 16))
+            .disabled(prompting)
 
             Spacer().frame(height: 40)
         }
         .padding(32)
         .frame(maxWidth: 500)
-        .onAppear {
-            authenticateWithDevicePasscode()
-        }
-    }
-
-    private func authenticateWithDevicePasscode() {
-        let context = LAContext()
-        var error: NSError?
-
-        // .deviceOwnerAuthentication = biometric OR device passcode. This is the fail-closed
-        // fallback: even with no in-app method, the OS passcode still gates entry.
-        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
-            errorMessage = String(localized: "No unlock method is available. Set up Face ID or a PIN in Settings, or unlock with your device passcode.")
-            return
-        }
-
-        context.evaluatePolicy(
-            .deviceOwnerAuthentication,
-            localizedReason: String(localized: "biometric_reason")
-        ) { success, _ in
-            Task { @MainActor in
-                if success {
-                    authViewModel.setAuthenticated(true)
-                }
-            }
-        }
     }
 }
 
 #Preview {
-    AuthSetupRequiredView(authViewModel: AuthViewModel())
+    AuthSetupRequiredView(prompting: false, error: nil, onUnlock: {})
 }

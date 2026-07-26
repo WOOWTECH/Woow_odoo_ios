@@ -48,7 +48,6 @@ struct AppRootView: View {
     @StateObject private var rootViewModel = AppRootViewModel()
     @StateObject private var authViewModel = AuthViewModel()
     @ObservedObject private var theme = WoowTheme.shared
-    @State private var showPin = false
     @State private var showConfig = false
     @State private var showPrivacyOverlay = false
     /// Set to true when the user taps "Add Account" so that after the Config sheet
@@ -80,98 +79,7 @@ struct AppRootView: View {
                     }
                 })
             case .authenticated:
-                if authViewModel.requiresAuth && !authViewModel.isAuthenticated {
-                    // Single-method routing via the fail-closed resolver (WI-1). `showPin` is only
-                    // meaningful in `.biometricAndPin` (the "Use PIN" escape).
-                    switch authViewModel.authAction {
-                    case .pinOnly:
-                        // Face unusable / disabled + PIN set → straight to the keypad, no biometric page.
-                        PinView(
-                            authViewModel: authViewModel,
-                            onPinVerified: {},
-                            onBackClick: {}
-                        )
-                    case .biometricOnly:
-                        // Face only, no PIN → biometric with the PIN escape fully removed.
-                        BiometricView(
-                            authViewModel: authViewModel,
-                            onAuthSuccess: {},
-                            onUsePinClick: {},
-                            hasPin: false
-                        )
-                    case .biometricAndPin:
-                        if showPin {
-                            PinView(
-                                authViewModel: authViewModel,
-                                onPinVerified: { showPin = false },
-                                onBackClick: { showPin = false }
-                            )
-                        } else {
-                            BiometricView(
-                                authViewModel: authViewModel,
-                                onAuthSuccess: {},
-                                onUsePinClick: { showPin = true },
-                                hasPin: true
-                            )
-                        }
-                    case .setupRequired, .none:
-                        // App Lock on but no usable method → FAIL CLOSED. (`.none` is unreachable here
-                        // since requiresAuth == appLockEnabled; handled defensively, never unlocking.)
-                        AuthSetupRequiredView(authViewModel: authViewModel)
-                    }
-                } else {
-                    MainView(
-                        onMenuClick: {
-                            showConfig = true
-                        },
-                        onSessionExpired: {
-                            rootViewModel.onSessionExpired()
-                            authViewModel.setAuthenticated(false)
-                        }
-                    )
-                    .sheet(isPresented: $showConfig, onDismiss: {
-                        // Deferred transition: navigate to login only after the sheet
-                        // dismissal animation completes. Changing launchState while the
-                        // sheet is still animating out causes SwiftUI to drop the
-                        // transition, leaving the login screen unreachable.
-                        if pendingAddAccount {
-                            pendingAddAccount = false
-                            isAddingAccount = true
-                            rootViewModel.onSessionExpired()
-                        }
-                    }) {
-                        ConfigView(
-                            onBackClick: {
-                                showConfig = false
-                            },
-                            onSettingsClick: {
-                                // Navigation handled inside ConfigView's NavigationStack
-                            },
-                            onAddAccountClick: {
-                                // Mark the intent and dismiss the sheet. The actual
-                                // launchState transition happens in onDismiss after
-                                // the sheet animation completes.
-                                pendingAddAccount = true
-                                showConfig = false
-                            },
-                            onLogout: { stayAuthenticated in
-                                showConfig = false
-                                if stayAuthenticated {
-                                    // Multi-account fallback: another account was promoted. Stay on
-                                    // the main screen — the promoted account's WebView reloads via
-                                    // `.activeAccountDidChange` (MainViewModel observes it). Surface a
-                                    // landing toast so the user (and VoiceOver) know which account
-                                    // they've landed in.
-                                    fallbackToastAccount = AccountRepository().getActiveAccount()?.displayName
-                                } else {
-                                    // Last account logged out — return to the login screen.
-                                    rootViewModel.onSessionExpired()
-                                    authViewModel.setAuthenticated(false)
-                                }
-                            }
-                        )
-                    }
-                }
+                authenticatedContent
             }
         }
         // Disable cross-fade transition when switching between launch states.
@@ -216,18 +124,108 @@ struct AppRootView: View {
             rootViewModel.checkSession()
         }
         .onChange(of: scenePhase) { newPhase in
+            guard rootViewModel.launchState == .authenticated else { return }
             switch newPhase {
-            case .background, .inactive:
-                if rootViewModel.launchState == .authenticated {
-                    authViewModel.onAppBackgrounded()
-                    showPin = false
-                    showPrivacyOverlay = true  // H4: hide content in task switcher
-                }
+            case .inactive:
+                // H4: iOS snapshots for the task switcher at .inactive — cover sensitive content.
+                // Do NOT re-lock here: the Face ID sheet itself drives the app .inactive.
+                showPrivacyOverlay = true
+            case .background:
+                // True background → re-lock (VM resets the loop guard + bumps the stale-success token).
+                authViewModel.appDidEnterBackground()
+                showPrivacyOverlay = true
             case .active:
                 showPrivacyOverlay = false
+                // Auto-run the biometric prompt once per lock — seamless single-method unlock.
+                authViewModel.appDidBecomeActive()
             @unknown default:
                 break
             }
+        }
+        .onChange(of: rootViewModel.launchState) { newState in
+            // Cold launch / post-login: drive the auto-prompt when the gate is first reached.
+            if newState == .authenticated {
+                authViewModel.appDidBecomeActive()
+            }
+        }
+        .onChange(of: authViewModel.isAuthenticated) { authed in
+            // Reset the Config sheet on re-lock so it is not re-presented after re-auth.
+            if !authed { showConfig = false }
+        }
+    }
+
+    // MARK: - Authenticated content (extracted so the `body` type-checks quickly)
+
+    /// Renders the App Lock gate purely from `authViewModel.uiState`. No auth control-flow here.
+    @ViewBuilder
+    private var authenticatedContent: some View {
+        switch authViewModel.uiState {
+        case .unlocked:
+            mainContent
+        case .biometric(let prompting, let error, let kind, let showUsePin):
+            BiometricView(
+                kind: kind,
+                prompting: prompting,
+                error: error,
+                showUsePin: showUsePin,
+                onRetry: { authViewModel.retryBiometric() },
+                onUsePin: { authViewModel.usePin() }
+            )
+        case .pin(let showBack):
+            PinView(
+                authViewModel: authViewModel,
+                onPinVerified: {},
+                onBackClick: { authViewModel.backFromPin() },
+                showBack: showBack
+            )
+        case .setupRequired(let prompting, let error):
+            AuthSetupRequiredView(
+                prompting: prompting,
+                error: error,
+                onUnlock: { authViewModel.unlockWithDevicePasscode() }
+            )
+        }
+    }
+
+    /// The unlocked main screen + the Config sheet / add-account / logout orchestration (kept in the
+    /// View — the ViewModel owns only lock-vs-content selection).
+    private var mainContent: some View {
+        MainView(
+            onMenuClick: { showConfig = true },
+            onSessionExpired: {
+                rootViewModel.onSessionExpired()
+                authViewModel.setAuthenticated(false)
+            }
+        )
+        .sheet(isPresented: $showConfig, onDismiss: {
+            // Deferred transition: navigate to login only after the sheet dismissal animation.
+            if pendingAddAccount {
+                pendingAddAccount = false
+                isAddingAccount = true
+                rootViewModel.onSessionExpired()
+            }
+        }) {
+            ConfigView(
+                onBackClick: { showConfig = false },
+                onSettingsClick: {
+                    // Navigation handled inside ConfigView's NavigationStack
+                },
+                onAddAccountClick: {
+                    pendingAddAccount = true
+                    showConfig = false
+                },
+                onLogout: { stayAuthenticated in
+                    showConfig = false
+                    if stayAuthenticated {
+                        // Multi-account fallback: another account was promoted — landing toast.
+                        fallbackToastAccount = AccountRepository().getActiveAccount()?.displayName
+                    } else {
+                        // Last account logged out — return to the login screen.
+                        rootViewModel.onSessionExpired()
+                        authViewModel.setAuthenticated(false)
+                    }
+                }
+            )
         }
     }
 }

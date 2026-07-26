@@ -498,7 +498,7 @@ final class AuthViewModelTests: XCTestCase {
         vm.setAuthenticated(true)
         XCTAssertTrue(vm.isAuthenticated)
 
-        vm.onAppBackgrounded()
+        vm.appDidEnterBackground()
         XCTAssertFalse(vm.isAuthenticated)
 
         // Cleanup
@@ -511,7 +511,7 @@ final class AuthViewModelTests: XCTestCase {
         let vm = AuthViewModel(settingsRepository: settings)
         vm.setAuthenticated(true)
 
-        vm.onAppBackgrounded()
+        vm.appDidEnterBackground()
         XCTAssertTrue(vm.isAuthenticated)
     }
 

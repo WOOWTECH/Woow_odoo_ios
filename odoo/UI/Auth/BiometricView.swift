@@ -1,33 +1,34 @@
-import LocalAuthentication
 import SwiftUI
 
-/// Biometric authentication screen — Face ID / Touch ID.
-/// UX-10 through UX-14: NO skip button.
+/// Biometric unlock screen — RENDER ONLY. It draws the state the `AuthViewModel` publishes and
+/// forwards taps; it owns no `LocalAuthentication`, no `scenePhase`, and no auto-prompt logic. The
+/// biometric prompt is auto-run by the ViewModel on `appDidBecomeActive` (once per lock); the button
+/// here is an explicit *retry* only.
 /// Ported from Android: BiometricScreen.kt
 struct BiometricView: View {
-    @ObservedObject var authViewModel: AuthViewModel
-    /// Observes the user's theme color so the icon + button tints reflect
-    /// the current theme (UX-48). See `WoowTheme.swift`.
     @ObservedObject private var theme = WoowTheme.shared
-    let onAuthSuccess: () -> Void
-    let onUsePinClick: () -> Void
-    /// Whether a PIN exists as a fallback. When false (`.biometricOnly`), the "Use PIN" button is
-    /// hidden AND the system fallback / lockout paths must NOT route to a (nonexistent) PIN screen.
-    let hasPin: Bool
 
-    @State private var errorMessage: String?
-    @State private var isAnimating = false
+    let kind: BiometryKind
+    /// True while the Face/Touch prompt is in flight.
+    let prompting: Bool
+    let error: String?
+    /// Only shown in the biometric+PIN combination (no PIN → no escape button).
+    let showUsePin: Bool
+    let onRetry: () -> Void
+    let onUsePin: () -> Void
+
+    private var iconName: String { kind == .touchID ? "touchid" : "faceid" }
+    private var biometryName: String { kind == .touchID ? "Touch ID" : "Face ID" }
 
     var body: some View {
         VStack(spacing: 32) {
             Spacer()
 
-            // Fingerprint/Face icon
-            Image(systemName: biometricIcon)
+            Image(systemName: iconName)
                 .font(.system(size: 64))
                 .foregroundStyle(theme.primaryColor)
-                .scaleEffect(isAnimating ? 1.1 : 1.0)
-                .animation(.easeInOut(duration: 0.3), value: isAnimating)
+                .scaleEffect(prompting ? 1.1 : 1.0)
+                .animation(.easeInOut(duration: 0.3), value: prompting)
 
             Text(String(localized: "biometric_login_title"))
                 .font(.title2)
@@ -37,20 +38,19 @@ struct BiometricView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
-            // Error message
-            if let error = errorMessage {
+            if let error {
                 ErrorBannerView(message: error)
             }
 
             Spacer()
 
-            // Retry biometric button
+            // Explicit retry — the auto-prompt is driven by the ViewModel, not this button.
             Button {
-                authenticate()
+                onRetry()
             } label: {
                 HStack {
-                    Image(systemName: biometricIcon)
-                    Text(String(localized: "unlock_with") + " " + biometricName)
+                    Image(systemName: iconName)
+                    Text(String(localized: "unlock_with") + " " + biometryName)
                 }
                 .fontWeight(.semibold)
                 .frame(maxWidth: .infinity)
@@ -59,12 +59,12 @@ struct BiometricView: View {
             .buttonStyle(.borderedProminent)
             .tint(theme.primaryColor)
             .clipShape(RoundedRectangle(cornerRadius: 16))
+            .disabled(prompting)
 
-            // Use PIN fallback — NO skip button (UX-14). Shown only when a PIN exists; in
-            // `.biometricOnly` there is no PIN to fall back to, so the button is hidden.
-            if hasPin {
+            // "Use PIN" — only when a PIN exists (UX-14: no skip button).
+            if showUsePin {
                 Button(String(localized: "use_pin_button")) {
-                    onUsePinClick()
+                    onUsePin()
                 }
                 .foregroundStyle(.secondary)
             }
@@ -73,79 +73,11 @@ struct BiometricView: View {
         }
         .padding(32)
         .frame(maxWidth: 500)
-        .onAppear {
-            authenticate()
-        }
-    }
-
-    // MARK: - Biometric
-
-    private var biometricIcon: String {
-        let context = LAContext()
-        _ = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil)
-        return context.biometryType == .faceID ? "faceid" : "touchid"
-    }
-
-    private var biometricName: String {
-        let context = LAContext()
-        _ = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil)
-        return context.biometryType == .faceID ? "Face ID" : "Touch ID"
-    }
-
-    private func authenticate() {
-        let context = LAContext()
-        var error: NSError?
-
-        guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {
-            errorMessage = String(localized: "error_biometric_unavailable")
-            return
-        }
-
-        // In `.biometricOnly` there is no PIN fallback: suppress the system fallback button so a
-        // tap can't fire `.userFallback` and strand the user on a nonexistent PIN screen.
-        if !hasPin {
-            context.localizedFallbackTitle = ""
-        }
-
-        isAnimating = true
-
-        context.evaluatePolicy(
-            .deviceOwnerAuthenticationWithBiometrics,
-            localizedReason: String(localized: "biometric_reason")
-        ) { success, authError in
-            Task { @MainActor in
-                isAnimating = false
-                if success {
-                    authViewModel.setAuthenticated(true)
-                    onAuthSuccess()
-                } else if let authError = authError as? LAError {
-                    switch authError.code {
-                    case .userCancel, .systemCancel:
-                        break // User cancelled — stay on screen
-                    case .userFallback:
-                        // Only route to PIN when one exists; otherwise stay with a retryable error.
-                        if hasPin { onUsePinClick() } else { errorMessage = String(localized: "error_biometric_failed") }
-                    case .biometryLockout:
-                        errorMessage = String(localized: "error_biometric_lockout")
-                        // No PIN → do not route to a nonexistent PIN screen; the Retry button and
-                        // (in `.setupRequired`) the device-passcode path remain the way forward.
-                        if hasPin { onUsePinClick() }
-                    default:
-                        errorMessage = String(localized: "error_biometric_failed")
-                    }
-                }
-            }
-        }
     }
 }
 
 // MARK: - Preview
 
 #Preview {
-    BiometricView(
-        authViewModel: AuthViewModel(),
-        onAuthSuccess: {},
-        onUsePinClick: {},
-        hasPin: true
-    )
+    BiometricView(kind: .faceID, prompting: false, error: nil, showUsePin: true, onRetry: {}, onUsePin: {})
 }
