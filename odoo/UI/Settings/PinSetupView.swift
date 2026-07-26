@@ -20,7 +20,7 @@ struct PinSetupView: View {
     @State private var newPin: String = ""
     @State private var error: String?
 
-    private let pinLength = 6
+    private let pinLength = PinHasher.pinLength
 
     init(isChangingPin: Bool, onPinSet: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
         self.isChangingPin = isChangingPin
@@ -92,11 +92,11 @@ struct PinSetupView: View {
         pin += "\(digit)"
         error = nil
 
-        // For verifyOld: try verification at 4+ digits (PIN can be 4-6 digits).
-        // For enterNew/confirmNew: wait for pinLength digits (user chooses length).
-        if step == .verifyOld && pin.count >= 4 {
-            handlePinComplete()
-        } else if pin.count == pinLength {
+        // Every step (verify-old / enter-new / confirm-new) evaluates once the full 6-digit PIN is
+        // entered — no intermediate verify. Verifying the old PIN at 4/5 digits would spuriously
+        // increment the failed-attempt counter (the same false-lockout fixed in
+        // AuthViewModel.enterPinDigit).
+        if pin.count == pinLength {
             handlePinComplete()
         }
     }

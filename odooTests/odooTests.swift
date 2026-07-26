@@ -158,24 +158,24 @@ final class DeepLinkValidatorTests: XCTestCase {
 final class PinHasherTests: XCTestCase {
 
     func test_hash_givenValidPin_returnsSaltColonHash() {
-        let result = PinHasher.hash(pin: "1234")
+        let result = PinHasher.hash(pin: "123456")
         XCTAssertNotNil(result)
         XCTAssertTrue(result!.contains(":"), "Hash must be in salt:hash format")
     }
 
     func test_hash_givenSamePinTwice_producesDifferentHashes() {
-        let hash1 = PinHasher.hash(pin: "1234")!
-        let hash2 = PinHasher.hash(pin: "1234")!
+        let hash1 = PinHasher.hash(pin: "123456")!
+        let hash2 = PinHasher.hash(pin: "123456")!
         XCTAssertNotEqual(hash1, hash2, "Random salt should produce different hashes")
     }
 
     func test_verify_givenCorrectPin_returnsTrue() {
-        let hash = PinHasher.hash(pin: "5678")!
-        XCTAssertTrue(PinHasher.verify(pin: "5678", against: hash))
+        let hash = PinHasher.hash(pin: "567890")!
+        XCTAssertTrue(PinHasher.verify(pin: "567890", against: hash))
     }
 
     func test_verify_givenWrongPin_returnsFalse() {
-        let hash = PinHasher.hash(pin: "5678")!
+        let hash = PinHasher.hash(pin: "567890")!
         XCTAssertFalse(PinHasher.verify(pin: "0000", against: hash))
     }
 
@@ -187,8 +187,9 @@ final class PinHasherTests: XCTestCase {
         XCTAssertNil(PinHasher.hash(pin: "1234567"))
     }
 
-    func test_isValidLength_givenFourDigits_returnsTrue() {
-        XCTAssertTrue(PinHasher.isValidLength("1234"))
+    func test_isValidLength_givenFourOrFiveDigits_returnsFalse() {
+        XCTAssertFalse(PinHasher.isValidLength("1234"))
+        XCTAssertFalse(PinHasher.isValidLength("12345"))
     }
 
     func test_isValidLength_givenSixDigits_returnsTrue() {
@@ -551,7 +552,7 @@ final class SettingsRepositoryTests: XCTestCase {
     }
 
     func test_setPin_givenValidPin_returnsTrue() {
-        XCTAssertTrue(repo.setPin("1234"))
+        XCTAssertTrue(repo.setPin("123456"))
     }
 
     func test_setPin_givenTooShort_returnsFalse() {
@@ -559,19 +560,19 @@ final class SettingsRepositoryTests: XCTestCase {
     }
 
     func test_verifyPin_givenCorrectPin_returnsTrue() {
-        repo.setPin("5678")
-        XCTAssertTrue(repo.verifyPin("5678"))
+        repo.setPin("567890")
+        XCTAssertTrue(repo.verifyPin("567890"))
     }
 
     func test_verifyPin_givenWrongPin_returnsFalse() {
-        repo.setPin("5678")
+        repo.setPin("567890")
         XCTAssertFalse(repo.verifyPin("0000"))
     }
 
     func test_removePin_clearsPinHash() {
-        repo.setPin("1234")
+        repo.setPin("123456")
         repo.removePin()
-        XCTAssertFalse(repo.verifyPin("1234"))
+        XCTAssertFalse(repo.verifyPin("123456"))
     }
 
     func test_failedAttempts_incrementsCorrectly() {
@@ -748,7 +749,7 @@ final class SettingsViewModelTests: XCTestCase {
 
     func test_setPin_givenValidPin_returnsTrue() {
         let vm = SettingsViewModel()
-        XCTAssertTrue(vm.setPin("1234"))
+        XCTAssertTrue(vm.setPin("123456"))
         vm.removePin()
     }
 

@@ -48,9 +48,13 @@ enum PinHasher {
 
     // MARK: - PIN Validation
 
-    /// Validates PIN length (4-6 digits).
+    /// Fixed PIN length — exactly 6 digits. Single source of truth for PIN length across the app
+    /// (referenced by AuthViewModel, PinView, PinSetupView).
+    static let pinLength = 6
+
+    /// Validates PIN length (exactly 6 digits).
     static func isValidLength(_ pin: String) -> Bool {
-        pin.count >= 4 && pin.count <= 6
+        pin.count == pinLength
     }
 
     // MARK: - Hashing

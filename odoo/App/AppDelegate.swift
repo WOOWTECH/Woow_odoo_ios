@@ -139,7 +139,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         // Pre-seed app-lock + biometric/PIN state so XCUITests can land
         // directly on `BiometricView` / `PinView` for visual verification.
         //   WOOW_TEST_FORCE_BIOMETRIC=1     → app lock ON + biometric ON
-        //   WOOW_TEST_FORCE_PIN=<4-6 digits> → app lock ON + PIN set + hash stored
+        //   WOOW_TEST_FORCE_PIN=<6 digits> → app lock ON + PIN set + hash stored
         applyDebugAuthSeeding()
     }
 

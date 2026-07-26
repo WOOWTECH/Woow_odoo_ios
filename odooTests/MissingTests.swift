@@ -497,18 +497,18 @@ final class AuthViewModelLockoutTests: XCTestCase {
     // verifyPin must delegate to settingsRepository.verifyPin, not re-implement.
     func test_verifyPin_givenCorrectPin_returnsTrue() {
         let settings = SettingsRepository()
-        settings.setPin("9999")
+        settings.setPin("999999")
         let vm = AuthViewModel(settingsRepository: settings)
-        XCTAssertTrue(vm.verifyPin("9999"))
+        XCTAssertTrue(vm.verifyPin("999999"))
         settings.removePin()
         settings.resetFailedAttempts()
     }
 
     func test_verifyPin_givenWrongPin_returnsFalse() {
         let settings = SettingsRepository()
-        settings.setPin("9999")
+        settings.setPin("999999")
         let vm = AuthViewModel(settingsRepository: settings)
-        XCTAssertFalse(vm.verifyPin("1111"))
+        XCTAssertFalse(vm.verifyPin("111111"))
         settings.removePin()
         settings.resetFailedAttempts()
     }
@@ -572,12 +572,12 @@ final class SettingsRepositoryLockoutTests: XCTestCase {
 
     // verifyPin when locked out must return false WITHOUT incrementing failed attempts.
     func test_verifyPin_whenLockedOut_returnsFalseWithoutIncrementing() {
-        repo.setPin("4321")
+        repo.setPin("432100")
         let farFuture = ProcessInfo.processInfo.systemUptime + 3600
         repo.setLockout(until: farFuture)
 
         let countBefore = repo.getFailedAttempts()
-        let result = repo.verifyPin("4321") // correct pin, but locked out
+        let result = repo.verifyPin("432100") // correct pin, but locked out
         XCTAssertFalse(result, "Locked out session must reject even the correct PIN")
         XCTAssertEqual(repo.getFailedAttempts(), countBefore,
                        "Failed attempt counter must NOT increment during lockout")
@@ -585,7 +585,7 @@ final class SettingsRepositoryLockoutTests: XCTestCase {
 
     // 5 failures must trigger a 30-second lockout (first tier).
     func test_verifyPin_afterFiveFailures_triggersLockout() {
-        repo.setPin("1234")
+        repo.setPin("123400")
         for _ in 0..<5 {
             _ = repo.verifyPin("0000")
         }
@@ -594,7 +594,7 @@ final class SettingsRepositoryLockoutTests: XCTestCase {
 
     // resetFailedAttempts must clear both counter and lockout time.
     func test_resetFailedAttempts_clearsBothCounterAndLockoutTime() {
-        repo.setPin("1234")
+        repo.setPin("123400")
         for _ in 0..<5 { _ = repo.verifyPin("0000") }
         XCTAssertTrue(repo.isLockedOut())
 
@@ -606,18 +606,19 @@ final class SettingsRepositoryLockoutTests: XCTestCase {
 
     // Correct PIN after some failures must reset the counter.
     func test_verifyPin_givenCorrectPinAfterFailures_resetsCounter() {
-        repo.setPin("5555")
+        repo.setPin("555500")
         _ = repo.verifyPin("0000")
         _ = repo.verifyPin("0000")
-        let success = repo.verifyPin("5555")
+        let success = repo.verifyPin("555500")
         XCTAssertTrue(success)
         XCTAssertEqual(repo.getFailedAttempts(), 0,
                        "Successful PIN verification must reset the failed attempts counter")
     }
 
-    // setPin with exactly 4 digits must succeed.
-    func test_setPin_givenFourDigits_succeeds() {
-        XCTAssertTrue(repo.setPin("1234"))
+    // setPin now requires exactly 6 digits — 4 and 5 digits must fail.
+    func test_setPin_givenFourOrFiveDigits_fails() {
+        XCTAssertFalse(repo.setPin("1234"))
+        XCTAssertFalse(repo.setPin("12345"))
     }
 
     // setPin with exactly 6 digits must succeed.
@@ -637,11 +638,93 @@ final class SettingsRepositoryLockoutTests: XCTestCase {
 
     // biometric toggle must persist independently from PIN state.
     func test_setBiometric_doesNotAffectPinState() {
-        repo.setPin("1234")
+        repo.setPin("123400")
         repo.setBiometric(true)
-        XCTAssertTrue(repo.verifyPin("1234"),
+        XCTAssertTrue(repo.verifyPin("123400"),
                       "Enabling biometric must not invalidate the existing PIN")
         repo.setBiometric(false)
+    }
+}
+
+// MARK: - PIN 6-digit unification + false-lockout fix (story-ios-applock-pin-6digit-fix)
+
+@MainActor
+final class PinSixDigitTests: XCTestCase {
+
+    override func tearDown() {
+        let repo = SettingsRepository()
+        repo.removePin()
+        repo.resetFailedAttempts()
+        super.tearDown()
+    }
+
+    // 1–5 digits: no verification runs, so the failure counter must not move (AC1).
+    func test_enterPinDigit_belowSix_needsMoreDigits_noVerify() {
+        let repo = SettingsRepository()
+        repo.setPin("123456")
+        repo.resetFailedAttempts()
+        let vm = AuthViewModel(settingsRepository: repo)
+        var pin = ""
+        for _ in 0..<5 {
+            let r = vm.enterPinDigit("9", currentPin: &pin)
+            guard case .needMoreDigits = r else { return XCTFail("expected .needMoreDigits below 6 digits") }
+        }
+        XCTAssertEqual(repo.getFailedAttempts(), 0,
+                       "no verify below 6 digits → the failure counter must not increment")
+        repo.removePin(); repo.resetFailedAttempts()
+    }
+
+    // A wrong 6-digit entry counts as exactly ONE failed attempt (not 3) (AC3).
+    func test_enterPinDigit_wrongSixDigit_incrementsByExactlyOne() {
+        let repo = SettingsRepository()
+        repo.setPin("123456")
+        repo.resetFailedAttempts()
+        let vm = AuthViewModel(settingsRepository: repo)
+        var pin = ""
+        for _ in 0..<6 { _ = vm.enterPinDigit("9", currentPin: &pin) }
+        XCTAssertEqual(repo.getFailedAttempts(), 1,
+                       "a wrong 6-digit entry must be exactly one failed attempt, not three")
+        repo.removePin(); repo.resetFailedAttempts()
+    }
+
+    // THE core regression (AC4): a CORRECT PIN unlocks even with the counter pre-loaded near the
+    // threshold. Under the old 4–6 code, the length-4/5 verifies tripped lockout and this returned
+    // .lockedOut — the reported "設定 123456 打對也不能登入" bug.
+    func test_enterPinDigit_correctPinWithPreloadedCounter_stillUnlocks() {
+        let repo = SettingsRepository()
+        repo.setPin("123456")
+        repo.resetFailedAttempts()
+        for _ in 0..<3 { _ = repo.incrementFailedAttempts() } // 3 of 5 — below the threshold
+        let vm = AuthViewModel(settingsRepository: repo)
+        var pin = ""
+        var result: PinEntryResult = .needMoreDigits
+        for d in ["1", "2", "3", "4", "5", "6"] { result = vm.enterPinDigit(d, currentPin: &pin) }
+        guard case .success = result else {
+            return XCTFail("a correct 6-digit PIN must unlock with a pre-loaded counter, got \(result)")
+        }
+        repo.removePin(); repo.resetFailedAttempts()
+    }
+
+    // Correct 6-digit PIN unlocks from a clean counter, verified once at 6 (AC2/AC7).
+    func test_enterPinDigit_correctSixDigit_success() {
+        let repo = SettingsRepository()
+        repo.setPin("246810")
+        repo.resetFailedAttempts()
+        let vm = AuthViewModel(settingsRepository: repo)
+        var pin = ""
+        var result: PinEntryResult = .needMoreDigits
+        for d in ["2", "4", "6", "8", "1", "0"] { result = vm.enterPinDigit(d, currentPin: &pin) }
+        guard case .success = result else { return XCTFail("expected .success, got \(result)") }
+        repo.removePin(); repo.resetFailedAttempts()
+    }
+
+    // isValidLength accepts only exactly 6 digits (AC5).
+    func test_isValidLength_onlySix() {
+        XCTAssertEqual(PinHasher.pinLength, 6)
+        XCTAssertFalse(PinHasher.isValidLength("1234"))
+        XCTAssertFalse(PinHasher.isValidLength("12345"))
+        XCTAssertTrue(PinHasher.isValidLength("123456"))
+        XCTAssertFalse(PinHasher.isValidLength("1234567"))
     }
 }
 
@@ -1085,7 +1168,7 @@ final class SettingsViewModelCacheTests: XCTestCase {
     func test_removePin_updatesCachedSettings() {
         let repo = SettingsRepository()
         let vm = SettingsViewModel(settingsRepo: repo)
-        _ = vm.setPin("1234")
+        _ = vm.setPin("123400")
         XCTAssertTrue(vm.settings.pinEnabled)
 
         vm.removePin()
@@ -1268,9 +1351,10 @@ final class MainViewModelTests: XCTestCase {
 
 final class PinHasherEdgeCaseTests: XCTestCase {
 
-    // Exactly 4 digits is valid.
-    func test_isValidLength_givenFourDigits_returnsTrue() {
-        XCTAssertTrue(PinHasher.isValidLength("1234"))
+    // 4 or 5 digits is now INVALID — PINs are exactly 6 digits (6-digit unification).
+    func test_isValidLength_givenFourOrFiveDigits_returnsFalse() {
+        XCTAssertFalse(PinHasher.isValidLength("1234"))
+        XCTAssertFalse(PinHasher.isValidLength("12345"))
     }
 
     // Exactly 6 digits is valid.
@@ -1286,15 +1370,15 @@ final class PinHasherEdgeCaseTests: XCTestCase {
     // Non-digit characters in a valid-length string — isValidLength does NOT validate digits,
     // only length. This test pins that behavior so it does not change silently.
     func test_isValidLength_givenLettersOfValidLength_returnsTrue() {
-        XCTAssertTrue(PinHasher.isValidLength("abcd"), "isValidLength checks length only, not digit-only content")
+        XCTAssertTrue(PinHasher.isValidLength("abcdef"), "isValidLength checks length only, not digit-only content")
     }
 
     // Constant-time comparison: two hashes of different pins must not equal each other.
     func test_verify_givenDifferentPins_neverCollide() {
-        let hash = PinHasher.hash(pin: "1111")!
-        XCTAssertFalse(PinHasher.verify(pin: "2222", against: hash))
-        XCTAssertFalse(PinHasher.verify(pin: "1112", against: hash))
-        XCTAssertFalse(PinHasher.verify(pin: "0000", against: hash))
+        let hash = PinHasher.hash(pin: "111111")!
+        XCTAssertFalse(PinHasher.verify(pin: "222222", against: hash))
+        XCTAssertFalse(PinHasher.verify(pin: "111112", against: hash))
+        XCTAssertFalse(PinHasher.verify(pin: "000000", against: hash))
     }
 
     // A corrupted stored hash (missing colon) must return false, not crash.

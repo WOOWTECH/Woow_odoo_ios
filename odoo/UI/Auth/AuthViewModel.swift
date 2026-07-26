@@ -33,27 +33,25 @@ final class AuthViewModel: ObservableObject {
         settingsRepository.verifyPin(pin)
     }
 
-    /// Attempts to verify a PIN digit-by-digit. Called each time a digit is entered.
-    /// PIN length is 4-6 digits. Tries verification at 4+ digits — if the stored PIN
-    /// is longer (5 or 6 digits), a mismatch at 4 digits returns `.needMoreDigits`
-    /// instead of `.wrongPin` to allow the user to keep entering digits.
-    /// Only counts as a failed attempt when the maximum length (6) is reached.
+    /// Appends a digit and evaluates the PIN ONLY once all `PinHasher.pinLength` (6) digits are
+    /// entered. Entries shorter than 6 digits return `.needMoreDigits` WITHOUT verifying — the PIN is
+    /// checked exactly once, at 6 digits.
+    ///
+    /// This fixes a false-lockout: `verifyPin` increments the failed-attempt counter on every wrong
+    /// call, so verifying at lengths 4 and 5 (the old 4–6 behaviour) burned spurious failures and
+    /// could trip the lockout one keystroke before the real length-6 check ran — causing a CORRECT
+    /// PIN to be rejected. Verifying once per entry keeps the failure count correct: a wrong 6-digit
+    /// entry is exactly one failed attempt.
     func enterPinDigit(_ digit: String, currentPin: inout String) -> PinEntryResult {
         currentPin += digit
-        guard currentPin.count >= 4 else { return .needMoreDigits }
+        guard currentPin.count >= PinHasher.pinLength else { return .needMoreDigits }
 
         if verifyPin(currentPin) {
             setAuthenticated(true)
             return .success
         }
 
-        // PIN didn't match — but if we haven't reached max length (6),
-        // the stored PIN might be longer. Keep accumulating digits.
-        if currentPin.count < 6 {
-            return .needMoreDigits
-        }
-
-        // At max length and still wrong — count as failed attempt
+        // All 6 entered and wrong — verifyPin incremented the failed-attempt counter exactly once.
         let remaining = getRemainingAttempts()
         currentPin = ""
         if remaining > 0 {

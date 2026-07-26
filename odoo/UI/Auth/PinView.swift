@@ -17,7 +17,7 @@ struct PinView: View {
     @State private var isLockedOut = false
     @State private var lockoutTimer: Timer?
 
-    private let pinLength = 6
+    private let pinLength = PinHasher.pinLength
 
     var body: some View {
         VStack(spacing: 0) {

@@ -130,7 +130,7 @@ final class E2E_ThemeAcrossAllViews: XCTestCase {
     func test_themeApplied_toPinView() throws {
         let app = XCUIApplication()
         app.launchEnvironment["WOOW_TEST_THEME_COLOR"] = "#00C853"
-        app.launchEnvironment["WOOW_TEST_FORCE_PIN"] = "1234"
+        app.launchEnvironment["WOOW_TEST_FORCE_PIN"] = "123456"
         app.launchArguments += ["-AppleLanguages", "(en)", "-WoowTestRunner"]
         app.launch()
 
