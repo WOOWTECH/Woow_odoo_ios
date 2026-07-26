@@ -81,18 +81,43 @@ struct AppRootView: View {
                 })
             case .authenticated:
                 if authViewModel.requiresAuth && !authViewModel.isAuthenticated {
-                    if showPin {
+                    // Single-method routing via the fail-closed resolver (WI-1). `showPin` is only
+                    // meaningful in `.biometricAndPin` (the "Use PIN" escape).
+                    switch authViewModel.authAction {
+                    case .pinOnly:
+                        // Face unusable / disabled + PIN set → straight to the keypad, no biometric page.
                         PinView(
                             authViewModel: authViewModel,
-                            onPinVerified: { showPin = false },
-                            onBackClick: { showPin = false }
+                            onPinVerified: {},
+                            onBackClick: {}
                         )
-                    } else {
+                    case .biometricOnly:
+                        // Face only, no PIN → biometric with the PIN escape fully removed.
                         BiometricView(
                             authViewModel: authViewModel,
                             onAuthSuccess: {},
-                            onUsePinClick: { showPin = true }
+                            onUsePinClick: {},
+                            hasPin: false
                         )
+                    case .biometricAndPin:
+                        if showPin {
+                            PinView(
+                                authViewModel: authViewModel,
+                                onPinVerified: { showPin = false },
+                                onBackClick: { showPin = false }
+                            )
+                        } else {
+                            BiometricView(
+                                authViewModel: authViewModel,
+                                onAuthSuccess: {},
+                                onUsePinClick: { showPin = true },
+                                hasPin: true
+                            )
+                        }
+                    case .setupRequired, .none:
+                        // App Lock on but no usable method → FAIL CLOSED. (`.none` is unreachable here
+                        // since requiresAuth == appLockEnabled; handled defensively, never unlocking.)
+                        AuthSetupRequiredView(authViewModel: authViewModel)
                     }
                 } else {
                     MainView(

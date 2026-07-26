@@ -1,4 +1,5 @@
 import Foundation
+import LocalAuthentication
 
 /// Auth lifecycle ViewModel — manages biometric/PIN state and bg→fg re-auth.
 /// Ported from Android: AuthViewModel.kt
@@ -15,6 +16,29 @@ final class AuthViewModel: ObservableObject {
 
     var requiresAuth: Bool {
         settingsRepository.isAppLockEnabled()
+    }
+
+    /// Whether a PIN is configured.
+    var pinEnabled: Bool {
+        settingsRepository.getSettings().pinEnabled
+    }
+
+    /// Whether biometric is both enabled by the user AND currently usable on this device
+    /// (hardware present, enrolled, permission granted, not OS-locked-out). Folds availability into
+    /// the "biometric" axis so the resolver never routes to a biometric screen that can't evaluate.
+    var canUseBiometric: Bool {
+        guard settingsRepository.isBiometricEnabled() else { return false }
+        return LAContext().canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil)
+    }
+
+    /// The auth-gate action to render, decided by the pure [resolveAuthAction]. Fails closed:
+    /// App Lock on with no usable method resolves to `.setupRequired`, never `.none`.
+    var authAction: AuthAction {
+        resolveAuthAction(
+            canUseBiometric: canUseBiometric,
+            pinEnabled: pinEnabled,
+            appLockEnabled: settingsRepository.isAppLockEnabled()
+        )
     }
 
     func setAuthenticated(_ value: Bool) {

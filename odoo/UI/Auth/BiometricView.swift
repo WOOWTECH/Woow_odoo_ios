@@ -11,6 +11,9 @@ struct BiometricView: View {
     @ObservedObject private var theme = WoowTheme.shared
     let onAuthSuccess: () -> Void
     let onUsePinClick: () -> Void
+    /// Whether a PIN exists as a fallback. When false (`.biometricOnly`), the "Use PIN" button is
+    /// hidden AND the system fallback / lockout paths must NOT route to a (nonexistent) PIN screen.
+    let hasPin: Bool
 
     @State private var errorMessage: String?
     @State private var isAnimating = false
@@ -57,11 +60,14 @@ struct BiometricView: View {
             .tint(theme.primaryColor)
             .clipShape(RoundedRectangle(cornerRadius: 16))
 
-            // Use PIN fallback — NO skip button (UX-14)
-            Button(String(localized: "use_pin_button")) {
-                onUsePinClick()
+            // Use PIN fallback — NO skip button (UX-14). Shown only when a PIN exists; in
+            // `.biometricOnly` there is no PIN to fall back to, so the button is hidden.
+            if hasPin {
+                Button(String(localized: "use_pin_button")) {
+                    onUsePinClick()
+                }
+                .foregroundStyle(.secondary)
             }
-            .foregroundStyle(.secondary)
 
             Spacer().frame(height: 40)
         }
@@ -95,6 +101,12 @@ struct BiometricView: View {
             return
         }
 
+        // In `.biometricOnly` there is no PIN fallback: suppress the system fallback button so a
+        // tap can't fire `.userFallback` and strand the user on a nonexistent PIN screen.
+        if !hasPin {
+            context.localizedFallbackTitle = ""
+        }
+
         isAnimating = true
 
         context.evaluatePolicy(
@@ -111,10 +123,13 @@ struct BiometricView: View {
                     case .userCancel, .systemCancel:
                         break // User cancelled — stay on screen
                     case .userFallback:
-                        onUsePinClick()
+                        // Only route to PIN when one exists; otherwise stay with a retryable error.
+                        if hasPin { onUsePinClick() } else { errorMessage = String(localized: "error_biometric_failed") }
                     case .biometryLockout:
                         errorMessage = String(localized: "error_biometric_lockout")
-                        onUsePinClick()
+                        // No PIN → do not route to a nonexistent PIN screen; the Retry button and
+                        // (in `.setupRequired`) the device-passcode path remain the way forward.
+                        if hasPin { onUsePinClick() }
                     default:
                         errorMessage = String(localized: "error_biometric_failed")
                     }
@@ -130,6 +145,7 @@ struct BiometricView: View {
     BiometricView(
         authViewModel: AuthViewModel(),
         onAuthSuccess: {},
-        onUsePinClick: {}
+        onUsePinClick: {},
+        hasPin: true
     )
 }
