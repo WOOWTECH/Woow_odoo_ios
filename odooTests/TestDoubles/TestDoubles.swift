@@ -44,6 +44,13 @@ final class MockAccountRepository: AccountRepositoryProtocol, @unchecked Sendabl
     /// DO exercise ambiguity supply their own closure.
     func isTenantIdAmbiguous(_ tenantId: String) -> Bool { false }
 
+        /// P2-9: this fake resolves no device-scoped key, so the router falls through to
+        /// the tenant path these suites were written for. Suites exercising the
+        /// account-scoped key use the real repository.
+        func getAccount(byDeviceId deviceId: String) -> OdooAccount? { nil }
+
+        func setDeviceId(_ deviceId: String, forAccountId accountId: String) {}
+
     /// Backed by `stubbedTenantAccounts`, which is a dictionary and therefore CANNOT represent
     /// two accounts sharing a tenant id. That is fine for these suites — none construct a
     /// collision — but it means this fake can never exercise the ambiguous path. A test that

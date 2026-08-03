@@ -200,3 +200,108 @@ final class AmbiguousTenantCoreDataTests: XCTestCase {
         XCTAssertFalse(repo.isAccount(active.id, candidateForTenantId: "some-other-tenant"))
     }
 }
+
+// MARK: - P2-9 root cause: the ACCOUNT-scoped routing key, over real Core Data
+
+/// Story 10-1 made the router REFUSE an ambiguous tenant id. Safe — and it cost two users
+/// on one Odoo database their deep links entirely, because a tenant id names a TENANT and
+/// they share it unavoidably. No client-side change could resolve that.
+///
+/// The plugin now stamps the `woow.fcm.device` row id on every push, and has always
+/// returned it from registration. That value is unique per (fcm_token, user_id) BY
+/// CONSTRUCTION, so the case that was undecidable becomes routable.
+@MainActor
+final class AccountScopedRoutingKeyTests: XCTestCase {
+
+    private var persistence: PersistenceController!
+    private var repo: AccountRepository!
+    private let sharedServer = "https://shared-odoo.woowtech.io"
+    private let collidingTenant = "odoo18_ecpay"
+
+    override func setUp() async throws {
+        try await super.setUp()
+        persistence = PersistenceController(inMemory: true)
+        repo = AccountRepository(persistence: persistence)
+        repo.replaceAccountsForTesting([
+            SeededAccount(serverURL: sharedServer, database: "shared", username: "alice",
+                          sessionCookie: "s1", tenantId: collidingTenant, isActive: true),
+            SeededAccount(serverURL: sharedServer, database: "shared", username: "bob",
+                          sessionCookie: "s2", tenantId: collidingTenant, isActive: false),
+        ])
+    }
+
+    override func tearDown() async throws {
+        repo = nil
+        persistence = nil
+        try await super.tearDown()
+    }
+
+    private func account(_ username: String) -> OdooAccount {
+        repo.getAllAccounts().first { $0.username == username }!
+    }
+
+    func test_twoUsersOnOneDatabaseGetDistinctDeviceIds() {
+        repo.setDeviceId("101", forAccountId: account("alice").id)
+        repo.setDeviceId("102", forAccountId: account("bob").id)
+
+        XCTAssertEqual(repo.getAccount(byDeviceId: "101")?.username, "alice")
+        XCTAssertEqual(repo.getAccount(byDeviceId: "102")?.username, "bob")
+        // The tenant id still cannot separate them — that is the point, not a regression.
+        XCTAssertNil(repo.getAccount(byTenantId: collidingTenant))
+    }
+
+    func test_aPushForBobRoutesToBobEvenThoughTheTenantIdIsAmbiguous() {
+        repo.setDeviceId("101", forAccountId: account("alice").id)
+        repo.setDeviceId("102", forAccountId: account("bob").id)
+
+        let decision = NotificationDeepLinkRouter.decide(
+            userInfo: [
+                "odoo_device_id": "102",
+                "odoo_tenant_id": collidingTenant,
+                "odoo_action_url": "/web#action=mail.action_discuss",
+            ],
+            resolveDevice: { repo.getAccount(byDeviceId: $0) },
+            resolveTenant: { repo.getAccount(byTenantId: $0) },
+            isAmbiguousTenant: { repo.isTenantIdAmbiguous($0) },
+            isTenantCandidate: { repo.isAccount($0, candidateForTenantId: $1) },
+            activeAccount: repo.getAllAccounts().first { $0.isActive }
+        )
+        XCTAssertEqual(
+            decision,
+            .switchAndRoute(accountId: account("bob").id, url: "/web#action=mail.action_discuss")
+        )
+    }
+
+    func test_anUnmatchedDeviceIdDropsRatherThanFallingBackToTheAmbiguousTenant() {
+        // Falling back would re-introduce the guess this key exists to remove.
+        repo.setDeviceId("101", forAccountId: account("alice").id)
+
+        let decision = NotificationDeepLinkRouter.decide(
+            userInfo: [
+                "odoo_device_id": "999",
+                "odoo_tenant_id": collidingTenant,
+                "odoo_action_url": "/web#action=mail.action_discuss",
+            ],
+            resolveDevice: { repo.getAccount(byDeviceId: $0) },
+            resolveTenant: { repo.getAccount(byTenantId: $0) },
+            isAmbiguousTenant: { repo.isTenantIdAmbiguous($0) },
+            isTenantCandidate: { repo.isAccount($0, candidateForTenantId: $1) },
+            activeAccount: repo.getAllAccounts().first { $0.isActive }
+        )
+        if case .switchAndRoute = decision {
+            XCTFail("an unmatched device id fell back to the ambiguous tenant id")
+        }
+    }
+
+    func test_setDeviceIdIsKeyedByAccountNotServer() {
+        // Keying by serverUrl would collapse exactly the distinction this key draws.
+        repo.setDeviceId("101", forAccountId: account("alice").id)
+        XCTAssertNil(repo.getAllAccounts().first { $0.username == "bob" }?.deviceId)
+    }
+
+    func test_parseDeviceIdAcceptsAnIntBecauseThatIsWhatOdooReturns() {
+        XCTAssertEqual(PushTokenRepository.parseDeviceId(from: ["device_id": 7]), "7")
+        XCTAssertEqual(PushTokenRepository.parseDeviceId(from: ["device_id": "7"]), "7")
+        XCTAssertNil(PushTokenRepository.parseDeviceId(from: ["odoo_tenant_id": "t"]))
+    }
+}

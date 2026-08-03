@@ -21,6 +21,14 @@ struct OdooAccount: Identifiable, Codable, Equatable, Hashable, Sendable {
     /// default) or before the server has returned a tenant id.
     let tenantId: String?
 
+    /// ACCOUNT-scoped push routing key: this account's `woow.fcm.device` row id (P2-9).
+    ///
+    /// Prefer this over ``tenantId`` when routing a notification. A tenant id names a
+    /// TENANT — the server resolves it to the database name — so two users on ONE database
+    /// share it unavoidably and it cannot select between them. Nil until the next
+    /// successful FCM registration; routing falls back to ``tenantId`` while it is.
+    let deviceId: String?
+
     init(
         id: String = UUID().uuidString,
         serverUrl: String,
@@ -31,7 +39,8 @@ struct OdooAccount: Identifiable, Codable, Equatable, Hashable, Sendable {
         avatarBase64: String? = nil,
         lastLogin: Date = Date(),
         isActive: Bool = false,
-        tenantId: String? = nil
+        tenantId: String? = nil,
+        deviceId: String? = nil
     ) {
         self.id = id
         self.serverUrl = serverUrl
@@ -43,6 +52,7 @@ struct OdooAccount: Identifiable, Codable, Equatable, Hashable, Sendable {
         self.lastLogin = lastLogin
         self.isActive = isActive
         self.tenantId = tenantId
+        self.deviceId = deviceId
     }
 
     /// Returns server URL with https:// prefix guaranteed.

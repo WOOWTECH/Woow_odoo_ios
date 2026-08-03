@@ -25,6 +25,12 @@ protocol AccountRepositoryProtocol: Sendable {
     /// for why this can never cause a cross-tenant switch.
     func isAccount(_ accountId: String, candidateForTenantId tenantId: String) -> Bool
 
+    /// Resolves the account owning `deviceId` — the ACCOUNT-scoped routing key (P2-9).
+    func getAccount(byDeviceId deviceId: String) -> OdooAccount?
+
+    /// Persists the ACCOUNT-scoped routing key for one account (P2-9).
+    func setDeviceId(_ deviceId: String, forAccountId accountId: String)
+
     func isTenantIdAmbiguous(_ tenantId: String) -> Bool
     func switchAccount(id: String) async -> Bool
     func activateAccount(id: String) -> Bool
@@ -212,6 +218,31 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
     /// push notifications can be routed to this account. The match is by `serverUrl`
     /// (the registration is per-server); a no-op if no matching account exists or the
     /// tenant id is already stored.
+    /// Persists the ACCOUNT-scoped push routing key for ONE account (P2-9).
+    ///
+    /// Keyed by account id, unlike `setTenantId(_:forServerUrl:)` — the whole reason this
+    /// key exists is to separate two users on one server, so keying it by server would
+    /// collapse exactly the distinction it is meant to draw.
+    func setDeviceId(_ deviceId: String, forAccountId accountId: String) {
+        guard !deviceId.isEmpty, !accountId.isEmpty else { return }
+        let context = persistence.container.viewContext
+        guard let entity = (try? context.fetch(OdooAccountEntity.fetchByIdRequest(id: accountId)))?.first,
+              entity.deviceId != deviceId else { return }
+        entity.deviceId = deviceId
+        try? context.save()
+    }
+
+    /// Resolves the account owning `deviceId`, or nil. Unique per (fcm_token, user_id) by
+    /// construction — but still refuses on more than one, because a routing lookup must
+    /// surface a violated assumption rather than hide it behind a first match.
+    func getAccount(byDeviceId deviceId: String) -> OdooAccount? {
+        guard !deviceId.isEmpty else { return nil }
+        let context = persistence.container.viewContext
+        let request = OdooAccountEntity.fetchByDeviceIdRequest(deviceId: deviceId)
+        guard let matches = try? context.fetch(request), matches.count == 1 else { return nil }
+        return matches[0].toDomainModel()
+    }
+
     func setTenantId(_ tenantId: String, forServerUrl serverUrl: String) {
         guard !tenantId.isEmpty else { return }
         let context = persistence.container.viewContext

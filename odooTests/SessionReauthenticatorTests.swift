@@ -41,6 +41,13 @@ private final class StubAccountRepo: AccountRepositoryProtocol, @unchecked Senda
     /// concept and assert routing outcomes, not drop-reason discrimination. The tests that
     /// DO exercise ambiguity supply their own closure.
     func isTenantIdAmbiguous(_ tenantId: String) -> Bool { false }
+
+        /// P2-9: this fake resolves no device-scoped key, so the router falls through to
+        /// the tenant path these suites were written for. Suites exercising the
+        /// account-scoped key use the real repository.
+        func getAccount(byDeviceId deviceId: String) -> OdooAccount? { nil }
+
+        func setDeviceId(_ deviceId: String, forAccountId accountId: String) {}
         /// This fake resolves no tenant at all, so neither ambiguity nor candidacy is
         /// reachable here (story 10-1). Suites that exercise the ambiguous path use the real
         /// repository — see `AmbiguousTenantCoreDataTests`.

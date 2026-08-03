@@ -108,6 +108,14 @@ final class PushTokenRepository: PushTokenRepositoryProtocol {
                 if let tenantId = Self.parseTenantId(from: response) {
                     accountRepository.setTenantId(tenantId, forServerUrl: account.serverUrl)
                 }
+                // P2-9 root cause: persist the ACCOUNT-scoped routing key. The server has
+                // always returned `device_id`; this client simply never stored it, and
+                // routed on a tenant id that cannot identify an account. Keyed by ACCOUNT
+                // id, not serverUrl — two users on one server are the case this exists for,
+                // and keying by server would collapse them again.
+                if let deviceId = Self.parseDeviceId(from: response) {
+                    accountRepository.setDeviceId(deviceId, forAccountId: account.id)
+                }
             } catch {
                 AppLogger.push.error("Failed to register token with \(account.serverUrl): \(error.localizedDescription, privacy: .public)")
             }
@@ -119,6 +127,26 @@ final class PushTokenRepository: PushTokenRepositoryProtocol {
     /// Accepts the value under either `tenant_id` or `odoo_tenant_id`, coercing numeric
     /// ids to their string form. Returns `nil` for any other shape (older plugin, boolean
     /// `true`, etc.) so registration stays backward-compatible.
+    /// Extracts the ACCOUNT-scoped routing key (`device_id`) from a `register_device`
+    /// response.
+    ///
+    /// Odoo returns an int; a parser that only accepted a string would silently store
+    /// nothing and leave routing exactly as ambiguous as before. Returns nil for any other
+    /// shape so an older plugin stays backward-compatible.
+    static func parseDeviceId(from response: Any?) -> String? {
+        guard let dict = response as? [String: Any] else { return nil }
+        switch dict["device_id"] {
+        case let value as String where !value.isEmpty:
+            return value
+        case let value as Int:
+            return String(value)
+        case let value as Int64:
+            return String(value)
+        default:
+            return nil
+        }
+    }
+
     static func parseTenantId(from response: Any?) -> String? {
         guard let dict = response as? [String: Any] else { return nil }
         let raw = dict["tenant_id"] ?? dict["odoo_tenant_id"]

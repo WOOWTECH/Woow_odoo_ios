@@ -15,6 +15,8 @@ public class OdooAccountEntity: NSManagedObject {
     /// Opaque tenant id from device registration. Optional — nil for accounts
     /// persisted before this attribute was added (lightweight migration).
     @NSManaged public var tenantId: String?
+    /// ACCOUNT-scoped push routing key — the `woow.fcm.device` row id (P2-9).
+    @NSManaged public var deviceId: String?
 }
 
 extension OdooAccountEntity {
@@ -30,7 +32,8 @@ extension OdooAccountEntity {
             userId: userId > 0 ? Int(userId) : nil,
             lastLogin: createdAt,
             isActive: isActive,
-            tenantId: tenantId
+            tenantId: tenantId,
+            deviceId: deviceId
         )
     }
 
@@ -45,6 +48,7 @@ extension OdooAccountEntity {
         isActive = account.isActive
         createdAt = account.lastLogin
         tenantId = account.tenantId
+        deviceId = account.deviceId
     }
 
     /// Fetch request for all accounts ordered by last login.
@@ -79,6 +83,15 @@ extension OdooAccountEntity {
     /// Core Data happened to return — a legitimate push from one server opening the other's account.
     /// The caller must COUNT and refuse on more than one; it cannot do that if the fetch has already
     /// discarded the evidence.
+    /// Fetch by the ACCOUNT-scoped routing key. Unique per (fcm_token, user_id) by
+    /// construction, which is the whole point of it — but still no `fetchLimit`, because
+    /// a routing lookup must be able to detect a violated assumption rather than hide it.
+    static func fetchByDeviceIdRequest(deviceId: String) -> NSFetchRequest<OdooAccountEntity> {
+        let request = NSFetchRequest<OdooAccountEntity>(entityName: "OdooAccountEntity")
+        request.predicate = NSPredicate(format: "deviceId == %@", deviceId)
+        return request
+    }
+
     static func fetchByTenantIdRequest(tenantId: String) -> NSFetchRequest<OdooAccountEntity> {
         let request = NSFetchRequest<OdooAccountEntity>(entityName: "OdooAccountEntity")
         request.predicate = NSPredicate(format: "tenantId == %@", tenantId)

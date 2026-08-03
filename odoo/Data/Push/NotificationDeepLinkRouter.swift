@@ -13,6 +13,9 @@ enum NotificationDeepLinkRouter {
     /// Payload key carrying the opaque tenant id (the multi-account routing key).
     static let tenantIdKey = "odoo_tenant_id"
 
+    /// ACCOUNT-scoped routing key (P2-9). Preferred over ``tenantIdKey`` when present.
+    static let deviceIdKey = "odoo_device_id"
+
     /// Why a notification tap did not produce a navigation.
     enum DropReason: Equatable {
         /// No `odoo_action_url` in the payload — nothing to navigate to.
@@ -65,6 +68,7 @@ enum NotificationDeepLinkRouter {
     ///   - activeAccount: The currently active account, or `nil`.
     static func decide(
         userInfo: [AnyHashable: Any],
+        resolveDevice: (String) -> OdooAccount? = { _ in nil },
         resolveTenant: (String) -> OdooAccount?,
         isAmbiguousTenant: (String) -> Bool = { _ in false },
         isTenantCandidate: (String, String) -> Bool = { _, _ in false },
@@ -72,6 +76,28 @@ enum NotificationDeepLinkRouter {
     ) -> Decision {
         guard let actionUrl = userInfo[actionUrlKey] as? String else {
             return .drop(.noActionUrl)
+        }
+
+        // P2-9 root cause: prefer the ACCOUNT-scoped key when the server sent one.
+        //
+        // A tenant id names a TENANT — the server resolves it to the database name — so two
+        // users on ONE database share it unavoidably and it cannot select between them. A
+        // device row id is unique per (fcm_token, user_id) by construction.
+        //
+        // A device id that matches NOTHING drops rather than falling back to the tenant id:
+        // falling back would re-introduce exactly the guess this key removes, and an
+        // unmatched id means our stored row is stale, not that the server failed to
+        // identify the account.
+        let deviceId = (userInfo[deviceIdKey] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !deviceId.isEmpty {
+            guard let target = resolveDevice(deviceId) else {
+                return .drop(.unresolvedTenant)
+            }
+            guard DeepLinkValidator.isValid(url: actionUrl, serverHost: target.serverHost) else {
+                return .drop(.invalidUrl)
+            }
+            return .switchAndRoute(accountId: target.id, url: actionUrl)
         }
 
         let tenantId = (userInfo[tenantIdKey] as? String)?

@@ -109,9 +109,19 @@ final class PersistenceController: @unchecked Sendable {
         tenantIdAttr.attributeType = .stringAttributeType
         tenantIdAttr.isOptional = true
 
+        // P2-9 root cause: the ACCOUNT-scoped routing key — this account's
+        // `woow.fcm.device` row id. `tenantId` names a TENANT (the server resolves it to
+        // the database name), so two users on ONE database share it unavoidably and it
+        // cannot select between them. Optional, so existing stores open unchanged and
+        // repopulate on the next successful registration.
+        let deviceIdAttr = NSAttributeDescription()
+        deviceIdAttr.name = "deviceId"
+        deviceIdAttr.attributeType = .stringAttributeType
+        deviceIdAttr.isOptional = true
+
         entity.properties = [idAttr, serverUrlAttr, databaseAttr, usernameAttr,
                             displayNameAttr, userIdAttr, isActiveAttr, createdAtAttr,
-                            tenantIdAttr]
+                            tenantIdAttr, deviceIdAttr]
 
         model.entities = [entity]
         return model
