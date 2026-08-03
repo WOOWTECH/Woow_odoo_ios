@@ -40,11 +40,23 @@ final class HonestLogoutS4Tests: XCTestCase {
         enum Mode { case succeed, fail }
 
         static var mode: Mode = .succeed
-        static var recordedURLs: [String] = []
+
+        /// ⚠️ `startLoading()` is invoked by URLSession on ITS OWN thread, and logout fires
+        /// several requests, so a bare static Array here is a data race — the same defect
+        /// that made `MockPushTokenRepository` drop appends and get written off as flakiness.
+        /// This suite's intermittent failures have the same shape.
+        private static let lock = NSLock()
+        private static var _recordedURLs: [String] = []
+
+        static var recordedURLs: [String] { lock.withLock { _recordedURLs } }
+
+        static func record(_ url: String) {
+            lock.withLock { _recordedURLs.append(url) }
+        }
 
         static func reset() {
             mode = .succeed
-            recordedURLs = []
+            lock.withLock { _recordedURLs = [] }
         }
 
         override class func canInit(with request: URLRequest) -> Bool { true }
@@ -52,7 +64,7 @@ final class HonestLogoutS4Tests: XCTestCase {
 
         override func startLoading() {
             if let url = request.url?.absoluteString {
-                LogoutURLProtocol.recordedURLs.append(url)
+                LogoutURLProtocol.record(url)
             }
 
             switch LogoutURLProtocol.mode {

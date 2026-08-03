@@ -140,22 +140,42 @@ final class MockSecureStorage: SecureStorageProtocol, @unchecked Sendable {
 /// deterministically.
 final class MockPushTokenRepository: PushTokenRepositoryProtocol, @unchecked Sendable {
 
+    /// ⚠️ This type is `@unchecked Sendable` — an assertion to the compiler that its mutable
+    /// state is safe to touch concurrently. It was NOT: `registeredTokens` was a bare Array
+    /// appended to from `async` methods, and a test that fires two reconciles concurrently
+    /// (`test_redundantReconcileTriggers_areSafe`) races two appends with no synchronisation.
+    ///
+    /// That is a DATA RACE, not a timing quirk: an append can be lost outright — which is
+    /// exactly the intermittent "1 token recorded instead of 2" this suite exhibited — and
+    /// the behaviour is undefined, so it can corrupt rather than merely drop. The failure was
+    /// blamed on flakiness for long enough to be written into a verification checklist.
+    ///
+    /// Every mutable field is now behind `lock`. `@unchecked Sendable` is finally true.
+    private let lock = NSLock()
+
+    private var _storedToken: String?
+    private var _registeredTokens: [String] = []
+    private var _unregisteredServerUrls: [String] = []
+
     /// The token returned by `getToken()`. Set this to simulate a token Firebase already
     /// delivered (possibly BEFORE any account existed — the AC8.b race).
-    var storedToken: String?
+    var storedToken: String? {
+        get { lock.withLock { _storedToken } }
+        set { lock.withLock { _storedToken = newValue } }
+    }
 
     /// Every token passed to `registerTokenWithAllAccounts`, in call order.
-    private(set) var registeredTokens: [String] = []
+    var registeredTokens: [String] { lock.withLock { _registeredTokens } }
 
     /// Every server URL passed to `unregisterToken(for:)`, in call order.
-    private(set) var unregisteredServerUrls: [String] = []
+    var unregisteredServerUrls: [String] { lock.withLock { _unregisteredServerUrls } }
 
     /// Invoked at the end of each `registerTokenWithAllAccounts` call so a test can
     /// fulfill an `XCTestExpectation` and await the detached reconcile Task.
     var onRegister: (@Sendable () -> Void)?
 
     init(storedToken: String? = nil) {
-        self.storedToken = storedToken
+        self._storedToken = storedToken
     }
 
     func saveToken(_ token: String) { storedToken = token }
@@ -163,11 +183,14 @@ final class MockPushTokenRepository: PushTokenRepositoryProtocol, @unchecked Sen
     func getToken() -> String? { storedToken }
 
     func registerTokenWithAllAccounts(_ token: String) async {
-        registeredTokens.append(token)
+        // The append and the callback are deliberately NOT in one critical section: the
+        // callback fulfils an XCTestExpectation, and holding a lock across arbitrary
+        // caller code invites a deadlock. The append is what needed protecting.
+        lock.withLock { _registeredTokens.append(token) }
         onRegister?()
     }
 
     func unregisterToken(for serverUrl: String) async {
-        unregisteredServerUrls.append(serverUrl)
+        lock.withLock { _unregisteredServerUrls.append(serverUrl) }
     }
 }
