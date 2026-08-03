@@ -39,6 +39,12 @@ final class MockAccountRepository: AccountRepositoryProtocol, @unchecked Sendabl
         tenantId.isEmpty ? nil : stubbedTenantAccounts[tenantId]
     }
 
+    /// Story 10-1: fakes default to "not ambiguous" — these suites predate the ambiguity
+    /// concept and assert routing outcomes, not drop-reason discrimination. The tests that
+    /// DO exercise ambiguity supply their own closure.
+    func isTenantIdAmbiguous(_ tenantId: String) -> Bool { false }
+
+
     func authenticate(serverUrl: String, database: String, username: String, password: String) async -> AuthResult {
         stubbedAuthResult
     }

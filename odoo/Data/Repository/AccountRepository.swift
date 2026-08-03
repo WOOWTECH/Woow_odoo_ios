@@ -16,6 +16,12 @@ protocol AccountRepositoryProtocol: Sendable {
     func getActiveAccount() -> OdooAccount?
     func getAllAccounts() -> [OdooAccount]
     func getAccount(byTenantId tenantId: String) -> OdooAccount?
+
+    /// True when `tenantId` matches more than one local account, so it cannot identify one.
+    ///
+    /// Only used to choose a DROP REASON — it can never turn a drop into a navigation. See
+    /// `NotificationDeepLinkRouter.DropReason.ambiguousTenant` (story 10-1, P2-9).
+    func isTenantIdAmbiguous(_ tenantId: String) -> Bool
     func switchAccount(id: String) async -> Bool
     func activateAccount(id: String) -> Bool
     func setTenantId(_ tenantId: String, forServerUrl serverUrl: String)
@@ -130,11 +136,33 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
     ///
     /// An empty `tenantId` never matches (guards against accounts with a nil/empty
     /// tenant id being selected by an empty payload value).
+    /// Returns `nil` when the id is empty, matches nothing, **or matches more than one account**.
+    ///
+    /// Ambiguity is refused rather than resolved (story 10-1, P2-9). Two accounts can legitimately
+    /// share a tenant id — the id is the Odoo database name, so two boxes deployed with the same
+    /// `POSTGRES_DB` collide, and two users on ONE database collide unavoidably. Picking either one
+    /// opens the wrong server, or the wrong user's session on the right server. Dropping the deep
+    /// link is the safe half of a bad choice; the real fix is server-side and is recorded in the
+    /// story's follow-ups.
     func getAccount(byTenantId tenantId: String) -> OdooAccount? {
         guard !tenantId.isEmpty else { return nil }
         let context = persistence.container.viewContext
         let request = OdooAccountEntity.fetchByTenantIdRequest(tenantId: tenantId)
-        return (try? context.fetch(request))?.first?.toDomainModel()
+        guard let matches = try? context.fetch(request), matches.count == 1 else { return nil }
+        return matches[0].toDomainModel()
+    }
+
+    /// True when `tenantId` matches MORE THAN ONE local account.
+    ///
+    /// Exists purely so a dropped deep link can say WHY. `getAccount(byTenantId:)` returns nil for
+    /// both "no match" and "several matches", and those are different operational problems: one is
+    /// a push for an account this device does not have, the other is two boxes deployed with the
+    /// same database name. An operator reading logs must be able to tell them apart.
+    func isTenantIdAmbiguous(_ tenantId: String) -> Bool {
+        guard !tenantId.isEmpty else { return false }
+        let context = persistence.container.viewContext
+        let request = OdooAccountEntity.fetchByTenantIdRequest(tenantId: tenantId)
+        return ((try? context.fetch(request))?.count ?? 0) > 1
     }
 
     /// Marks the account with `id` active and every other account inactive, without any

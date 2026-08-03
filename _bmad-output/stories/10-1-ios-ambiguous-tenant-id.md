@@ -1,6 +1,6 @@
 # Story 10-1 — iOS: a push deep link must not act on an ambiguous tenant id
 
-- **Status:** ready-for-dev
+- **Status:** review — WI-1/WI-2 implemented; full `odooTests` suite green on iPhone 16 simulator.
 - **Repo:** ios · branch `dev_spec_drift_refine` (base `9d047e3`)
 - **Covers:** the **iOS half of P2-9**. The Android half is story 8-1 in that repo.
 
@@ -54,3 +54,31 @@ platforms' fixes are not assumed symmetrical.
 ## Follow-ups
 - **The routing key cannot identify an account.** Same as Android story 8-1: the server must stamp
   something account-scoped. That is the actual fix for P2-9 and it lives in the plugin.
+
+## Dev Agent Record
+
+### Implementation
+- `fetchByTenantIdRequest` lost its `fetchLimit = 1`. That limit **was** the defect: the caller
+  cannot count and refuse if the fetch has already thrown the evidence away.
+- `getAccount(byTenantId:)` returns `nil` for both "no match" and "more than one".
+- `isTenantIdAmbiguous(_:)` separates the two so the drop reason is actionable — it is consulted
+  ONLY to choose a reason and can never turn a drop into a navigation.
+
+### Confirmed asymmetry with Android, recorded rather than assumed
+Android's `switchAccount` unregistered the previously-active account's FCM token, so a mis-routed tap
+killed push for an unrelated account. **iOS has no such call** — `unregisterFcmToken` is reached only
+from `logout` and `removeAccount`. So the iOS fix is narrower, and the platforms' remediations are
+deliberately not symmetrical.
+
+### Tests
+Four new tests. The decisive one asserts **negatively over BOTH orderings**: no `switchAndRoute` may
+be produced for a colliding id. A test asserting "it picks X" would pass with the bug present, because
+the bug is that the pick is arbitrary.
+
+Adding a protocol member required five conforming test doubles to implement it; each defaults to "not
+ambiguous" with a comment saying why, and the suites that actually exercise ambiguity supply their own
+closure.
+
+### NOT proven — 待伺服器恢復後驗證
+- That two deployed boxes emit the same `odoo_tenant_id` today. The fix is correct either way.
+- E2E: a push from server Y, tapped, must not open server X.

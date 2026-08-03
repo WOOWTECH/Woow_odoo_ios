@@ -71,10 +71,17 @@ extension OdooAccountEntity {
     }
 
     /// Fetch request by opaque tenant id (the push-routing key).
+    ///
+    /// ⚠️ Deliberately has **no `fetchLimit`** (story 10-1, P2-9). A `LIMIT 1` on a routing key IS
+    /// the defect: `odoo_tenant_id` is the Odoo database name, and spec §4.3 ships every STB box
+    /// with the same `POSTGRES_DB`, so two customer servers routinely produce two local accounts
+    /// with an identical id. Taking the first row made the routing target depend on whatever order
+    /// Core Data happened to return — a legitimate push from one server opening the other's account.
+    /// The caller must COUNT and refuse on more than one; it cannot do that if the fetch has already
+    /// discarded the evidence.
     static func fetchByTenantIdRequest(tenantId: String) -> NSFetchRequest<OdooAccountEntity> {
         let request = NSFetchRequest<OdooAccountEntity>(entityName: "OdooAccountEntity")
         request.predicate = NSPredicate(format: "tenantId == %@", tenantId)
-        request.fetchLimit = 1
         return request
     }
 }

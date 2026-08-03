@@ -53,6 +53,12 @@ private final class RoutingFakeRepository: AccountRepositoryProtocol, @unchecked
         guard !tenantId.isEmpty else { return nil }
         return accounts.first(where: { $0.tenantId == tenantId })
     }
+
+    /// Story 10-1: fakes default to "not ambiguous" — these suites predate the ambiguity
+    /// concept and assert routing outcomes, not drop-reason discrimination. The tests that
+    /// DO exercise ambiguity supply their own closure.
+    func isTenantIdAmbiguous(_ tenantId: String) -> Bool { false }
+
     func switchAccount(id: String) async -> Bool { activateAccount(id: id) }
     func activateAccount(id: String) -> Bool {
         guard accounts.contains(where: { $0.id == id }) else { return false }
@@ -442,5 +448,88 @@ final class TenantIdParsingTests: XCTestCase {
         XCTAssertNil(PushTokenRepository.parseTenantId(from: true))
         XCTAssertNil(PushTokenRepository.parseTenantId(from: ["ok": true]))
         XCTAssertNil(PushTokenRepository.parseTenantId(from: nil))
+    }
+}
+
+// MARK: - Story 10-1 (P2-9 iOS half): an ambiguous tenant id must be refused
+
+/// `odoo_tenant_id` is the Odoo DATABASE NAME (the plugin's `tenant_id_for`: "one database ==
+/// one tenant/box"), and spec §4.3 ships every STB box with the same `POSTGRES_DB`. So two
+/// customer servers routinely produce two local accounts with an IDENTICAL id — and
+/// `fetchByTenantIdRequest` used `fetchLimit = 1`, making the routing target depend on whatever
+/// order Core Data returned. A legitimate push from server Y could open server X's account, on a
+/// default deployment, with nobody attacking anything.
+///
+/// The same collision is UNAVOIDABLE for two users on one database, which is why the real fix is
+/// server-side (stamp something account-scoped on the payload) and is recorded as a follow-up.
+final class AmbiguousTenantRoutingTests: XCTestCase {
+
+    private let collidingX = OdooAccount(
+        id: "XXXXXXXX-0000-0000-0000-000000000001",
+        serverUrl: "https://x-odoo.woowtech.io",
+        database: "odoo18_ecpay", username: "u", displayName: "X",
+        isActive: true, tenantId: "odoo18_ecpay"
+    )
+    private let collidingY = OdooAccount(
+        id: "YYYYYYYY-0000-0000-0000-000000000002",
+        serverUrl: "https://y-odoo.woowtech.io",
+        database: "odoo18_ecpay", username: "u", displayName: "Y",
+        isActive: false, tenantId: "odoo18_ecpay"
+    )
+
+    private func decide(
+        accounts: [OdooAccount],
+        tenantId: String
+    ) -> NotificationDeepLinkRouter.Decision {
+        // Models the repository contract exactly: nil for BOTH "no match" and "several",
+        // with ambiguity reported separately.
+        let matches = accounts.filter { $0.tenantId == tenantId }
+        return NotificationDeepLinkRouter.decide(
+            userInfo: [
+                "odoo_tenant_id": tenantId,
+                "odoo_action_url": "/web#action=mail.action_discuss",
+            ],
+            resolveTenant: { _ in matches.count == 1 ? matches[0] : nil },
+            isAmbiguousTenant: { _ in matches.count > 1 },
+            activeAccount: accounts.first { $0.isActive }
+        )
+    }
+
+    func testCollidingTenantIdIsDroppedWithAnAmbiguityReason() {
+        let decision = decide(accounts: [collidingX, collidingY], tenantId: "odoo18_ecpay")
+        XCTAssertEqual(decision, .drop(.ambiguousTenant))
+    }
+
+    func testFetchOrderCannotDecideTheTarget() {
+        // Asserted NEGATIVELY over BOTH orders. A test asserting "it picks X" would pass with
+        // the bug present — the bug IS that the pick is arbitrary.
+        for accounts in [[collidingX, collidingY], [collidingY, collidingX]] {
+            let decision = decide(accounts: accounts, tenantId: "odoo18_ecpay")
+            if case .switchAndRoute = decision {
+                XCTFail("row order decided the routing target — this is the defect")
+            }
+        }
+    }
+
+    func testAUniqueTenantIdStillRoutes() {
+        // The refusal must be scoped to the ambiguous id, not poison the whole list.
+        let unique = OdooAccount(
+            id: "ZZZZZZZZ-0000-0000-0000-000000000003",
+            serverUrl: "https://z-odoo.woowtech.io",
+            database: "z", username: "u", displayName: "Z",
+            isActive: false, tenantId: "tenant-Z"
+        )
+        let decision = decide(accounts: [collidingX, collidingY, unique], tenantId: "tenant-Z")
+        XCTAssertEqual(
+            decision,
+            .switchAndRoute(accountId: unique.id, url: "/web#action=mail.action_discuss")
+        )
+    }
+
+    func testAnUnknownTenantIdIsStillUnresolvedNotAmbiguous() {
+        // The two reasons are different operational problems: "two of our boxes share a
+        // database name" versus "this push is for an account this device does not have".
+        let decision = decide(accounts: [collidingX, collidingY], tenantId: "nobody")
+        XCTAssertEqual(decision, .drop(.unresolvedTenant))
     }
 }

@@ -982,6 +982,11 @@ final class ConfigViewModelTests: XCTestCase {
             return accounts.first(where: { $0.tenantId == tenantId })
         }
 
+        /// Story 10-1: fakes default to "not ambiguous" — these suites assert routing
+        /// outcomes, not drop-reason discrimination. Tests that DO exercise ambiguity
+        /// supply their own closure.
+        func isTenantIdAmbiguous(_ tenantId: String) -> Bool { false }
+
         func activateAccount(id: String) -> Bool {
             guard accounts.contains(where: { $0.id == id }) else { return false }
             accounts = accounts.map { account in
@@ -1280,6 +1285,12 @@ final class MainViewModelTests: XCTestCase {
         func getActiveAccount() -> OdooAccount? { activeAccount }
         func getAllAccounts() -> [OdooAccount] { activeAccount.map { [$0] } ?? [] }
         func getAccount(byTenantId tenantId: String) -> OdooAccount? { nil }
+
+    /// Story 10-1: fakes default to "not ambiguous" — these suites predate the ambiguity
+    /// concept and assert routing outcomes, not drop-reason discrimination. The tests that
+    /// DO exercise ambiguity supply their own closure.
+    func isTenantIdAmbiguous(_ tenantId: String) -> Bool { false }
+
         func activateAccount(id: String) -> Bool { true }
         func setTenantId(_ tenantId: String, forServerUrl serverUrl: String) {}
         func switchAccount(id: String) async -> Bool { false }

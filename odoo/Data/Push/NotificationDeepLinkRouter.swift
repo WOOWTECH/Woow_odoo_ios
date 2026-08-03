@@ -21,6 +21,15 @@ enum NotificationDeepLinkRouter {
         case invalidUrl
         /// A tenant id was present but matched no local account. NEVER fall back to A.
         case unresolvedTenant
+        /// A tenant id matched MORE THAN ONE local account, so it cannot identify one
+        /// (story 10-1, P2-9).
+        ///
+        /// Distinct from `unresolvedTenant` on purpose: "two of our boxes were deployed
+        /// with the same database name" and "this push is for an account we do not have"
+        /// are different operational problems with different fixes, and an operator
+        /// reading logs must be able to tell them apart. Collapsing them would hide a
+        /// mis-provisioning behind what looks like ordinary noise.
+        case ambiguousTenant
     }
 
     /// The outcome of evaluating a notification tap.
@@ -46,11 +55,15 @@ enum NotificationDeepLinkRouter {
     ///
     /// - Parameters:
     ///   - userInfo: The raw notification payload.
-    ///   - resolveTenant: Maps an opaque tenant id to a local account, or `nil`.
+    ///   - resolveTenant: Maps an opaque tenant id to a local account, or `nil` — which now means
+    ///     EITHER no match OR more than one (the repository refuses to pick).
+    ///   - isAmbiguousTenant: True when the id matches several accounts. Only consulted to choose
+    ///     the drop reason; it can never turn a drop into a navigation.
     ///   - activeAccount: The currently active account, or `nil`.
     static func decide(
         userInfo: [AnyHashable: Any],
         resolveTenant: (String) -> OdooAccount?,
+        isAmbiguousTenant: (String) -> Bool = { _ in false },
         activeAccount: OdooAccount?
     ) -> Decision {
         guard let actionUrl = userInfo[actionUrlKey] as? String else {
@@ -62,8 +75,11 @@ enum NotificationDeepLinkRouter {
 
         if !tenantId.isEmpty {
             // Multi-account routing path.
+            // `resolveTenant` returns nil for BOTH "no match" and "more than one match" —
+            // the repository refuses ambiguity rather than picking a row. `isAmbiguous`
+            // separates the two so the drop reason is actionable.
             guard let target = resolveTenant(tenantId) else {
-                return .drop(.unresolvedTenant)
+                return .drop(isAmbiguousTenant(tenantId) ? .ambiguousTenant : .unresolvedTenant)
             }
             guard DeepLinkValidator.isValid(url: actionUrl, serverHost: target.serverHost) else {
                 return .drop(.invalidUrl)

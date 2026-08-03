@@ -36,6 +36,12 @@ private final class StubAccountRepo: AccountRepositoryProtocol, @unchecked Senda
     func getActiveAccount() -> OdooAccount? { active }
     func getAllAccounts() -> [OdooAccount] { accounts }
     func getAccount(byTenantId tenantId: String) -> OdooAccount? { nil }
+
+    /// Story 10-1: fakes default to "not ambiguous" — these suites predate the ambiguity
+    /// concept and assert routing outcomes, not drop-reason discrimination. The tests that
+    /// DO exercise ambiguity supply their own closure.
+    func isTenantIdAmbiguous(_ tenantId: String) -> Bool { false }
+
     func switchAccount(id: String) async -> Bool { false }
     func activateAccount(id: String) -> Bool { false }
     func setTenantId(_ tenantId: String, forServerUrl serverUrl: String) {}
