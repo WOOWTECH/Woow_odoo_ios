@@ -33,6 +33,18 @@ enum NotificationDeepLinkRouter {
         /// reading logs must be able to tell them apart. Collapsing them would hide a
         /// mis-provisioning behind what looks like ordinary noise.
         case ambiguousTenant
+        /// A device id matched MORE THAN ONE local account (story 10-1 review).
+        ///
+        /// `woow.fcm.device.id` is a per-DATABASE Postgres sequence, so two identically
+        /// deployed boxes both hand out 1, 2, 3 — the routing key is unique per
+        /// (fcm_token, user_id) only WITHIN one database. Distinct from
+        /// ``unresolvedTenant`` for the same reason ``ambiguousTenant`` is: collapsing them
+        /// hides a mis-provisioning behind what looks like ordinary noise.
+        case ambiguousDevice
+        /// A device id matched no local account, while others DO hold one — our stored row
+        /// is stale. Deliberately not a fall-back to the tenant id: that would re-introduce
+        /// the guess this key removes.
+        case unresolvedDevice
     }
 
     /// The outcome of evaluating a notification tap.
@@ -69,6 +81,8 @@ enum NotificationDeepLinkRouter {
     static func decide(
         userInfo: [AnyHashable: Any],
         resolveDevice: (String) -> OdooAccount? = { _ in nil },
+        isAmbiguousDevice: (String) -> Bool = { _ in false },
+        anyAccountHasDeviceId: () -> Bool = { false },
         resolveTenant: (String) -> OdooAccount?,
         isAmbiguousTenant: (String) -> Bool = { _ in false },
         isTenantCandidate: (String, String) -> Bool = { _, _ in false },
@@ -92,7 +106,26 @@ enum NotificationDeepLinkRouter {
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !deviceId.isEmpty {
             guard let target = resolveDevice(deviceId) else {
-                return .drop(.unresolvedTenant)
+                if isAmbiguousDevice(deviceId) {
+                    return .drop(.ambiguousDevice)
+                }
+                // The payload carries a key but NO account has stored one yet — the server
+                // MUST upgrade first, so this window is guaranteed. Dropping here would
+                // silently break every deep link that worked yesterday, so fall through to
+                // the tenant path. Distinct from "our row is stale", below.
+                if !anyAccountHasDeviceId() {
+                    return decide(
+                        userInfo: userInfo.filter { ($0.key as? String) != deviceIdKey },
+                        resolveDevice: resolveDevice,
+                        isAmbiguousDevice: isAmbiguousDevice,
+                        anyAccountHasDeviceId: anyAccountHasDeviceId,
+                        resolveTenant: resolveTenant,
+                        isAmbiguousTenant: isAmbiguousTenant,
+                        isTenantCandidate: isTenantCandidate,
+                        activeAccount: activeAccount
+                    )
+                }
+                return .drop(.unresolvedDevice)
             }
             guard DeepLinkValidator.isValid(url: actionUrl, serverHost: target.serverHost) else {
                 return .drop(.invalidUrl)

@@ -31,6 +31,12 @@ protocol AccountRepositoryProtocol: Sendable {
     /// Persists the ACCOUNT-scoped routing key for one account (P2-9).
     func setDeviceId(_ deviceId: String, forAccountId accountId: String)
 
+    /// True when `deviceId` matches more than one account (per-database sequence collision).
+    func isDeviceIdAmbiguous(_ deviceId: String) -> Bool
+
+    /// True when ANY account has stored a routing key.
+    func anyAccountHasDeviceId() -> Bool
+
     func isTenantIdAmbiguous(_ tenantId: String) -> Bool
     func switchAccount(id: String) async -> Bool
     func activateAccount(id: String) -> Bool
@@ -241,6 +247,20 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         let request = OdooAccountEntity.fetchByDeviceIdRequest(deviceId: deviceId)
         guard let matches = try? context.fetch(request), matches.count == 1 else { return nil }
         return matches[0].toDomainModel()
+    }
+
+    /// True when `deviceId` matches MORE THAN ONE account — see `DropReason.ambiguousDevice`.
+    func isDeviceIdAmbiguous(_ deviceId: String) -> Bool {
+        guard !deviceId.isEmpty else { return false }
+        let context = persistence.container.viewContext
+        let request = OdooAccountEntity.fetchByDeviceIdRequest(deviceId: deviceId)
+        return ((try? context.count(for: request)) ?? 0) > 1
+    }
+
+    /// True when ANY account has stored a routing key. False means the server upgraded
+    /// before this device re-registered, and the tenant path must still be tried.
+    func anyAccountHasDeviceId() -> Bool {
+        getAllAccounts().contains { !($0.deviceId ?? "").isEmpty }
     }
 
     func setTenantId(_ tenantId: String, forServerUrl serverUrl: String) {

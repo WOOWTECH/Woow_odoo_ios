@@ -51,6 +51,10 @@ final class MockAccountRepository: AccountRepositoryProtocol, @unchecked Sendabl
 
         func setDeviceId(_ deviceId: String, forAccountId accountId: String) {}
 
+        func isDeviceIdAmbiguous(_ deviceId: String) -> Bool { false }
+
+        func anyAccountHasDeviceId() -> Bool { false }
+
     /// Backed by `stubbedTenantAccounts`, which is a dictionary and therefore CANNOT represent
     /// two accounts sharing a tenant id. That is fine for these suites — none construct a
     /// collision — but it means this fake can never exercise the ambiguous path. A test that

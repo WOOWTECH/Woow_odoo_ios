@@ -261,6 +261,8 @@ final class AccountScopedRoutingKeyTests: XCTestCase {
                 "odoo_action_url": "/web#action=mail.action_discuss",
             ],
             resolveDevice: { repo.getAccount(byDeviceId: $0) },
+            isAmbiguousDevice: { repo.isDeviceIdAmbiguous($0) },
+            anyAccountHasDeviceId: { repo.anyAccountHasDeviceId() },
             resolveTenant: { repo.getAccount(byTenantId: $0) },
             isAmbiguousTenant: { repo.isTenantIdAmbiguous($0) },
             isTenantCandidate: { repo.isAccount($0, candidateForTenantId: $1) },
@@ -283,20 +285,63 @@ final class AccountScopedRoutingKeyTests: XCTestCase {
                 "odoo_action_url": "/web#action=mail.action_discuss",
             ],
             resolveDevice: { repo.getAccount(byDeviceId: $0) },
+            isAmbiguousDevice: { repo.isDeviceIdAmbiguous($0) },
+            anyAccountHasDeviceId: { repo.anyAccountHasDeviceId() },
             resolveTenant: { repo.getAccount(byTenantId: $0) },
             isAmbiguousTenant: { repo.isTenantIdAmbiguous($0) },
             isTenantCandidate: { repo.isAccount($0, candidateForTenantId: $1) },
             activeAccount: repo.getAllAccounts().first { $0.isActive }
         )
-        if case .switchAndRoute = decision {
-            XCTFail("an unmatched device id fell back to the ambiguous tenant id")
-        }
+        // Assert the REASON, not just "not a switch": with the feature reverted this input
+        // yields `.useActive(alice)` (alice is active and a tenant candidate), so a
+        // switch-only assertion stayed green with the whole change removed.
+        XCTAssertEqual(decision, .drop(.unresolvedDevice))
     }
 
     func test_setDeviceIdIsKeyedByAccountNotServer() {
         // Keying by serverUrl would collapse exactly the distinction this key draws.
         repo.setDeviceId("101", forAccountId: account("alice").id)
+        // Both halves: with setDeviceId a no-op, bob's is trivially nil and the test used
+        // to pass with the feature reverted.
+        XCTAssertEqual(repo.getAllAccounts().first { $0.username == "alice" }?.deviceId, "101")
         XCTAssertNil(repo.getAllAccounts().first { $0.username == "bob" }?.deviceId)
+    }
+
+    func test_twoServersIssuingTheSameRowIdAreRefused() {
+        // `woow.fcm.device.id` is a per-DATABASE Postgres sequence, so two identically
+        // deployed boxes both hand out 1, 2, 3. The commit claimed the repository "refuses
+        // on more than one match" as a design property and nothing tested it.
+        repo.setDeviceId("1", forAccountId: account("alice").id)
+        repo.setDeviceId("1", forAccountId: account("bob").id)
+
+        XCTAssertTrue(repo.isDeviceIdAmbiguous("1"))
+        XCTAssertNil(repo.getAccount(byDeviceId: "1"),
+                     "a colliding routing key must not resolve to an arbitrary account")
+    }
+
+    func test_aPayloadKeyWithNoStoredKeysFallsBackToTheTenantPath() {
+        // The server MUST upgrade first, so this window is guaranteed. Dropping here would
+        // silently break every deep link that worked yesterday.
+        let decision = NotificationDeepLinkRouter.decide(
+            userInfo: [
+                "odoo_device_id": "101",
+                "odoo_tenant_id": collidingTenant,
+                "odoo_action_url": "/web#action=mail.action_discuss",
+            ],
+            resolveDevice: { repo.getAccount(byDeviceId: $0) },
+            isAmbiguousDevice: { repo.isDeviceIdAmbiguous($0) },
+            anyAccountHasDeviceId: { repo.anyAccountHasDeviceId() },
+            resolveTenant: { repo.getAccount(byTenantId: $0) },
+            isAmbiguousTenant: { repo.isTenantIdAmbiguous($0) },
+            isTenantCandidate: { repo.isAccount($0, candidateForTenantId: $1) },
+            activeAccount: repo.getAllAccounts().first { $0.isActive }
+        )
+        // Falls through to the tenant path, which is ambiguous here but has an ACTIVE
+        // candidate — so the link survives on the active account rather than vanishing.
+        XCTAssertEqual(
+            decision,
+            .useActive(accountId: account("alice").id, url: "/web#action=mail.action_discuss")
+        )
     }
 
     func test_parseDeviceIdAcceptsAnIntBecauseThatIsWhatOdooReturns() {

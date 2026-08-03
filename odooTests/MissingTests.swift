@@ -993,6 +993,10 @@ final class ConfigViewModelTests: XCTestCase {
         func getAccount(byDeviceId deviceId: String) -> OdooAccount? { nil }
 
         func setDeviceId(_ deviceId: String, forAccountId accountId: String) {}
+
+        func isDeviceIdAmbiguous(_ deviceId: String) -> Bool { false }
+
+        func anyAccountHasDeviceId() -> Bool { false }
         /// This fake resolves no tenant at all, so neither ambiguity nor candidacy is
         /// reachable here (story 10-1). Suites that exercise the ambiguous path use the real
         /// repository — see `AmbiguousTenantCoreDataTests`.
@@ -1308,6 +1312,10 @@ final class MainViewModelTests: XCTestCase {
         func getAccount(byDeviceId deviceId: String) -> OdooAccount? { nil }
 
         func setDeviceId(_ deviceId: String, forAccountId accountId: String) {}
+
+        func isDeviceIdAmbiguous(_ deviceId: String) -> Bool { false }
+
+        func anyAccountHasDeviceId() -> Bool { false }
         /// This fake resolves no tenant at all, so neither ambiguity nor candidacy is
         /// reachable here (story 10-1). Suites that exercise the ambiguous path use the real
         /// repository — see `AmbiguousTenantCoreDataTests`.

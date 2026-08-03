@@ -316,6 +316,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         let decision = NotificationDeepLinkRouter.decide(
             userInfo: userInfo,
             resolveDevice: { accountRepository.getAccount(byDeviceId: $0) },
+            isAmbiguousDevice: { accountRepository.isDeviceIdAmbiguous($0) },
+            anyAccountHasDeviceId: { accountRepository.anyAccountHasDeviceId() },
             resolveTenant: { accountRepository.getAccount(byTenantId: $0) },
             isAmbiguousTenant: { accountRepository.isTenantIdAmbiguous($0) },
             isTenantCandidate: { accountRepository.isAccount($0, candidateForTenantId: $1) },
