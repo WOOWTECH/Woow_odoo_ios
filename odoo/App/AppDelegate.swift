@@ -317,6 +317,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             userInfo: userInfo,
             resolveTenant: { accountRepository.getAccount(byTenantId: $0) },
             isAmbiguousTenant: { accountRepository.isTenantIdAmbiguous($0) },
+            isTenantCandidate: { accountRepository.isAccount($0, candidateForTenantId: $1) },
             activeAccount: accountRepository.getActiveAccount()
         )
 

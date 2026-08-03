@@ -57,13 +57,17 @@ enum NotificationDeepLinkRouter {
     ///   - userInfo: The raw notification payload.
     ///   - resolveTenant: Maps an opaque tenant id to a local account, or `nil` — which now means
     ///     EITHER no match OR more than one (the repository refuses to pick).
-    ///   - isAmbiguousTenant: True when the id matches several accounts. Only consulted to choose
-    ///     the drop reason; it can never turn a drop into a navigation.
+    ///   - isAmbiguousTenant: True when the id matches several accounts.
+    ///   - isTenantCandidate: `(accountId, tenantId)` → true when that account is one of the
+    ///     matches. Consulted ONLY on the ambiguous path, and only to decide whether the
+    ///     already-active account may keep the link — it can never cause a SWITCH, so it cannot
+    ///     produce a cross-tenant navigation.
     ///   - activeAccount: The currently active account, or `nil`.
     static func decide(
         userInfo: [AnyHashable: Any],
         resolveTenant: (String) -> OdooAccount?,
         isAmbiguousTenant: (String) -> Bool = { _ in false },
+        isTenantCandidate: (String, String) -> Bool = { _, _ in false },
         activeAccount: OdooAccount?
     ) -> Decision {
         guard let actionUrl = userInfo[actionUrlKey] as? String else {
@@ -79,7 +83,28 @@ enum NotificationDeepLinkRouter {
             // the repository refuses ambiguity rather than picking a row. `isAmbiguous`
             // separates the two so the drop reason is actionable.
             guard let target = resolveTenant(tenantId) else {
-                return .drop(isAmbiguousTenant(tenantId) ? .ambiguousTenant : .unresolvedTenant)
+                guard isAmbiguousTenant(tenantId) else { return .drop(.unresolvedTenant) }
+
+                // Ambiguous. Prefer the ACTIVE account when it is one of the candidates,
+                // rather than dropping outright.
+                //
+                // Take the premise seriously: `odoo_tenant_id` is the database name and
+                // §4.3 ships every STB box with the same POSTGRES_DB, so collision is the
+                // DEFAULT deployment, not the exception. A bare drop therefore makes every
+                // notification tap a silent no-op on such an install — the notification
+                // dismisses, nothing opens, no message, until someone reads os_log. That
+                // is a worse day-to-day experience than the bug.
+                //
+                // Routing to the active account performs NO account switch, so it cannot
+                // leak across tenants — it is exactly the old-plugin `useActive` path this
+                // router already treats as safe. It only ever applies when the active
+                // account is genuinely a candidate; otherwise we still drop.
+                if let active = activeAccount,
+                   isTenantCandidate(active.id, tenantId),
+                   DeepLinkValidator.isValid(url: actionUrl, serverHost: active.serverHost) {
+                    return .useActive(accountId: active.id, url: actionUrl)
+                }
+                return .drop(.ambiguousTenant)
             }
             guard DeepLinkValidator.isValid(url: actionUrl, serverHost: target.serverHost) else {
                 return .drop(.invalidUrl)

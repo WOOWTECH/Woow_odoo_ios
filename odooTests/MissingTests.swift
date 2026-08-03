@@ -986,6 +986,10 @@ final class ConfigViewModelTests: XCTestCase {
         /// outcomes, not drop-reason discrimination. Tests that DO exercise ambiguity
         /// supply their own closure.
         func isTenantIdAmbiguous(_ tenantId: String) -> Bool { false }
+        /// This fake resolves no tenant at all, so neither ambiguity nor candidacy is
+        /// reachable here (story 10-1). Suites that exercise the ambiguous path use the real
+        /// repository — see `AmbiguousTenantCoreDataTests`.
+        func isAccount(_ accountId: String, candidateForTenantId tenantId: String) -> Bool { false }
 
         func activateAccount(id: String) -> Bool {
             guard accounts.contains(where: { $0.id == id }) else { return false }
@@ -1290,6 +1294,10 @@ final class MainViewModelTests: XCTestCase {
     /// concept and assert routing outcomes, not drop-reason discrimination. The tests that
     /// DO exercise ambiguity supply their own closure.
     func isTenantIdAmbiguous(_ tenantId: String) -> Bool { false }
+        /// This fake resolves no tenant at all, so neither ambiguity nor candidacy is
+        /// reachable here (story 10-1). Suites that exercise the ambiguous path use the real
+        /// repository — see `AmbiguousTenantCoreDataTests`.
+        func isAccount(_ accountId: String, candidateForTenantId tenantId: String) -> Bool { false }
 
         func activateAccount(id: String) -> Bool { true }
         func setTenantId(_ tenantId: String, forServerUrl serverUrl: String) {}

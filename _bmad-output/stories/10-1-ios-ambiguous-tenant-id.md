@@ -1,6 +1,7 @@
 # Story 10-1 — iOS: a push deep link must not act on an ambiguous tenant id
 
-- **Status:** review — WI-1/WI-2 implemented; full `odooTests` suite green on iPhone 16 simulator.
+- **Status:** review-fixes-applied — WI-1/WI-2 implemented, then seven review findings fixed,
+  including one my change **missed entirely** and one that proved the whole fix was untested.
 - **Repo:** ios · branch `dev_spec_drift_refine` (base `9d047e3`)
 - **Covers:** the **iOS half of P2-9**. The Android half is story 8-1 in that repo.
 
@@ -47,7 +48,9 @@ platforms' fixes are not assumed symmetrical.
 ## Test plan
 | Claim | Verified how |
 |---|---|
-| AC1–AC5 | Unit (hermetic) — `NotificationDeepLinkRouter` is a pure function; the repository half uses an in-memory Core Data stack |
+| AC1–AC4 (router) | Unit (hermetic) — `NotificationDeepLinkRouter` is a pure function |
+| The repository's count-and-refuse, and the write path | Unit (hermetic) — `AmbiguousTenantCoreDataTests`, real `AccountRepository` over an in-memory Core Data stack |
+| ~~AC5 "fetch order must not decide the outcome"~~ | **Not proven by the router test** — see the review record |
 | Two deployed boxes actually emit the same id | 待伺服器恢復後驗證 — the fix is correct either way |
 | E2E: a push from server Y, tapped, must not open server X | 待伺服器恢復後驗證 |
 
@@ -82,3 +85,23 @@ closure.
 ### NOT proven — 待伺服器恢復後驗證
 - That two deployed boxes emit the same `odoo_tenant_id` today. The fix is correct either way.
 - E2E: a push from server Y, tapped, must not open server X.
+
+## Code review round — what the first version got wrong
+
+| # | Finding | Fix |
+|---|---|---|
+| 1 | **The WRITE path still took a first match.** I hunted `fetchLimit = 1` on the read path and missed the identical `.first` in `setTenantId`, which then short-circuited on `tenantId != tenantId`. Two users on ONE database share a `serverUrl`, so the registration loop's second pass hit the SAME row and was swallowed — **only one of the two rows was ever stamped**. `isTenantIdAmbiguous` then reported false, `getAccount` returned that single row, and a push for the OTHER user opened this one's session. The evidence was destroyed at write time, one layer earlier than the defect I fixed — the same failure mode I had just written a paragraph about. | `setTenantId` stamps every row matching the server. |
+| 2 | **The entire production fix was untested.** A mutation test proved it: reverting `getAccount` to `.first` and `isTenantIdAmbiguous` to `false` left all 377 tests green. All four new tests fed the router a hand-written closure that **re-implemented** the repository's logic, so the repository and the `fetchLimit` removal were exercised by nothing. | `AmbiguousTenantCoreDataTests` runs the real repository over in-memory Core Data, including the write path from #1. |
+| 3 | **"Asserts negatively over BOTH orderings" was tautological.** The closure body is `matches.count == 1 ? matches[0] : nil` — order-insensitive *by construction*, so the loop could not distinguish anything and the test could not fail. Fetch order is a property of Core Data, not of a closure the test wrote. | Renamed to what it actually pins (ambiguity never yields a switch), with the limitation stated; real fetch-order behaviour moved to the Core Data suite. |
+| 4 | **The story claimed coverage that did not exist** — "the repository half uses an in-memory Core Data stack". It did not. | Table corrected. |
+| 5 | **"Two users on one database → their deep links now drop" was false in the common case.** Per #1, only one row got stamped, so those pushes *routed* rather than dropping. The residual risk was understated: not "they lose deep links" but "they may lose them, or get each other's, depending on login history". | Fixed by #1; the story now says so. |
+| 6 | **A silent permanent drop is a worse product than the bug.** Collision is the DEFAULT deployment (§4.3), so on such an install every notification tap became a no-op with no message and no fallback. | On the ambiguous path, if the **already-active** account is one of the candidates the link is applied to it — no switch, so no cross-tenant leak; it is the same `useActive` path the old-plugin branch already uses. Dropping only when the active account is genuinely not a candidate. |
+| 7 | **The test doubles were made to compile, not to model the contract** — `RoutingFakeRepository` kept `.first`, so a future ambiguity test written against it would silently assert the pre-fix behaviour. | Each fake now states what it can and cannot represent, and points at the Core Data suite for the ambiguous path. |
+
+### On the suite being "green"
+The first commit said "full odooTests suite green". A run after these fixes reported
+`test_redundantReconcileTriggers_areSafe` failing; a stash-and-rerun confirmed the **baseline** passes
+and a re-run with the changes passes too, so it is a pre-existing flake (the suite shares mutable
+statics and the real Keychain across test instances) and not caused by this work. Worth recording,
+because "the suite is green" is not currently a reliable gate and this flake will eventually be blamed
+on an innocent commit.

@@ -98,3 +98,105 @@ final class MultiAccountCoreDataRoutingTests: XCTestCase {
                        "The pending deep link must be bound to B's account id")
     }
 }
+
+// MARK: - Story 10-1 review: the REPOSITORY half, against real Core Data
+
+/// A mutation test proved the first version of story 10-1 had **zero** coverage of its own
+/// production change: reverting `getAccount(byTenantId:)` to `.first` and `isTenantIdAmbiguous`
+/// to `false` left the entire 377-test suite green. All four new tests fed the router a
+/// hand-written closure that re-implemented the repository's count-and-refuse, so the repository
+/// itself — and the `fetchLimit` removal that makes counting possible — was exercised by nothing.
+///
+/// These run the real `AccountRepository` over an in-memory Core Data stack, so they fail if the
+/// production logic is reverted.
+@MainActor
+final class AmbiguousTenantCoreDataTests: XCTestCase {
+
+    private var persistence: PersistenceController!
+    private var repo: AccountRepository!
+
+    /// The §4.3 default: every STB box ships with the same POSTGRES_DB, so two unrelated
+    /// customer servers hand back an identical tenant id.
+    private let collidingTenant = "odoo18_ecpay"
+    private let serverX = "https://x-odoo.woowtech.io"
+    private let serverY = "https://y-odoo.woowtech.io"
+    /// Two USERS on ONE server — the collision that is unavoidable, not a mis-provisioning.
+    private let sharedServer = "https://shared-odoo.woowtech.io"
+
+    override func setUp() async throws {
+        try await super.setUp()
+        persistence = PersistenceController(inMemory: true)
+        repo = AccountRepository(persistence: persistence)
+    }
+
+    override func tearDown() async throws {
+        repo = nil
+        persistence = nil
+        try await super.tearDown()
+    }
+
+    private func seed(_ accounts: [SeededAccount]) {
+        repo.replaceAccountsForTesting(accounts)
+    }
+
+    func test_twoBoxesSharingATenantId_resolveToNothing() {
+        seed([
+            SeededAccount(serverURL: serverX, database: collidingTenant, username: "u",
+                          sessionCookie: "s1", tenantId: collidingTenant, isActive: true),
+            SeededAccount(serverURL: serverY, database: collidingTenant, username: "u",
+                          sessionCookie: "s2", tenantId: collidingTenant, isActive: false),
+        ])
+        XCTAssertNil(repo.getAccount(byTenantId: collidingTenant),
+                     "a colliding tenant id must not resolve to an arbitrary row")
+        XCTAssertTrue(repo.isTenantIdAmbiguous(collidingTenant))
+    }
+
+    func test_aUniqueTenantIdStillResolves() {
+        seed([
+            SeededAccount(serverURL: serverX, database: "dbX", username: "u",
+                          sessionCookie: "s1", tenantId: "tenant-X", isActive: true),
+            SeededAccount(serverURL: serverY, database: "dbY", username: "u",
+                          sessionCookie: "s2", tenantId: "tenant-Y", isActive: false),
+        ])
+        XCTAssertEqual(repo.getAccount(byTenantId: "tenant-Y")?.serverUrl, serverY)
+        XCTAssertFalse(repo.isTenantIdAmbiguous("tenant-Y"))
+    }
+
+    /// The defect the review found: the WRITE side destroyed the evidence the read side needs.
+    ///
+    /// `setTenantId` took `.first` of the accounts matching a serverUrl and then short-circuited
+    /// on `tenantId != tenantId`. Two users on one database share a serverUrl, so the registration
+    /// loop's second pass hit the SAME row and was swallowed — only one row was ever stamped.
+    /// `isTenantIdAmbiguous` then reported false, `getAccount` returned that single row, and a
+    /// push for the OTHER user opened this one's session. The ambiguity refusal never fired.
+    func test_bothUsersOnOneServerAreStamped_soAmbiguityIsDetectable() {
+        seed([
+            SeededAccount(serverURL: sharedServer, database: "shared", username: "alice",
+                          sessionCookie: "s1", tenantId: nil, isActive: true),
+            SeededAccount(serverURL: sharedServer, database: "shared", username: "bob",
+                          sessionCookie: "s2", tenantId: nil, isActive: false),
+        ])
+
+        // What FCM registration does: one call per account, both on the same server.
+        repo.setTenantId(collidingTenant, forServerUrl: sharedServer)
+        repo.setTenantId(collidingTenant, forServerUrl: sharedServer)
+
+        let stamped = repo.getAllAccounts().filter { $0.tenantId == collidingTenant }
+        XCTAssertEqual(stamped.count, 2,
+                       "only one row was stamped, so the ambiguity is invisible to the read side")
+        XCTAssertTrue(repo.isTenantIdAmbiguous(collidingTenant))
+        XCTAssertNil(repo.getAccount(byTenantId: collidingTenant))
+    }
+
+    func test_theActiveAccountIsRecognisedAsACandidate() {
+        seed([
+            SeededAccount(serverURL: serverX, database: collidingTenant, username: "u",
+                          sessionCookie: "s1", tenantId: collidingTenant, isActive: true),
+            SeededAccount(serverURL: serverY, database: collidingTenant, username: "u",
+                          sessionCookie: "s2", tenantId: collidingTenant, isActive: false),
+        ])
+        let active = repo.getAllAccounts().first { $0.isActive }!
+        XCTAssertTrue(repo.isAccount(active.id, candidateForTenantId: collidingTenant))
+        XCTAssertFalse(repo.isAccount(active.id, candidateForTenantId: "some-other-tenant"))
+    }
+}

@@ -21,6 +21,10 @@ protocol AccountRepositoryProtocol: Sendable {
     ///
     /// Only used to choose a DROP REASON — it can never turn a drop into a navigation. See
     /// `NotificationDeepLinkRouter.DropReason.ambiguousTenant` (story 10-1, P2-9).
+    /// True when `accountId` is one of the accounts carrying `tenantId`. See the implementation
+    /// for why this can never cause a cross-tenant switch.
+    func isAccount(_ accountId: String, candidateForTenantId tenantId: String) -> Bool
+
     func isTenantIdAmbiguous(_ tenantId: String) -> Bool
     func switchAccount(id: String) async -> Bool
     func activateAccount(id: String) -> Bool
@@ -162,7 +166,21 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         guard !tenantId.isEmpty else { return false }
         let context = persistence.container.viewContext
         let request = OdooAccountEntity.fetchByTenantIdRequest(tenantId: tenantId)
-        return ((try? context.fetch(request))?.count ?? 0) > 1
+        // `count(for:)` rather than fetching and counting — the objects are never used.
+        return ((try? context.count(for: request)) ?? 0) > 1
+    }
+
+    /// True when `accountId` is one of the accounts carrying `tenantId`.
+    ///
+    /// Used only on the ambiguous path, to decide whether the ALREADY-ACTIVE account may keep a
+    /// deep link rather than the tap becoming a silent no-op. It can never cause a switch, so it
+    /// cannot produce a cross-tenant navigation (story 10-1 review).
+    func isAccount(_ accountId: String, candidateForTenantId tenantId: String) -> Bool {
+        guard !tenantId.isEmpty, !accountId.isEmpty else { return false }
+        let context = persistence.container.viewContext
+        let request = OdooAccountEntity.fetchByTenantIdRequest(tenantId: tenantId)
+        guard let matches = try? context.fetch(request) else { return false }
+        return matches.contains { $0.id == accountId }
     }
 
     /// Marks the account with `id` active and every other account inactive, without any
@@ -199,10 +217,30 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         let context = persistence.container.viewContext
         let request = OdooAccountEntity.fetchAllRequest()
         request.predicate = NSPredicate(format: "serverUrl == %@", serverUrl)
-        guard let entity = (try? context.fetch(request))?.first else { return }
-        guard entity.tenantId != tenantId else { return }
-        entity.tenantId = tenantId
-        try? context.save()
+        guard let entities = try? context.fetch(request), !entities.isEmpty else { return }
+
+        // Stamp EVERY account on this server, not just the first (story 10-1 review).
+        //
+        // The first version took `.first` and then short-circuited on
+        // `entity.tenantId != tenantId`. Two users on ONE Odoo database share a
+        // `serverUrl`, so the registration loop's second pass resolved to the SAME row
+        // and was swallowed by that guard — only one of the two rows ever got stamped.
+        //
+        // That silently defeats the ambiguity refusal on the read side:
+        // `isTenantIdAmbiguous` counts rows carrying the id, so with only one stamped it
+        // reports false, `getAccount(byTenantId:)` returns that single row, and a push
+        // for the OTHER user opens this one's session. The evidence was being destroyed
+        // at WRITE time — the same failure mode as the `fetchLimit` this story removed
+        // from the read path, one layer earlier.
+        //
+        // Which row won was `createdAt DESC`, and `authenticate` refreshes `createdAt`
+        // on every re-login, so it could also flip over the device's lifetime.
+        var changed = false
+        for entity in entities where entity.tenantId != tenantId {
+            entity.tenantId = tenantId
+            changed = true
+        }
+        if changed { try? context.save() }
     }
 
     /// Switches to the specified account after validating the session.

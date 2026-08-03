@@ -58,6 +58,10 @@ private final class RoutingFakeRepository: AccountRepositoryProtocol, @unchecked
     /// concept and assert routing outcomes, not drop-reason discrimination. The tests that
     /// DO exercise ambiguity supply their own closure.
     func isTenantIdAmbiguous(_ tenantId: String) -> Bool { false }
+        /// This fake resolves no tenant at all, so neither ambiguity nor candidacy is
+        /// reachable here (story 10-1). Suites that exercise the ambiguous path use the real
+        /// repository — see `AmbiguousTenantCoreDataTests`.
+        func isAccount(_ accountId: String, candidateForTenantId tenantId: String) -> Bool { false }
 
     func switchAccount(id: String) async -> Bool { activateAccount(id: id) }
     func activateAccount(id: String) -> Bool {
@@ -491,22 +495,49 @@ final class AmbiguousTenantRoutingTests: XCTestCase {
             ],
             resolveTenant: { _ in matches.count == 1 ? matches[0] : nil },
             isAmbiguousTenant: { _ in matches.count > 1 },
+            isTenantCandidate: { id, _ in matches.contains { $0.id == id } },
             activeAccount: accounts.first { $0.isActive }
         )
     }
 
-    func testCollidingTenantIdIsDroppedWithAnAmbiguityReason() {
-        let decision = decide(accounts: [collidingX, collidingY], tenantId: "odoo18_ecpay")
+    func testCollidingTenantIdWithNoActiveCandidateIsDropped() {
+        // Neither colliding account is active, so there is nothing safe to fall back to.
+        let inactiveX = OdooAccount(
+            id: collidingX.id, serverUrl: collidingX.serverUrl, database: collidingX.database,
+            username: collidingX.username, displayName: collidingX.displayName,
+            isActive: false, tenantId: collidingX.tenantId
+        )
+        let decision = decide(accounts: [inactiveX, collidingY], tenantId: "odoo18_ecpay")
         XCTAssertEqual(decision, .drop(.ambiguousTenant))
     }
 
-    func testFetchOrderCannotDecideTheTarget() {
-        // Asserted NEGATIVELY over BOTH orders. A test asserting "it picks X" would pass with
-        // the bug present — the bug IS that the pick is arbitrary.
+    func testAnAmbiguousTenantFallsBackToTheActiveAccountWithoutSwitching() {
+        // Collision is the DEFAULT deployment (§4.3 ships every box with the same POSTGRES_DB),
+        // so a bare drop would make every notification tap a silent no-op on such an install.
+        // Routing to the ALREADY-ACTIVE account performs no switch, so it cannot leak across
+        // tenants — it is the same `useActive` path the old-plugin branch already uses.
+        let decision = decide(accounts: [collidingX, collidingY], tenantId: "odoo18_ecpay")
+        XCTAssertEqual(
+            decision,
+            .useActive(accountId: collidingX.id, url: "/web#action=mail.action_discuss"),
+            "the active account is a candidate, so the link should survive without a switch"
+        )
+    }
+
+    func testAmbiguityNeverProducesAnAccountSwitch() {
+        // ⚠️ This does NOT prove "fetch order cannot decide the target", and the first version
+        // of this test claimed it did. It loops two array orderings past a closure whose body
+        // is `matches.count == 1 ? matches[0] : nil` — order-insensitive BY CONSTRUCTION, so
+        // the loop could not distinguish anything and the test could not fail.
+        //
+        // Fetch order is a property of Core Data, not of a closure the test wrote. It is now
+        // exercised for real in `AmbiguousTenantCoreDataTests`.
+        //
+        // What this DOES pin is still worth having: on the ambiguous path the router may never
+        // emit `switchAndRoute`, whatever else it decides.
         for accounts in [[collidingX, collidingY], [collidingY, collidingX]] {
-            let decision = decide(accounts: accounts, tenantId: "odoo18_ecpay")
-            if case .switchAndRoute = decision {
-                XCTFail("row order decided the routing target — this is the defect")
+            if case .switchAndRoute = decide(accounts: accounts, tenantId: "odoo18_ecpay") {
+                XCTFail("an ambiguous tenant id produced an account SWITCH")
             }
         }
     }
