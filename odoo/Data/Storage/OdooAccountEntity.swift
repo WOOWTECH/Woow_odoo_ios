@@ -71,10 +71,14 @@ extension OdooAccountEntity {
     }
 
     /// Fetch request by opaque tenant id (the push-routing key).
+    ///
+    /// Deliberately NOT limited to one result: `woow_fcm_push.tenant_id_for` falls back to
+    /// the Odoo database name, so two unrelated customers whose databases share a name
+    /// publish the same tenant id. The caller must be able to COUNT the matches and refuse
+    /// an ambiguous one — a `fetchLimit` of 1 would make every lookup look unambiguous.
     static func fetchByTenantIdRequest(tenantId: String) -> NSFetchRequest<OdooAccountEntity> {
         let request = NSFetchRequest<OdooAccountEntity>(entityName: "OdooAccountEntity")
         request.predicate = NSPredicate(format: "tenantId == %@", tenantId)
-        request.fetchLimit = 1
         return request
     }
 }

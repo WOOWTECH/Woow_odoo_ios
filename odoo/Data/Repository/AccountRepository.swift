@@ -130,11 +130,27 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
     ///
     /// An empty `tenantId` never matches (guards against accounts with a nil/empty
     /// tenant id being selected by an empty payload value).
+    ///
+    /// An AMBIGUOUS tenant id — one carried by more than one stored account — also returns
+    /// `nil`. `woow_fcm_push.tenant_id_for` falls back to the Odoo database name and the
+    /// host is not part of the value, so two unrelated customers whose databases are both
+    /// called e.g. "odoo" publish the same tenant id. Taking the first match would open one
+    /// customer's notification inside another customer's account, which is exactly the
+    /// isolation invariant above. Counting and refusing is also what the plugin's own
+    /// `DEVICE_ID_DATA_KEY` contract requires of clients.
     func getAccount(byTenantId tenantId: String) -> OdooAccount? {
         guard !tenantId.isEmpty else { return nil }
         let context = persistence.container.viewContext
         let request = OdooAccountEntity.fetchByTenantIdRequest(tenantId: tenantId)
-        return (try? context.fetch(request))?.first?.toDomainModel()
+        guard let matches = try? context.fetch(request) else { return nil }
+        guard matches.count == 1 else {
+            if matches.count > 1 {
+                AppLogger.push.error(
+                    "Refusing ambiguous tenant id: \(matches.count, privacy: .public) accounts match; dropping the deep link")
+            }
+            return nil
+        }
+        return matches[0].toDomainModel()
     }
 
     /// Marks the account with `id` active and every other account inactive, without any
