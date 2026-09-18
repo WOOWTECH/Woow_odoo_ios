@@ -61,10 +61,15 @@ final class LocationPermissionGate {
     ///
     /// - Parameters:
     ///   - origin: The `window.location.origin` of the requesting frame. Must be non-nil, HTTPS,
-    ///             and its host must match `activeAccountHost`.
+    ///             and its host AND port must match the active account's.
     ///   - activeAccountHost: The hostname of the currently signed-in Odoo account (e.g. "company.odoo.com").
+    ///   - activeAccountPort: The explicit port of the active account's server URL, or `nil` when the
+    ///             URL carries none (i.e. the HTTPS default, 443). A web origin is the
+    ///             scheme+host+**port** triple, so a matching host on a different port is a
+    ///             DIFFERENT origin and must not inherit the account's location grant.
+    ///             Defaults to `nil` so existing callers keep the default-port semantics.
     /// - Returns: `.grant`, `.reject(reason:)`, or `.needsRuntimePrompt`.
-    func resolve(origin: URL?, activeAccountHost: String?) -> Decision {
+    func resolve(origin: URL?, activeAccountHost: String?, activeAccountPort: Int? = nil) -> Decision {
         // 1. Origin validation
         guard let origin else {
             return .reject(reason: "origin-nil")
@@ -80,6 +85,14 @@ final class LocationPermissionGate {
         }
         guard originHost.caseInsensitiveCompare(accountHost) == .orderedSame else {
             return .reject(reason: "origin-host-mismatch")
+        }
+        // A web origin is scheme + host + port. `URL.port` is nil when the URL omits the
+        // port, which for https means 443 — normalise both sides before comparing so
+        // "https://host" and "https://host:443" are the same origin, while
+        // "https://host:8443" is not.
+        let defaultHTTPSPort = 443
+        guard (origin.port ?? defaultHTTPSPort) == (activeAccountPort ?? defaultHTTPSPort) else {
+            return .reject(reason: "origin-port-mismatch")
         }
 
         // 2. User preference

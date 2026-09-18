@@ -67,7 +67,8 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     /// current account's host after a switch (avoids the Android stale-closure bug).
     private(set) lazy var locationCoordinator: LocationCoordinator = LocationCoordinator(
         gate: LocationPermissionGate(),
-        activeAccountHost: { [weak self] in self?.currentServerHost }
+        activeAccountHost: { [weak self] in self?.currentServerHost },
+        activeAccountPort: { [weak self] in self?.currentServerPort }
     )
 
     /// Stable host container; the per-account child WebView is swapped inside it.
@@ -79,6 +80,10 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     private var currentAccountId: String?
     private var currentServerUrl: String
     private(set) var currentServerHost: String
+    /// The active account's explicit port, or nil when the server URL omits it (HTTPS default).
+    /// Kept alongside `currentServerHost` because a web origin is scheme+host+port: a request
+    /// from the same host on a different port is a different origin.
+    private(set) var currentServerPort: Int?
     private var currentDatabase: String = ""
 
     /// A deep link captured on account switch, applied once in `didFinish` when the loaded
@@ -99,6 +104,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         self._isLoading = isLoading
         self.currentServerUrl = serverUrl
         self.currentServerHost = URL(string: serverUrl)?.host ?? ""
+        self.currentServerPort = URL(string: serverUrl)?.port
         super.init()
     }
 
@@ -129,6 +135,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
             currentAccountId = accountId
             currentServerUrl = serverUrl
             currentServerHost = URL(string: serverUrl)?.host ?? ""
+            currentServerPort = URL(string: serverUrl)?.port
             currentDatabase = database
             lastDeepLink = deepLink
             pendingDeepLink = (deepLink?.isEmpty == false) ? deepLink : nil
