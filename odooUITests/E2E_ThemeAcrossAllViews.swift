@@ -59,7 +59,7 @@ final class E2E_ThemeAcrossAllViews: XCTestCase {
         app.loginWithTestCredentials()
 
         // ── 2. MainView toolbar (header) ──
-        let header = app.staticTexts["WoowTech Odoo"]
+        let header = app.staticTexts[SharedTestConfig.appDisplayName]
         XCTAssertTrue(
             header.waitForExistence(timeout: 30),
             "Main screen header did not appear within 30s — login may have failed",

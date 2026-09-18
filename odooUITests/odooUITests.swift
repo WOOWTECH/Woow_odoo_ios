@@ -63,7 +63,7 @@ final class F5_LoginFlowTests: XCTestCase {
     /// F5.1: App shows login screen on first launch
     @MainActor
     func test_F5_1_firstLaunch_showsLoginScreen() {
-        XCTAssertTrue(app.staticTexts["WoowTech Odoo"].waitForExistence(timeout: 5),
+        XCTAssertTrue(app.staticTexts[SharedTestConfig.appDisplayName].waitForExistence(timeout: 5),
                       "User sees app title")
         XCTAssertTrue(app.staticTexts["Enter server details"].exists,
                       "User sees server info step")
@@ -649,7 +649,7 @@ final class FCM_EndToEndTests: XCTestCase {
         // Verify the app is showing UI — either login page (cold start) or WebView (warm start)
         // Current behavior: no auto-login, so login page shows after cold start.
         // TODO: Implement auto-login + persistent deep links (see docs/2026-04-05-auto-login-plan.md)
-        let loginVisible = app.staticTexts["WoowTech Odoo"].waitForExistence(timeout: 10)
+        let loginVisible = app.staticTexts[SharedTestConfig.appDisplayName].waitForExistence(timeout: 10)
             || app.textFields["example.odoo.com"].waitForExistence(timeout: 5)
         let webViewVisible = app.webViews.firstMatch.waitForExistence(timeout: 5)
 

@@ -50,10 +50,10 @@ final class E2E_ThemeColorTests: XCTestCase {
         app.launchArguments += ["-AppleLanguages", "(en)", "-WoowTestRunner"]
         app.launch()
 
-        // The "WoowTech Odoo" header text lives in the principal toolbar item.
+        // The app-name header text lives in the principal toolbar item.
         // It MUST appear regardless of theme color — that proves the app
         // launched and the toolbar rendered.
-        let header = app.staticTexts["WoowTech Odoo"]
+        let header = app.staticTexts[SharedTestConfig.appDisplayName]
         XCTAssertTrue(
             header.waitForExistence(timeout: 10),
             "Navigation header did not appear within 10s — app failed to launch correctly with WOOW_TEST_THEME_COLOR override",
@@ -80,7 +80,7 @@ final class E2E_ThemeColorTests: XCTestCase {
         app.launchArguments += ["-AppleLanguages", "(en)", "-WoowTestRunner"]
         app.launch()
 
-        let header = app.staticTexts["WoowTech Odoo"]
+        let header = app.staticTexts[SharedTestConfig.appDisplayName]
         XCTAssertTrue(
             header.waitForExistence(timeout: 10),
             "Navigation header did not appear within 10s — default-theme launch failed",

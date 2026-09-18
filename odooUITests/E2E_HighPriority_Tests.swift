@@ -399,7 +399,7 @@ final class E2E_WebViewTests: XCTestCase {
 
         // Step 4: Wait for the login screen to appear (session redirect detection)
         let loginFieldAppeared = app.textFields["example.odoo.com"].waitForExistence(timeout: 20)
-        let loginTitleAppeared = app.staticTexts["WoowTech Odoo"].waitForExistence(timeout: 5)
+        let loginTitleAppeared = app.staticTexts[SharedTestConfig.appDisplayName].waitForExistence(timeout: 5)
 
         guard loginFieldAppeared || loginTitleAppeared else {
             failWithScreenshot(
@@ -1135,7 +1135,7 @@ final class E2E_LoginAccountTests: XCTestCase {
 
         // Assert the login screen appears after logout
         let loginFieldVisible = app.textFields["example.odoo.com"].waitForExistence(timeout: 10)
-        let loginTitleVisible = app.staticTexts["WoowTech Odoo"].waitForExistence(timeout: 5)
+        let loginTitleVisible = app.staticTexts[SharedTestConfig.appDisplayName].waitForExistence(timeout: 5)
 
         guard loginFieldVisible || loginTitleVisible else {
             failWithScreenshot(

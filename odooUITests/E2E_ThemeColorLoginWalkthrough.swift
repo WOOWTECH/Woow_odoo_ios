@@ -41,7 +41,7 @@ final class E2E_ThemeColorLoginWalkthrough: XCTestCase {
 
         // Wait up to 30s for the WebView to load Odoo content. The header
         // text must appear regardless of WebView readiness.
-        let header = app.staticTexts["WoowTech Odoo"]
+        let header = app.staticTexts[SharedTestConfig.appDisplayName]
         XCTAssertTrue(
             header.waitForExistence(timeout: 30),
             "Main screen header did not appear within 30s after login — Odoo tunnel may be unreachable",

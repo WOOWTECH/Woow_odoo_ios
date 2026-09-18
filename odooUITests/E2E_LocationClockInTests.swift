@@ -43,7 +43,7 @@
 //         WILL NOT appear and the monitor cannot grant. Reset on real device:
 //             Settings → General → Transfer or Reset iPhone → Reset → Reset Location & Privacy
 //         OR for a single app:
-//             Settings → Privacy & Security → Location Services → WoowTech Odoo → Ask Next Time
+//             Settings → Privacy & Security → Location Services → the app → Ask Next Time
 //         This is intentional Apple behavior — a third-party tool cannot toggle
 //         CLLocation permission without the user's involvement (privacy-by-design).
 //  4. DEBUG build of the app target (JSBridge + TestHooks require `#if DEBUG`).
@@ -109,7 +109,7 @@ final class E2E_LocationClockInTests: XCTestCase {
         //   - Real device: the monitor below taps "Allow While Using App" if the OS
         //     surfaces the dialog. The dialog only appears when status is
         //     `.notDetermined`; if a previous run left it `.denied`, reset via
-        //     Settings → Privacy & Security → Location Services → WoowTech Odoo → Ask Next Time.
+        //     Settings → Privacy & Security → Location Services → the app → Ask Next Time.
 
         // Snapshot current state to determine which action will fire.
         let before = try await OdooHelper.latestAttendance(forEmployeeID: employeeID, cookie: sessionCookie)
@@ -199,7 +199,7 @@ final class E2E_LocationClockInTests: XCTestCase {
         }
 
         let finalRecord = try await OdooHelper.latestAttendance(forEmployeeID: employeeID, cookie: sessionCookie)
-        let permissionHint = "If on real device, verify Location permission for WoowTech Odoo " +
+        let permissionHint = "If on real device, verify Location permission for the app " +
             "is .notDetermined or .authorizedWhenInUse — see file header LOCATION PERMISSION MODEL section."
         if isCheckIn {
             XCTAssertNotNil(finalRecord, "No hr.attendance row exists for employee \(employeeID!)")
@@ -348,7 +348,7 @@ final class E2E_LocationClockInTests: XCTestCase {
         let finalRecord = try await OdooHelper.latestAttendance(forEmployeeID: employeeID, cookie: sessionCookie)
 
         if let rec = finalRecord {
-            let permissionHint = " If on real device, verify Location permission for WoowTech Odoo " +
+            let permissionHint = " If on real device, verify Location permission for the app " +
                 "is .notDetermined or .authorizedWhenInUse — see file header LOCATION PERMISSION MODEL section."
             XCTAssertTrue(validateCoord(rec), failMessage + permissionHint)
         } else {

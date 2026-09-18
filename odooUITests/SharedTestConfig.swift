@@ -14,6 +14,21 @@ enum SharedTestConfig {
         return dict
     }()
 
+    /// The app's user-visible display name, as rendered in the LoginView title and
+    /// the MainView toolbar.
+    ///
+    /// Single source of truth so a rename does not silently rot a dozen XCUITest
+    /// selectors. It was hardcoded as "WoowTech Odoo" in 13 places across 7 files;
+    /// the 2026-09-17 rename to "woowtech platform" (AP-15) broke every one of them.
+    ///
+    /// Keep in sync with the `"WoowTech Odoo"` VALUE in
+    /// `odoo/Resources/*.lproj/Localizable.strings` — the key stays as the old name
+    /// because `LoginView`/`MainView` use the string literal as the localization key.
+    /// The brand wordmark is intentionally identical across all locales.
+    static let appDisplayName = ProcessInfo.processInfo.environment["TEST_APP_DISPLAY_NAME"]
+        ?? plist["AppDisplayName"] as? String
+        ?? "woowtech platform"
+
     static let serverURL = ProcessInfo.processInfo.environment["TEST_SERVER_URL"]
         ?? plist["ServerURL"] as? String
         ?? "localhost:8069"

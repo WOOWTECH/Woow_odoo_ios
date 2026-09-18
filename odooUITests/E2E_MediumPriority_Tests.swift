@@ -972,7 +972,7 @@ final class E2E_DeepLinkSecurityTests: XCTestCase {
         )
 
         // After activation the app must show either the login screen or the main screen
-        let loginVisible = app.staticTexts["WoowTech Odoo"].waitForExistence(timeout: 5)
+        let loginVisible = app.staticTexts[SharedTestConfig.appDisplayName].waitForExistence(timeout: 5)
         let mainVisible  = app.webViews.firstMatch.waitForExistence(timeout: 5)
         XCTAssertTrue(
             loginVisible || mainVisible,
@@ -1503,9 +1503,12 @@ final class E2E_MiscTests: XCTestCase {
         app.launch()
 
         // Wait for the login screen
-        // The title "WoowTech Odoo" is brand text and stays in English across locales
+        // The app-name title is brand text and stays in English across locales
         let serverLabel = app.staticTexts.matching(
-            NSPredicate(format: "label CONTAINS '服务器' OR label CONTAINS 'WoowTech Odoo'")
+            NSPredicate(
+                format: "label CONTAINS '服务器' OR label CONTAINS %@",
+                SharedTestConfig.appDisplayName,
+            )
         ).firstMatch
         XCTAssertTrue(
             serverLabel.waitForExistence(timeout: 5),
