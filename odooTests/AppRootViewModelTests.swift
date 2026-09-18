@@ -110,6 +110,51 @@ final class AppRootViewModelTests: XCTestCase {
                        "launchState must return to .login when self-heal is impossible")
     }
 
+    // MARK: - 新增實例導航（AP-19）
+
+    /// 回歸防線：使用者點「Add Account」時，即使目前的 active account 完全健康，
+    /// 也必須進入登入表單。
+    ///
+    /// 2026-09-18 實機重現：在 iPad 上點「Add Account」，畫面閃一下就回到原本的
+    /// WebView，永遠加不了第二個實例。根因是該流程借用了 `onSessionExpired()`，
+    /// 而那個事件會先嘗試靜默自癒 —— 目前帳號健康時自癒會成功，`launchState`
+    /// 被設回 `.authenticated`，登入表單根本沒機會出現。
+    ///
+    /// 這正是 EXISTING-BASELINE 第 4 項記載的已知缺陷
+    /// （「07-25 self-heal 改變 onSessionExpired 語意，舊新增實例 caller 仍共用該事件」），
+    /// 對應測例 T18。
+    func test_beginAddAccount_givenHealthyActiveAccount_transitionsToLogin() {
+        let repo = MockAccountRepository()
+        repo.stubbedActiveAccount = makeAccount(username: "alan@woow.com")
+        let sut = AppRootViewModel(accountRepository: repo)
+        sut.checkSession()
+        XCTAssertEqual(sut.launchState, .authenticated,
+                       "前置條件：必須先處於已登入狀態，否則這個測試沒有意義")
+
+        sut.beginAddAccount()
+
+        XCTAssertEqual(sut.launchState, .login,
+                       "點新增實例後必須進入登入表單，不得因為目前帳號健康就留在主畫面")
+    }
+
+    /// 與上一條成對：證明 `beginAddAccount()` 的行為**不是**靠「沒有 active account」
+    /// 湊出來的 —— 同一個 repository 狀態下，`checkSession()` 仍然會回到 `.authenticated`。
+    /// 若這條失敗，代表測試前提已經壞掉，上一條的綠燈也不可信。
+    func test_checkSession_afterBeginAddAccount_stillSeesActiveAccount() {
+        let repo = MockAccountRepository()
+        repo.stubbedActiveAccount = makeAccount(username: "alan@woow.com")
+        let sut = AppRootViewModel(accountRepository: repo)
+
+        sut.beginAddAccount()
+        XCTAssertEqual(sut.launchState, .login)
+
+        sut.checkSession()
+
+        XCTAssertEqual(sut.launchState, .authenticated,
+                       "active account 仍在，checkSession 應回到 authenticated —— " +
+                       "證明 beginAddAccount 是刻意覆寫導航，不是帳號消失的副作用")
+    }
+
     // MARK: - EC-01
 
     /// EC-01: Uses in-memory Core Data with a real AccountRepository to verify that

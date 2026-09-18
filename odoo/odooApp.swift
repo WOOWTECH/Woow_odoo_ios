@@ -78,6 +78,13 @@ struct AppRootView: View {
                         authViewModel.setAuthenticated(true)
                     }
                 })
+                // `LoginView` 的 view model 是 @StateObject，而 @StateObject 的初值只在
+                // view 第一次建立時求值一次。同一次 App 執行中若 LoginView 出現過第二次
+                // （例：登入 A → 點新增實例），SwiftUI 會沿用第一次的 LoginViewModel，
+                // 新傳入的 `addingAccount: true` 因此完全沒有作用 —— viewModel 仍停在
+                // 預填好的憑證步驟，使用者看不到空白的伺服器表單。
+                // 綁定 .id(isAddingAccount) 讓模式切換時強制重建 view 與其 @StateObject。
+                .id(isAddingAccount)
             case .authenticated:
                 authenticatedContent
             }
@@ -202,7 +209,9 @@ struct AppRootView: View {
             if pendingAddAccount {
                 pendingAddAccount = false
                 isAddingAccount = true
-                rootViewModel.onSessionExpired()
+                // 用專屬的導航事件，不要借用 onSessionExpired —— 後者會先嘗試自癒，
+                // 而目前帳號是健康的，自癒成功就會把使用者彈回主畫面。
+                rootViewModel.beginAddAccount()
             }
         }) {
             ConfigView(

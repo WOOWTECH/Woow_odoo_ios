@@ -89,6 +89,21 @@ final class AppRootViewModel: ObservableObject {
     /// to log in again. It transitions to `.login` only when re-auth is impossible (no active/https
     /// account, credentials rejected, unsafe host — every guardrail is enforced inside
     /// `SessionReauthenticator`; see `attemptSelfHealOrLogin`).
+    /// 使用者主動要新增一個 Odoo 實例時呼叫。
+    ///
+    /// **刻意不走 `onSessionExpired()`。** 那個事件的語意是「目前這個 session 失效了」，
+    /// 它會先嘗試靜默自癒（`attemptSelfHealOrLogin`）——而在「新增帳號」的情境下，
+    /// 目前的 active account 通常是**健康的**，自癒因此會成功並把 `launchState` 設回
+    /// `.authenticated`，使用者還沒看到登入表單就被彈回原本的 WebView，
+    /// 永遠新增不了第二個實例。
+    ///
+    /// 這裡無條件進入 `.login`：新增實例本來就不是 session 失效，不該做任何 re-auth。
+    /// 呼叫端另外把 `isAddingAccount` 設為 true，使 `LoginView` 從空白的伺服器資訊
+    /// 步驟開始，而不是預填現有帳號。
+    func beginAddAccount() {
+        launchState = .login
+    }
+
     func onSessionExpired() {
         Task { await attemptSelfHealOrLogin() }
     }
