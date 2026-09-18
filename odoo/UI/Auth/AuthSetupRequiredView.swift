@@ -4,7 +4,6 @@ import SwiftUI
 /// device-passcode evaluation lives in the `AuthViewModel` (via `BiometricAuthenticator`); this view
 /// draws the state and forwards the unlock tap. It must NEVER fall through to the unlocked app.
 struct AuthSetupRequiredView: View {
-    @ObservedObject private var theme = WoowTheme.shared
 
     let prompting: Bool
     let error: String?
@@ -16,7 +15,7 @@ struct AuthSetupRequiredView: View {
 
             Image(systemName: "lock.shield")
                 .font(.system(size: 64))
-                .foregroundStyle(theme.primaryColor)
+                .foregroundStyle(WoowTheme.fixedBrandColor)
 
             Text(String(localized: "Unlock Required"))
                 .font(.title2)
@@ -41,7 +40,7 @@ struct AuthSetupRequiredView: View {
                     .padding()
             }
             .buttonStyle(.borderedProminent)
-            .tint(theme.primaryColor)
+            .tint(WoowTheme.fixedBrandColor)
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .disabled(prompting)
 

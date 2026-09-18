@@ -6,8 +6,6 @@ import SwiftUI
 struct PinView: View {
     @ObservedObject var authViewModel: AuthViewModel
     /// Observes the user's theme color so the PIN-dot fill reflects the
-    /// current theme (UX-48). See `WoowTheme.swift`.
-    @ObservedObject private var theme = WoowTheme.shared
     let onPinVerified: () -> Void
     let onBackClick: () -> Void
     /// Hidden when PIN is the only method (nothing to go back to); shown in biometric+PIN.
@@ -50,11 +48,11 @@ struct PinView: View {
             HStack(spacing: 16) {
                 ForEach(0..<pinLength, id: \.self) { index in
                     Circle()
-                        .fill(index < pin.count ? theme.primaryColor : Color.clear)
+                        .fill(index < pin.count ? WoowTheme.fixedBrandColor : Color.clear)
                         .frame(width: 20, height: 20)
                         .overlay(
                             Circle()
-                                .stroke(index < pin.count ? theme.primaryColor : Color.gray.opacity(0.4), lineWidth: 2)
+                                .stroke(index < pin.count ? WoowTheme.fixedBrandColor : Color.gray.opacity(0.4), lineWidth: 2)
                         )
                 }
             }

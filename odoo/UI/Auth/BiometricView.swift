@@ -6,7 +6,6 @@ import SwiftUI
 /// here is an explicit *retry* only.
 /// Ported from Android: BiometricScreen.kt
 struct BiometricView: View {
-    @ObservedObject private var theme = WoowTheme.shared
 
     let kind: BiometryKind
     /// True while the Face/Touch prompt is in flight.
@@ -26,7 +25,7 @@ struct BiometricView: View {
 
             Image(systemName: iconName)
                 .font(.system(size: 64))
-                .foregroundStyle(theme.primaryColor)
+                .foregroundStyle(WoowTheme.fixedBrandColor)
                 .scaleEffect(prompting ? 1.1 : 1.0)
                 .animation(.easeInOut(duration: 0.3), value: prompting)
 
@@ -57,7 +56,7 @@ struct BiometricView: View {
                 .padding()
             }
             .buttonStyle(.borderedProminent)
-            .tint(theme.primaryColor)
+            .tint(WoowTheme.fixedBrandColor)
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .disabled(prompting)
 

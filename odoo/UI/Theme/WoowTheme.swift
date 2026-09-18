@@ -13,6 +13,24 @@ final class WoowTheme: ObservableObject {
 
     static let shared = WoowTheme()
 
+    /// The FIXED brand colour for pre-authentication surfaces.
+    ///
+    /// Login, PIN, biometric and auth-setup screens deliberately do **not**
+    /// follow the user's chosen theme colour. Rationale:
+    ///
+    /// * Before sign-in there is no account context, so "whose theme?" has no
+    ///   answer — the last account's colour would leak onto a screen that is
+    ///   not yet theirs.
+    /// * The theme picker exists to let a customer brand the *inside* of the
+    ///   app (their own Odoo). The sign-in surface is this product's own
+    ///   shell and must stay on brand.
+    ///
+    /// Use this instead of reaching for `WoowColors.primaryBlue` directly:
+    /// `scripts/audit_theme_color_usage.sh` blocks raw `WoowColors.*` in
+    /// `odoo/UI/` to prevent the 2026-04-28 "theme not applied" regression,
+    /// and allows this one named symbol because the intent is explicit.
+    static let fixedBrandColor: Color = WoowColors.primaryBlue
+
     @Published private(set) var primaryColor: Color = WoowColors.primaryBlue
     @Published var themeMode: ThemeMode = .system
 

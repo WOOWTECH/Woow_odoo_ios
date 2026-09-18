@@ -12,8 +12,6 @@ struct LoginView: View {
 
     @StateObject private var viewModel: LoginViewModel
     /// Observes the user's theme color so the logo accent + button tints
-    /// reflect the current theme (UX-48). See `WoowTheme.swift`.
-    @ObservedObject private var theme = WoowTheme.shared
 
     init(addingAccount: Bool = false, onLoginSuccess: @escaping () -> Void) {
         self.addingAccount = addingAccount
@@ -113,7 +111,7 @@ struct LoginView: View {
                     .padding()
             }
             .buttonStyle(.borderedProminent)
-            .tint(theme.primaryColor)
+            .tint(WoowTheme.fixedBrandColor)
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
     }
@@ -125,7 +123,7 @@ struct LoginView: View {
             // Show server info summary
             HStack {
                 Image(systemName: "server.rack")
-                    .foregroundStyle(theme.primaryColor)
+                    .foregroundStyle(WoowTheme.fixedBrandColor)
                 VStack(alignment: .leading) {
                     Text(viewModel.displayUrl)
                         .font(.caption)
@@ -177,7 +175,7 @@ struct LoginView: View {
                     .padding()
             }
             .buttonStyle(.borderedProminent)
-            .tint(theme.primaryColor)
+            .tint(WoowTheme.fixedBrandColor)
             .clipShape(RoundedRectangle(cornerRadius: 12))
 
             Button("Back") {
