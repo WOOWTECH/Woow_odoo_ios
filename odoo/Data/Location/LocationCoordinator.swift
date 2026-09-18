@@ -22,6 +22,12 @@ struct PendingRequest {
     let requestId: String
     /// The `window.location.origin` string from the JS postMessage.
     let origin: String
+    /// The document generation that was current when the request arrived.
+    ///
+    /// A single WKWebView outlives the documents loaded into it (self-heal re-login, deep-link
+    /// navigation, reload). A fix that arrives after the document changed belongs to a page that
+    /// no longer exists, so it must never be handed to whatever is on screen now.
+    let generation: UInt64
     /// A weak reference to the WKWebView that sent the request (to avoid retain cycles).
     weak var webView: WKWebView?
 }
@@ -62,6 +68,10 @@ final class LocationCoordinator: NSObject, CLLocationManagerDelegate {
     /// (the shim and handler are installed with `forMainFrameOnly: false`), so a caller-
     /// supplied key lets one frame silently overwrite another frame's pending request.
     private var pendingRequests: [UUID: PendingRequest] = [:]
+
+    /// Incremented every time the hosting WebView starts loading a new document or is rebuilt
+    /// for a different account. Requests stamped with an older generation are discarded.
+    private var currentGeneration: UInt64 = 0
 
     // MARK: - Init
 
@@ -122,7 +132,8 @@ final class LocationCoordinator: NSObject, CLLocationManagerDelegate {
         switch decision {
         case .grant:
             pendingRequests[UUID()] = PendingRequest(
-                requestId: requestId, origin: originString, webView: webView)
+                requestId: requestId, origin: originString,
+                generation: currentGeneration, webView: webView)
             locationManager.requestLocation()
 
         case .reject(let reason):
@@ -135,7 +146,8 @@ final class LocationCoordinator: NSObject, CLLocationManagerDelegate {
             // Stash the request and ask the OS for permission.
             // After the status changes, locationManagerDidChangeAuthorization re-resolves.
             pendingRequests[UUID()] = PendingRequest(
-                requestId: requestId, origin: originString, webView: webView)
+                requestId: requestId, origin: originString,
+                generation: currentGeneration, webView: webView)
             locationManager.requestWhenInUseAuthorization()
         }
     }
@@ -188,11 +200,43 @@ final class LocationCoordinator: NSObject, CLLocationManagerDelegate {
         let lng = location.coordinate.longitude
         let accuracy = location.horizontalAccuracy
 
-        // Deliver to all pending requests — a single CLLocation fix serves them all.
+        // Deliver the fix — but only to requests that are STILL entitled to it.
+        //
+        // A grant is checked when the request arrives; the fix lands later. In between the user
+        // can revoke consent (app switch or OS permission), or the page can be replaced. The
+        // gate must therefore be re-run at delivery time, otherwise a position is handed over
+        // after consent was withdrawn — which also contradicts "location only on an explicit
+        // clock-in, no background tracking".
         let pendingCopy = pendingRequests
         pendingRequests.removeAll()
         for (_, request) in pendingCopy {
             guard let webView = request.webView else { continue }
+
+            // Stale generation: the document that asked is gone. It was already answered once by
+            // `invalidateActiveDocument()`, so answering again would break callback-exactly-once.
+            guard request.generation == currentGeneration else {
+                AppLogger.location.info("Discarding location for a replaced document")
+                continue
+            }
+
+            // Consent may have been withdrawn while the fix was in flight.
+            let decision = gate.resolve(
+                origin: URL(string: request.origin),
+                activeAccountHost: activeAccountHost(),
+                activeAccountPort: activeAccountPort()
+            )
+            guard case .grant = decision else {
+                let reason: String
+                switch decision {
+                case .reject(let r): reason = r
+                case .needsRuntimePrompt: reason = "permission-not-determined"
+                case .grant: reason = ""  // unreachable: guarded above
+                }
+                AppLogger.location.info("Withholding location: gate no longer grants this request")
+                evaluateReject(requestId: request.requestId, code: 1, message: reason, in: webView)
+                continue
+            }
+
             let safeRequestId = Self.jsStringLiteralEscaped(request.requestId)
             let js = "__woowResolveGeo('\(safeRequestId)', \(lat), \(lng), \(accuracy));"
             webView.evaluateJavaScript(js) { _, error in
@@ -240,6 +284,24 @@ final class LocationCoordinator: NSObject, CLLocationManagerDelegate {
         for (_, request) in pendingCopy {
             guard let webView = request.webView else { continue }
             evaluateReject(requestId: request.requestId, code: code, message: message, in: webView)
+        }
+    }
+
+    // MARK: - Document lifecycle
+
+    /// Invalidates every in-flight request that belongs to the document being replaced.
+    ///
+    /// Called by the hosting WebView when a new document starts loading or the WebView is rebuilt
+    /// for another account. Each outstanding request is answered ONCE with a rejection rather than
+    /// being dropped silently, so a clock-in button waiting on `getCurrentPosition` cannot hang
+    /// forever; the subsequent CLLocation fix then finds no matching generation and is discarded.
+    func invalidateActiveDocument() {
+        currentGeneration &+= 1
+        let superseded = pendingRequests.filter { $0.value.generation < currentGeneration }
+        for (token, request) in superseded {
+            pendingRequests.removeValue(forKey: token)
+            guard let webView = request.webView else { continue }
+            evaluateReject(requestId: request.requestId, code: 1, message: "context-changed", in: webView)
         }
     }
 

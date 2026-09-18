@@ -150,6 +150,9 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     // MARK: - Per-account WebView construction
 
     private func rebuildWebView(accountId: String, serverUrl: String, database: String, sessionId: String?) {
+        // The outgoing document is about to be discarded: answer and drop any in-flight
+        // geolocation request so a later fix can never be delivered into the new account's page.
+        locationCoordinator.invalidateActiveDocument()
         let config = makeConfiguration(accountId: accountId)
         let newWebView = WKWebView(frame: .zero, configuration: config)
         newWebView.navigationDelegate = self
@@ -363,6 +366,10 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         isLoading = true
+        // A real document load is starting in this WebView (self-heal re-login, deep link,
+        // reload). Odoo's OWL SPA routes with pushState, which does NOT fire this, so an
+        // in-progress clock-in is unaffected — only an actual page replacement invalidates.
+        locationCoordinator.invalidateActiveDocument()
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
