@@ -508,6 +508,54 @@ final class LocationBridgeSecurityTests: XCTestCase {
         )
     }
 
+    /// T24-c2 — the document generation mechanism, isolated from the gate re-check.
+    ///
+    /// Everything the gate looks at is left UNCHANGED (same host, same port, same app switch,
+    /// same OS status), so a delivery-time gate re-check alone would still grant. The only thing
+    /// that changed is that the WebView started loading a different document — the reachable
+    /// same-WebView case (self-heal re-login, deep-link navigation, reload) that an account-host
+    /// comparison cannot see.
+    ///
+    /// Also pins T24's "callback exactly once": the superseded request must be ANSWERED once when
+    /// the document is replaced — otherwise a clock-in button awaiting `getCurrentPosition` hangs
+    /// forever — and must NOT be answered a second time when the fix finally arrives.
+    func test_didUpdateLocations_givenDocumentReplacedAfterGrant_returnsSingleRejectAndNoDelivery() {
+        let world = makeWorld()
+
+        world.coordinator.handleMessage(
+            GeoBridgeFakeScriptMessage(
+                requestId: GeoBridgeFixture.validRequestId,
+                origin: GeoBridgeFixture.trustedOrigin,
+                webView: world.webView
+            )
+        )
+        XCTAssertEqual(world.locationManager.requestLocationCallCount, 1)
+
+        // The WebView starts loading a new document. Nothing the gate inspects has changed.
+        world.coordinator.invalidateActiveDocument()
+
+        XCTAssertEqual(
+            world.webView.evaluatedJavaScript.count, 1,
+            "The superseded request must be answered once, or the page's callback hangs forever"
+        )
+        XCTAssertTrue(
+            world.webView.evaluatedJavaScript.first?.hasPrefix("__woowRejectGeo(") == true,
+            "Replacing the document must answer with a rejection, not a position"
+        )
+
+        // The fix arrives after the document was replaced.
+        deliverLocation(world)
+
+        XCTAssertEqual(
+            world.webView.evaluatedJavaScript.filter { $0.hasPrefix("__woowResolveGeo(") }.count, 0,
+            "A position requested by a replaced document must never reach the page that replaced it"
+        )
+        XCTAssertEqual(
+            world.webView.evaluatedJavaScript.count, 1,
+            "Callback exactly once: the late fix must not produce a second answer"
+        )
+    }
+
     /// T24-d — a request whose WebView has gone away must not crash and must not deliver.
     /// EXPECTED GREEN — `PendingRequest.webView` is weak and delivery guards on it.
     func test_didUpdateLocations_givenWebViewDeallocated_returnsNoDeliveryAndNoCrash() {
