@@ -1,0 +1,3 @@
+/* Display name shown on the home screen and in all system permission prompts */
+"CFBundleDisplayName" = "woowtech platform";
+"CFBundleName" = "woowtech platform";

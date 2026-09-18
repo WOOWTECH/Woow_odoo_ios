@@ -1,5 +1,5 @@
 /* App */
-"WoowTech Odoo" = "WoowTech Odoo";
+"WoowTech Odoo" = "woowtech platform";
 
 /* Login */
 "Add New Account" = "Add New Account";
@@ -41,7 +41,7 @@
 "unlock_with" = "Unlock with";
 "Use PIN" = "Use PIN";
 "use_pin_button" = "Use PIN";
-"biometric_reason" = "Unlock WoowTech Odoo";
+"biometric_reason" = "Unlock woowtech platform";
 "error_biometric_unavailable" = "Biometric authentication not available";
 "error_biometric_lockout" = "Too many attempts. Use PIN instead.";
 "error_biometric_failed" = "Authentication failed. Try again.";
@@ -124,7 +124,7 @@
 "notification_channel_messages" = "Odoo Messages";
 
 /* Location permission purpose (NSLocationWhenInUseUsageDescription — also shown in system prompt) */
-"NSLocationWhenInUseUsageDescription" = "WoowTech Odoo records your location when you clock in or clock out so your Odoo attendance record includes the GPS coordinates of where you checked in. Location is sent only to your own Odoo server and never to third parties.";
+"NSLocationWhenInUseUsageDescription" = "woowtech platform records your location when you clock in or clock out so your Odoo attendance record includes the GPS coordinates of where you checked in. Location is sent only to your own Odoo server and never to third parties.";
 
 /* Location permanent-deny banner */
 "location_denied_message" = "Location access is denied. Enable it in Settings to record GPS with clock-in.";
