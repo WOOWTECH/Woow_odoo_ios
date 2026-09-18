@@ -1,5 +1,5 @@
 /* App */
-"WoowTech Odoo" = "渥屋系統";
+"WoowTech Odoo" = "woowtech platform";
 
 /* Login */
 "Add New Account" = "添加账号";
@@ -41,7 +41,7 @@
 "unlock_with" = "使用";
 "Use PIN" = "使用 PIN 码";
 "use_pin_button" = "使用 PIN 码";
-"biometric_reason" = "解锁渥屋系統";
+"biometric_reason" = "解锁 woowtech platform";
 "error_biometric_unavailable" = "生物识别认证不可用";
 "error_biometric_lockout" = "尝试次数过多，请使用 PIN 码";
 "error_biometric_failed" = "认证失败，请重试";
@@ -124,7 +124,7 @@
 "notification_channel_messages" = "Odoo 消息";
 
 /* Location permission purpose */
-"NSLocationWhenInUseUsageDescription" = "渥屋系統 会在您打卡上下班时记录您的位置，以便您的 Odoo 考勤记录包含打卡时的 GPS 坐标。位置信息仅发送至您自己的 Odoo 服务器，绝不会发送给第三方。";
+"NSLocationWhenInUseUsageDescription" = "woowtech platform 会在您打卡上下班时记录您的位置，以便您的 Odoo 考勤记录包含打卡时的 GPS 坐标。位置信息仅发送至您自己的 Odoo 服务器，绝不会发送给第三方。";
 
 /* Location permanent-deny banner */
 "location_denied_message" = "位置访问已被拒绝。请在设置中启用，以在打卡时记录 GPS。";

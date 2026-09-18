@@ -29,9 +29,11 @@ struct LoginView: View {
             ScrollView {
                 VStack(spacing: 24) {
                     // Logo
-                    Image(systemName: "building.2")
-                        .font(.system(size: 56))
-                        .foregroundStyle(theme.primaryColor)
+                    Image("WoowLogo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 72, height: 72)
+                        .accessibilityHidden(true)
                         .padding(.top, 40)
 
                     Text("WoowTech Odoo")
