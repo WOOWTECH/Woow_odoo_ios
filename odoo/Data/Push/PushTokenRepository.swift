@@ -106,7 +106,9 @@ final class PushTokenRepository: PushTokenRepositoryProtocol {
                 // this server can be routed to this account. Backward-compatible: an
                 // older plugin that returns no tenant id leaves the field untouched.
                 if let tenantId = Self.parseTenantId(from: response) {
-                    accountRepository.setTenantId(tenantId, forServerUrl: account.serverUrl)
+                    // 以 account.id 回寫：此處已握有剛註冊的那一筆帳號，
+                    // 用 serverUrl 查會在同 host 多 DB 時對應到多筆而無從辨識。
+                    accountRepository.setTenantId(tenantId, forAccountId: account.id)
                 }
             } catch {
                 AppLogger.push.error("Failed to register token with \(account.serverUrl): \(error.localizedDescription, privacy: .public)")

@@ -52,6 +52,13 @@ final class MockAccountRepository: AccountRepositoryProtocol, @unchecked Sendabl
 
     func setTenantId(_ tenantId: String, forServerUrl serverUrl: String) {}
 
+    /// 記錄以 account id 回寫的 tenant，供 FCM 註冊路徑的歸屬斷言使用。
+    private(set) var tenantWritesByAccountId: [String: String] = [:]
+
+    func setTenantId(_ tenantId: String, forAccountId accountId: String) {
+        tenantWritesByAccountId[accountId] = tenantId
+    }
+
     func logout(accountId: String?) async {}
 
     func removeAccount(id: String) async {}

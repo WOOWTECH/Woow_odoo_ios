@@ -39,6 +39,7 @@ private final class StubAccountRepo: AccountRepositoryProtocol, @unchecked Senda
     func switchAccount(id: String) async -> Bool { false }
     func activateAccount(id: String) -> Bool { false }
     func setTenantId(_ tenantId: String, forServerUrl serverUrl: String) {}
+    func setTenantId(_ tenantId: String, forAccountId accountId: String) {}
     func logout(accountId: String?) async {}
     func removeAccount(id: String) async {}
     func getSessionId(for serverUrl: String) -> String? { nil }

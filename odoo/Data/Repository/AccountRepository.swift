@@ -19,6 +19,7 @@ protocol AccountRepositoryProtocol: Sendable {
     func switchAccount(id: String) async -> Bool
     func activateAccount(id: String) -> Bool
     func setTenantId(_ tenantId: String, forServerUrl serverUrl: String)
+    func setTenantId(_ tenantId: String, forAccountId accountId: String)
     func logout(accountId: String?) async
     func removeAccount(id: String) async
     func getSessionId(for serverUrl: String) -> String?
@@ -178,15 +179,37 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
 
     /// Persists the opaque `tenantId` for the account matching `serverUrl`.
     ///
-    /// Called at device registration once the server returns the tenant id, so later
-    /// push notifications can be routed to this account. The match is by `serverUrl`
-    /// (the registration is per-server); a no-op if no matching account exists or the
-    /// tenant id is already stored.
+    /// **Refuses to write when `serverUrl` resolves to more than one account.** Two accounts
+    /// can share a server URL (the same host serving several Odoo databases), and this
+    /// signature carries nothing that could tell them apart — writing to an arbitrary one
+    /// would mis-route every later push for that tenant to the wrong instance. This mirrors
+    /// the count-and-refuse contract already applied to `getAccount(byTenantId:)`.
+    ///
+    /// Prefer ``setTenantId(_:forAccountId:)``: the registration caller always knows exactly
+    /// which account it registered, so it never needs this ambiguous lookup. This overload
+    /// remains for callers that genuinely only hold a URL.
     func setTenantId(_ tenantId: String, forServerUrl serverUrl: String) {
         guard !tenantId.isEmpty else { return }
         let context = persistence.container.viewContext
         let request = OdooAccountEntity.fetchAllRequest()
         request.predicate = NSPredicate(format: "serverUrl == %@", serverUrl)
+        guard let matches = try? context.fetch(request), matches.count == 1,
+              let entity = matches.first else { return }
+        guard entity.tenantId != tenantId else { return }
+        entity.tenantId = tenantId
+        try? context.save()
+    }
+
+    /// Persists the opaque `tenantId` against a specific account id.
+    ///
+    /// This is the unambiguous path: `id` is the account's UUID, so it identifies exactly one
+    /// connection regardless of how many databases share a host. Used by the FCM registration
+    /// flow, which already holds the account it just registered.
+    func setTenantId(_ tenantId: String, forAccountId accountId: String) {
+        guard !tenantId.isEmpty, !accountId.isEmpty else { return }
+        let context = persistence.container.viewContext
+        let request = OdooAccountEntity.fetchAllRequest()
+        request.predicate = NSPredicate(format: "id == %@", accountId)
         guard let entity = (try? context.fetch(request))?.first else { return }
         guard entity.tenantId != tenantId else { return }
         entity.tenantId = tenantId

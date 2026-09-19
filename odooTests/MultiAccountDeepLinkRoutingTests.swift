@@ -41,6 +41,7 @@ private final class RoutingFakeRepository: AccountRepositoryProtocol, @unchecked
     var accounts: [OdooAccount]
     private(set) var activatedIds: [String] = []
     var tenantWrites: [(tenantId: String, serverUrl: String)] = []
+    var tenantWritesByAccountId: [(tenantId: String, accountId: String)] = []
 
     init(accounts: [OdooAccount]) { self.accounts = accounts }
 
@@ -68,6 +69,9 @@ private final class RoutingFakeRepository: AccountRepositoryProtocol, @unchecked
     }
     func setTenantId(_ tenantId: String, forServerUrl serverUrl: String) {
         tenantWrites.append((tenantId, serverUrl))
+    }
+    func setTenantId(_ tenantId: String, forAccountId accountId: String) {
+        tenantWritesByAccountId.append((tenantId, accountId))
     }
     func logout(accountId: String?) async {}
     func removeAccount(id: String) async {}

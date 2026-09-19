@@ -995,6 +995,7 @@ final class ConfigViewModelTests: XCTestCase {
         }
 
         func setTenantId(_ tenantId: String, forServerUrl serverUrl: String) {}
+        func setTenantId(_ tenantId: String, forAccountId accountId: String) {}
 
         func switchAccount(id: String) async -> Bool {
             if switchResult {
@@ -1282,6 +1283,7 @@ final class MainViewModelTests: XCTestCase {
         func getAccount(byTenantId tenantId: String) -> OdooAccount? { nil }
         func activateAccount(id: String) -> Bool { true }
         func setTenantId(_ tenantId: String, forServerUrl serverUrl: String) {}
+        func setTenantId(_ tenantId: String, forAccountId accountId: String) {}
         func switchAccount(id: String) async -> Bool { false }
         func logout(accountId: String?) async {}
         func removeAccount(id: String) async {}
