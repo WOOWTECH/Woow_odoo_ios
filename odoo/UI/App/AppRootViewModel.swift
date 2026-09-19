@@ -60,9 +60,29 @@ final class AppRootViewModel: ObservableObject {
     /// Transitions to the authenticated state after a successful login and reconciles
     /// the token registration (covers account-before-token: Firebase may have delivered
     /// the token before this account was saved).
+    /// It also closes any re-auth circuit the previous (now-replaced) password had opened:
+    /// a successful manual login IS the "manual re-login" `SessionReauthenticator` waits for
+    /// (guardrail 3). Without this the circuit stayed open for the whole process lifetime, so the
+    /// very next session expiry was declined without even attempting a re-auth — the user had
+    /// already fixed the credential, yet silent self-heal (and with it FCM register/unregister
+    /// recovery) stayed dead until the app was restarted.
     func onLoginSuccess() {
         launchState = .authenticated
         reconcileTokenRegistration()
+        Task { await clearReauthCircuitForActiveAccount() }
+    }
+
+    /// The awaitable core of the circuit reset `onLoginSuccess` fires, exposed for deterministic
+    /// unit testing (same pattern as `attemptSelfHealOrLogin`).
+    ///
+    /// Scoped to the account that just became active — the one this login re-authenticated — so no
+    /// other account's circuit is ever reopened for auto re-auth. Closing an already-closed circuit
+    /// is a no-op, and this never sends a credential: it only lifts the "stop re-sending the known-bad
+    /// password" latch, leaving every other guardrail (https-only, exact host, single-flight, retry
+    /// cap) untouched.
+    func clearReauthCircuitForActiveAccount() async {
+        guard let account = accountRepository.getActiveAccount() else { return }
+        await reauthenticator.onManualReloginSucceeded(accountId: account.id)
     }
 
     /// Upserts the current FCM token for every logged-in account.

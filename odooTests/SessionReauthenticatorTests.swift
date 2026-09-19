@@ -396,6 +396,107 @@ final class SessionReauthenticatorTests: XCTestCase {
         XCTAssertEqual(state, .login)
         XCTAssertEqual(fakeAuth.authCount, 0, "no active account -> no credential ever sent")
     }
+
+    // MARK: - EP-09R-A2 — manual re-login must CLOSE the circuit its bad password opened
+
+    /// `SessionReauthenticator.onManualReloginSucceeded(accountId:)` documents a contract:
+    /// "Clears the circuit for `accountId` after a successful manual re-login, re-enabling auto
+    /// re-auth." Before this fix the method had NO caller anywhere in the app, so the guardrail-3
+    /// circuit opened by a server-side password change stayed open for the whole process lifetime:
+    /// the user re-logged in with the new password, the app looked healthy, and yet the very next
+    /// session expiry was declined without even attempting a re-auth — silently killing the
+    /// self-heal (and with it the FCM register/unregister recovery) until the app was restarted.
+    ///
+    /// This drives the REAL app choke point (`AppRootViewModel.onLoginSuccess()`, the single
+    /// callback `LoginView` fires on a successful manual login) rather than calling the actor
+    /// method directly, so it fails if the wiring is missing — which is exactly the defect.
+    ///
+    /// The bounded poll below never distorts `authCount`: while the circuit is open
+    /// `reauthenticateForHost` declines WITHOUT calling `authenticate`, so the counter moves only
+    /// on the one successful heal.
+    @MainActor
+    func test_manualLoginSuccess_closesOpenCircuit_andNextExpirySelfHealsExactlyOnce() async {
+        let acc = account()
+        let fakeAuth = FakeSessionAuthenticator()
+        fakeAuth.result = .error("bad creds", .invalidCredentials)
+        let relogin = RecordingReloginSignal()
+        let reauth = makeReauth(accounts: [acc], authenticator: fakeAuth, relogin: relogin)
+        let repo = MockAccountRepository(); repo.stubbedActiveAccount = acc
+        let sut = AppRootViewModel(accountRepository: repo, reauthenticator: reauth)
+
+        // 1. Password changed server-side: the stored one is rejected -> guardrail 3 opens the circuit.
+        let firstHeal = await reauth.reauthenticateForHost(host)
+        XCTAssertFalse(firstHeal, "a rejected stored password must not report a healed session")
+        XCTAssertEqual(relogin.requestedAccountIds, [acc.id], "re-login signalled for the account")
+        XCTAssertEqual(fakeAuth.authCount, 1, "the known-bad password is sent exactly once")
+
+        // 2. The user now has a working credential again, but the circuit is still open:
+        //    every expiry is declined without any auth call. (Precondition, not the defect.)
+        fakeAuth.result = .success(.init(userId: 1, sessionId: "s2", username: "admin", displayName: "Admin"))
+        let whileCircuitOpen = await reauth.reauthenticateForHost(host)
+        XCTAssertFalse(whileCircuitOpen, "precondition: circuit stays open until a manual re-login")
+        XCTAssertEqual(fakeAuth.authCount, 1, "precondition: no credential re-sent while open")
+
+        // 3. The user manually logs in again — the app's one success callback.
+        sut.onLoginSuccess()
+
+        // 4. The next session expiry must self-heal, exactly once.
+        var healed = false
+        for _ in 0..<50 {
+            healed = await reauth.reauthenticateForHost(host)
+            if healed { break }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+
+        XCTAssertTrue(healed, "EP-09R-A2: a successful manual re-login must close the circuit so auto re-auth works again")
+        XCTAssertEqual(fakeAuth.authCount, 2, "exactly ONE further re-auth after the circuit closed — no loop")
+        XCTAssertEqual(relogin.requestedAccountIds, [acc.id], "a healed expiry must not raise a second re-login")
+    }
+
+    /// The deterministic (await-able) half of the same contract: the core the login callback drives.
+    /// Also pins idempotence — closing an already-closed circuit is a no-op, never a re-auth trigger.
+    @MainActor
+    func test_manualReloginCore_isIdempotent_andNeverSendsCredentials() async {
+        let acc = account()
+        let fakeAuth = FakeSessionAuthenticator()
+        let relogin = RecordingReloginSignal()
+        let reauth = makeReauth(accounts: [acc], authenticator: fakeAuth, relogin: relogin)
+        let repo = MockAccountRepository(); repo.stubbedActiveAccount = acc
+        let sut = AppRootViewModel(accountRepository: repo, reauthenticator: reauth)
+
+        // Circuit was never open; clearing it twice must do nothing at all.
+        await sut.clearReauthCircuitForActiveAccount()
+        await sut.clearReauthCircuitForActiveAccount()
+
+        XCTAssertEqual(fakeAuth.authCount, 0, "closing a circuit never authenticates")
+        XCTAssertEqual(relogin.requestedAccountIds, [], "closing a circuit never signals a re-login")
+
+        // The normal self-heal path is untouched by the new wiring.
+        let healed = await reauth.reauthenticateForHost(host)
+        XCTAssertTrue(healed, "happy-path self-heal still works")
+        XCTAssertEqual(fakeAuth.authCount, 1)
+    }
+
+    /// No active account (e.g. the login that succeeded was for a brand-new instance that failed to
+    /// persist) must not crash or touch any other account's circuit.
+    @MainActor
+    func test_manualReloginCore_noActiveAccount_isSafeNoOp() async {
+        let acc = account()
+        let fakeAuth = FakeSessionAuthenticator()
+        fakeAuth.result = .error("bad creds", .invalidCredentials)
+        let relogin = RecordingReloginSignal()
+        let reauth = makeReauth(accounts: [acc], authenticator: fakeAuth, relogin: relogin)
+        let repo = MockAccountRepository(); repo.stubbedActiveAccount = nil
+        let sut = AppRootViewModel(accountRepository: repo, reauthenticator: reauth)
+
+        _ = await reauth.reauthenticateForHost(host)   // opens the circuit for acc
+
+        await sut.clearReauthCircuitForActiveAccount()
+
+        let stillOpen = await reauth.reauthenticateForHost(host)
+        XCTAssertFalse(stillOpen, "with no active account, no other account's circuit may be cleared")
+        XCTAssertEqual(fakeAuth.authCount, 1, "no credential re-sent")
+    }
 }
 
 // MARK: - Test helper
