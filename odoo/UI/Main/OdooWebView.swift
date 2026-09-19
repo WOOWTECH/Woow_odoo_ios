@@ -412,6 +412,47 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         }
     }
 
+    /// A load that had already committed a document then died (connection dropped mid-transfer).
+    ///
+    /// Without this, `isLoading` — set in `didStartProvisionalNavigation` and cleared ONLY in
+    /// `didFinish` — stayed true forever, leaving the spinner running with no error and no way
+    /// to retry.
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        finishLoad(after: error)
+    }
+
+    /// A load that never got far enough to commit a document: offline, DNS failure, a rejected
+    /// TLS handshake, or a navigation this app itself cancelled. Same missing-teardown problem
+    /// as `didFail`, and the far more common one in practice.
+    ///
+    /// This only stops the spinner. It deliberately does NOT retry, does not queue the request,
+    /// and does not touch certificate handling — a rejected TLS handshake stays rejected.
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
+                 withError error: Error) {
+        finishLoad(after: error)
+    }
+
+    /// Shared teardown for both failure delegates.
+    ///
+    /// `NSURLErrorCancelled` is normal control flow, not a fault: `decidePolicyFor` returns
+    /// `.cancel` for session expiry and for links handed off to Safari. Those paths still need
+    /// the spinner stopped — `didFinish` never arrives for a cancelled navigation either — but
+    /// they must not be logged as errors.
+    private func finishLoad(after error: Error) {
+        isLoading = false
+
+        let nsError = error as NSError
+        let isCancellation = nsError.domain == NSURLErrorDomain
+            && nsError.code == NSURLErrorCancelled
+        if isCancellation {
+            AppLogger.webview.debug("Navigation cancelled (expected for session expiry / Safari hand-off)")
+        } else {
+            AppLogger.webview.error(
+                "WebView navigation failed: \(nsError.domain, privacy: .public) \(nsError.code, privacy: .public)"
+            )
+        }
+    }
+
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         let decision = decideNavigation(for: navigationAction.request.url)
