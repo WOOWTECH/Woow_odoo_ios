@@ -94,7 +94,7 @@ Every milestone, commit, UX item, verification check, and test maps to a consist
 | IC19 | Refactor OdooAPIClient for testability (URLProtocol injection) | M11 |
 | IC20 | Extract AppDelegate.handleNotificationTap for testability | M11 |
 
-### UX Items (UX-01–UX-82)
+### UX Items (UX-01–UX-82, plus UX-42b — 83 rows total)
 
 From `docs/functional-equivalence-matrix.md`. Every UX item maps to a milestone:
 
@@ -257,7 +257,7 @@ Every milestone MUST follow these steps in order. Do NOT skip any step. Do NOT c
 
 | Document | Location | Content |
 |----------|----------|---------|
-| Functional equivalence | `docs/functional-equivalence-matrix.md` | 82 UX items, Android ↔ iOS |
+| Functional equivalence | `docs/functional-equivalence-matrix.md` | 83 UX items, Android ↔ iOS. Its iOS column is a MILESTONE PLAN (M1–M8), not a completion status |
 | Implementation milestones | `docs/2026-03-25-ios-implementation-milestones.md` | M1–M10, Mermaid diagrams |
 | Porting plan | `docs/2026-03-25-ios-porting-plan.md` | Architecture mapping, decisions |
 | Verification log | `docs/ios-verification-log.md` | All simulator test results |
