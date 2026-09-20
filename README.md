@@ -2,7 +2,12 @@
 
 An iOS companion app for [Odoo ERP](https://www.odoo.com/) built by WoowTech. The app wraps Odoo's web interface in a native WKWebView, adding biometric/PIN security, multi-account management, push notifications via Firebase Cloud Messaging (FCM), deep linking, theme customization, and localization in English, Simplified Chinese, and Traditional Chinese.
 
-This is the iOS port of the existing WoowTech Odoo Android app. Every user-facing behavior is documented in a [Functional Equivalence Matrix](docs/functional-equivalence-matrix.md) (82 UX items, all implemented) to ensure the two platforms behave identically.
+This is the iOS port of the existing WoowTech Odoo Android app. Every user-facing behavior is catalogued in a [Functional Equivalence Matrix](docs/functional-equivalence-matrix.md) (83 UX items) so the two platforms behave identically.
+
+> **Read the matrix as a plan, not as a status report.** Its iOS column records the
+> milestone each item was *scheduled into* (M1–M8), not whether that item ships today.
+> It was written 2026-03-26 and only four rows have been updated since. For what is
+> actually built, read the code and `app/src` test suites — not that column.
 
 ---
 
@@ -465,7 +470,7 @@ Woow_odoo_ios/
 |
 |-- odooTests/                         # Unit tests (XCTest)
 |   |-- odooTests.swift               # 105 tests: DeepLinkValidator, PinHasher, API, etc.
-|   |-- MissingTests.swift            # 93 tests: comprehensive gap coverage
+|   |-- MissingTests.swift            # 99 tests: comprehensive gap coverage
 |   |-- OdooWebViewNavigationTests.swift # 15 tests: WebView navigation policy
 |   |-- LoginViewModelPrefillTests.swift # 9 tests: auto-prefill from active account
 |   |-- DeepLinkManagerPersistenceTests.swift # 10 tests: cold-start deep link persistence

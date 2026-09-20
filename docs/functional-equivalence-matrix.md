@@ -4,6 +4,15 @@
 > **Rule:** A user should NOT be able to tell which platform they're on based on functionality.
 > **Date:** 2026-03-26
 
+> ⚠️ **The iOS column is a plan, not a status report.**
+> `M1`–`M8` mean "scheduled into that milestone", NOT "done". This document was written
+> before the iOS implementation ran and only four rows (the 2026-07-13 deep-link fixes)
+> have been revised since — so the column has drifted away from the shipped app in the
+> direction of *understating* it. Do not cite it as evidence that a feature is missing,
+> and do not cite it as evidence that everything is finished. Check the code.
+>
+> Updating this column against the current iOS build is outstanding work.
+
 ---
 
 ## How to Read This Document
