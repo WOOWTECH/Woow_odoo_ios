@@ -87,12 +87,13 @@
 
 /* Settings -- Language */
 "Language" = "語言";
-"Change language in iOS Settings" = "前往 設定 > odoo > 語言 變更語言";
+"Change language in iOS Settings" = "前往 設定 > woowtech platform > 語言 變更語言";
 
 /* Settings -- Help & Support */
-"Help & Support" = "幫助與支持";
-"Odoo Help Center" = "Odoo 幫助中心";
-"Community Forum" = "社群論壇";
+"Help & Support" = "說明與支援";
+"Support" = "支援";
+"Privacy Policy" = "隱私權政策";
+"Delete Account" = "刪除帳號";
 
 /* Settings -- About */
 "Visit Website" = "訪問網站";

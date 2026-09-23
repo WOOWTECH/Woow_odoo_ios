@@ -49,7 +49,6 @@ struct AppRootView: View {
     @StateObject private var authViewModel = AuthViewModel()
     @ObservedObject private var theme = WoowTheme.shared
     @State private var showConfig = false
-    @State private var showPrivacyOverlay = false
     /// Set to true when the user taps "Add Account" so that after the Config sheet
     /// finishes its dismissal animation, the app transitions to the login screen.
     /// Combining sheet dismissal with a parent-view swap in the same state update
@@ -115,18 +114,6 @@ struct AppRootView: View {
                     }
             }
         }
-        .overlay {
-            // H4: Privacy overlay — hides sensitive content in task switcher
-            if showPrivacyOverlay {
-                Color(.systemBackground)
-                    .ignoresSafeArea()
-                    .overlay {
-                        Image(systemName: "lock.fill")
-                            .font(.system(size: 48))
-                            .foregroundStyle(.secondary)
-                    }
-            }
-        }
         .task {
             rootViewModel.checkSession()
         }
@@ -134,15 +121,14 @@ struct AppRootView: View {
             guard rootViewModel.launchState == .authenticated else { return }
             switch newPhase {
             case .inactive:
-                // H4: iOS snapshots for the task switcher at .inactive — cover sensitive content.
                 // Do NOT re-lock here: the Face ID sheet itself drives the app .inactive.
-                showPrivacyOverlay = true
+                // (The former H4 task-switcher privacy overlay was removed by owner decision for
+                // 1.0 (2): the app switcher shows real content, matching Android without FLAG_SECURE.)
+                break
             case .background:
                 // True background → re-lock (VM resets the loop guard + bumps the stale-success token).
                 authViewModel.appDidEnterBackground()
-                showPrivacyOverlay = true
             case .active:
-                showPrivacyOverlay = false
                 // Auto-run the biometric prompt once per lock — seamless single-method unlock.
                 authViewModel.appDidBecomeActive()
             @unknown default:

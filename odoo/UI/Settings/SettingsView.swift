@@ -135,38 +135,24 @@ struct SettingsView: View {
             }
 
             // ── Help & Support (G4) ──
+            // WOOW-hosted support / privacy / account-deletion pages (store requirement:
+            // in-app privacy policy + account deletion). English UI → "-en" page variant.
             Section("Help & Support") {
-                Button {
-                    if let url = URL(string: SettingsConstants.helpURL) {
-                        UIApplication.shared.open(url)
-                    }
-                } label: {
-                    HStack {
-                        Label("Odoo Help Center", systemImage: "questionmark.circle")
-                        Spacer()
-                        Image(systemName: "arrow.up.forward")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .accessibilityHidden(true)
-                    }
-                }
-                .foregroundStyle(.primary)
-
-                Button {
-                    if let url = URL(string: SettingsConstants.forumURL) {
-                        UIApplication.shared.open(url)
-                    }
-                } label: {
-                    HStack {
-                        Label("Community Forum", systemImage: "bubble.left.and.bubble.right")
-                        Spacer()
-                        Image(systemName: "arrow.up.forward")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .accessibilityHidden(true)
-                    }
-                }
-                .foregroundStyle(.primary)
+                externalLinkRow(
+                    "Support",
+                    systemImage: "questionmark.circle",
+                    url: SettingsConstants.supportURL(forLanguage: Bundle.main.preferredLocalizations.first)
+                )
+                externalLinkRow(
+                    "Privacy Policy",
+                    systemImage: "hand.raised",
+                    url: SettingsConstants.privacyPolicyURL(forLanguage: Bundle.main.preferredLocalizations.first)
+                )
+                externalLinkRow(
+                    "Delete Account",
+                    systemImage: "person.crop.circle.badge.xmark",
+                    url: SettingsConstants.accountDeletionURL(forLanguage: Bundle.main.preferredLocalizations.first)
+                )
             }
 
             // ── About (G5) ──
@@ -242,6 +228,25 @@ struct SettingsView: View {
             )
         }
     }
+
+    /// A Help & Support row that opens `url` in the system browser.
+    private func externalLinkRow(_ title: LocalizedStringKey, systemImage: String, url: String) -> some View {
+        Button {
+            if let target = URL(string: url) {
+                UIApplication.shared.open(target)
+            }
+        } label: {
+            HStack {
+                Label(title, systemImage: systemImage)
+                Spacer()
+                Image(systemName: "arrow.up.forward")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+        }
+        .foregroundStyle(.primary)
+    }
 }
 
 // MARK: - Preview
@@ -258,6 +263,28 @@ enum SettingsConstants {
     static let websiteURL = "https://aiot.woowtech.io"
     static let websiteDisplayName = "aiot.woowtech.io"
     static let contactEmail = "woowtech@designsmart.com.tw"
-    static let helpURL = "https://www.odoo.com/help"
-    static let forumURL = "https://www.odoo.com/forum"
+
+    // Public compliance pages on the WOOW website. Each exists in a default (Chinese) and an
+    // English ("-en") variant; `forLanguage` is the app's current UI localization
+    // (`Bundle.main.preferredLocalizations.first`): English → "-en", anything else → default page.
+    static let supportPath = "/odoo-support"
+    static let privacyPolicyPath = "/odoo-privacy"
+    static let accountDeletionPath = "/odoo-account-deletion"
+
+    static func supportURL(forLanguage code: String?) -> String {
+        localizedPageURL(supportPath, forLanguage: code)
+    }
+
+    static func privacyPolicyURL(forLanguage code: String?) -> String {
+        localizedPageURL(privacyPolicyPath, forLanguage: code)
+    }
+
+    static func accountDeletionURL(forLanguage code: String?) -> String {
+        localizedPageURL(accountDeletionPath, forLanguage: code)
+    }
+
+    static func localizedPageURL(_ path: String, forLanguage code: String?) -> String {
+        let isEnglish = code.map { $0 == "en" || $0.hasPrefix("en-") || $0.hasPrefix("en_") } ?? false
+        return websiteURL + path + (isEnglish ? "-en" : "")
+    }
 }

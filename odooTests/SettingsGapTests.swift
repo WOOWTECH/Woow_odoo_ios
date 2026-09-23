@@ -94,13 +94,15 @@ final class SettingsGapTests: XCTestCase {
         )
     }
 
-    /// G5-U2: SettingsConstants must declare valid HTTPS URLs for websiteURL, helpURL, and forumURL.
+    /// G5-U2: SettingsConstants must declare valid HTTPS URLs for the website and every
+    /// Help & Support page, in both language variants.
     func test_settingsConstants_urlsAreValid() {
-        let candidates: [(name: String, raw: String)] = [
-            ("websiteURL", SettingsConstants.websiteURL),
-            ("helpURL", SettingsConstants.helpURL),
-            ("forumURL", SettingsConstants.forumURL),
-        ]
+        var candidates: [(name: String, raw: String)] = [("websiteURL", SettingsConstants.websiteURL)]
+        for lang in ["en", "zh-Hant"] {
+            candidates.append(("supportURL(\(lang))", SettingsConstants.supportURL(forLanguage: lang)))
+            candidates.append(("privacyPolicyURL(\(lang))", SettingsConstants.privacyPolicyURL(forLanguage: lang)))
+            candidates.append(("accountDeletionURL(\(lang))", SettingsConstants.accountDeletionURL(forLanguage: lang)))
+        }
 
         for candidate in candidates {
             guard let url = URL(string: candidate.raw) else {
@@ -123,19 +125,32 @@ final class SettingsGapTests: XCTestCase {
     // G4 — Help & Support (P3)
     // ──────────────────────────────────────────────
 
-    /// G4-U1: helpURL and forumURL must both start with "https".
-    /// This guards against accidentally switching to HTTP or committing a placeholder value.
-    func test_settingsConstants_helpURLStartsWithHttps() {
-        for (name, raw) in [("helpURL", SettingsConstants.helpURL), ("forumURL", SettingsConstants.forumURL)] {
-            guard let url = URL(string: raw) else {
-                XCTFail("SettingsConstants.\(name) '\(raw)' could not be parsed as a URL (G4 fix)")
-                continue
+    /// G4-U1: Chinese (and any non-English) UI opens the non-suffixed WOOW pages.
+    func test_helpLinks_nonEnglishUseDefaultPages() {
+        for lang in ["zh-Hant", "zh-Hans", nil] as [String?] {
+            XCTAssertEqual(SettingsConstants.supportURL(forLanguage: lang), "https://aiot.woowtech.io/odoo-support")
+            XCTAssertEqual(SettingsConstants.privacyPolicyURL(forLanguage: lang), "https://aiot.woowtech.io/odoo-privacy")
+            XCTAssertEqual(SettingsConstants.accountDeletionURL(forLanguage: lang), "https://aiot.woowtech.io/odoo-account-deletion")
+        }
+    }
+
+    /// G4-U2: English UI opens the "-en" WOOW pages.
+    func test_helpLinks_englishUsesEnPages() {
+        for lang in ["en", "en-US", "en-GB"] {
+            XCTAssertEqual(SettingsConstants.supportURL(forLanguage: lang), "https://aiot.woowtech.io/odoo-support-en")
+            XCTAssertEqual(SettingsConstants.privacyPolicyURL(forLanguage: lang), "https://aiot.woowtech.io/odoo-privacy-en")
+            XCTAssertEqual(SettingsConstants.accountDeletionURL(forLanguage: lang), "https://aiot.woowtech.io/odoo-account-deletion-en")
+        }
+    }
+
+    /// G4-U3: No Help & Support link may point at odoo.com (implies affiliation with Odoo S.A.).
+    func test_helpLinks_neverPointAtOdooCom() {
+        for lang in ["en", "zh-Hant", "zh-Hans"] {
+            for raw in [SettingsConstants.supportURL(forLanguage: lang),
+                        SettingsConstants.privacyPolicyURL(forLanguage: lang),
+                        SettingsConstants.accountDeletionURL(forLanguage: lang)] {
+                XCTAssertEqual(URL(string: raw)?.host, "aiot.woowtech.io", raw)
             }
-            XCTAssertEqual(
-                url.scheme,
-                "https",
-                "SettingsConstants.\(name) must use HTTPS scheme (G4 fix)"
-            )
         }
     }
 }

@@ -91,8 +91,9 @@
 
 /* Settings -- Help & Support */
 "Help & Support" = "Help & Support";
-"Odoo Help Center" = "Odoo Help Center";
-"Community Forum" = "Community Forum";
+"Support" = "Support";
+"Privacy Policy" = "Privacy Policy";
+"Delete Account" = "Delete Account";
 
 /* Settings -- About */
 "Visit Website" = "Visit Website";
