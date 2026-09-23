@@ -1,3 +1,9 @@
-/* 桌面圖示與所有系統權限提示顯示的 App 名稱（品牌名跨語系維持英文） */
-"CFBundleDisplayName" = "woowtech platform";
-"CFBundleName" = "woowtech platform";
+/* 桌面圖示與所有系統權限提示顯示的 App 名稱（繁中使用「渥屋平台」，其他語系維持英文品牌名） */
+"CFBundleDisplayName" = "渥屋平台";
+"CFBundleName" = "渥屋平台";
+
+/* 系統權限提示；iOS 只從 InfoPlist.strings 讀這些鍵，放在 Localizable.strings 不會生效 */
+"NSCameraUsageDescription" = "渥屋平台需要使用相機，才能在 Odoo 中上傳照片。";
+"NSFaceIDUsageDescription" = "渥屋平台使用 Face ID 保護您的 Odoo 帳號資料。";
+"NSLocationWhenInUseUsageDescription" = "渥屋平台會在您打卡上下班時記錄您的位置，以便您的 Odoo 出勤紀錄包含打卡時的 GPS 座標。位置資訊僅傳送至您自己的 Odoo 伺服器，絕不會傳送給第三方。";
+"NSPhotoLibraryUsageDescription" = "渥屋平台需要取用照片圖庫，才能在 Odoo 中上傳圖片。";
