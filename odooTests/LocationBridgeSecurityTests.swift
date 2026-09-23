@@ -72,7 +72,8 @@ final class LocationBridgeSecurityTests: XCTestCase {
         let coordinator = LocationCoordinator(
             gate: gate,
             activeAccountHost: { hostBox.host },
-            locationManager: manager
+            locationManager: manager,
+            requestingOrigin: GeoBridgeFakeScriptMessage.trustedFrameOrigin
         )
         return World(
             coordinator: coordinator,
@@ -107,6 +108,7 @@ final class LocationBridgeSecurityTests: XCTestCase {
             GeoBridgeFakeScriptMessage(
                 requestId: GeoBridgeFixture.validRequestId,
                 origin: GeoBridgeFixture.trustedOrigin,
+                frameOrigin: GeoBridgeFixture.trustedOrigin,
                 webView: world.webView
             )
         )
@@ -135,6 +137,7 @@ final class LocationBridgeSecurityTests: XCTestCase {
             GeoBridgeFakeScriptMessage(
                 requestId: GeoBridgeFixture.validRequestId,
                 origin: GeoBridgeFixture.trustedOrigin,
+                frameOrigin: GeoBridgeFixture.trustedOrigin,
                 webView: world.webView
             )
         )
@@ -162,6 +165,7 @@ final class LocationBridgeSecurityTests: XCTestCase {
             GeoBridgeFakeScriptMessage(
                 requestId: GeoBridgeFixture.validRequestId,
                 origin: GeoBridgeFixture.trustedOrigin,
+                frameOrigin: GeoBridgeFixture.trustedOrigin,
                 webView: world.webView
             )
         )
@@ -177,20 +181,19 @@ final class LocationBridgeSecurityTests: XCTestCase {
 
     // MARK: - T23 · origin trust
 
-    /// T23-a — **EXPECTED RED** (finding F2).
+    /// T23-a — finding F2 (was EXPECTED RED; fixed in EP-06F F2).
     ///
-    /// A hostile frame supplies `origin` itself in the message body. The coordinator
-    /// reads `body["origin"]` and never consults `WKScriptMessage.frameInfo.securityOrigin`,
-    /// so any frame can claim the active account's origin.
+    /// Scenario, stated explicitly: the frame that posts the message is REALLY
+    /// `evil-third-party.invalid` (that is what WebKit attests in
+    /// `frameInfo.securityOrigin`), but its body CLAIMS the active account's origin.
+    /// Before the fix the coordinator read `body["origin"]` and granted.
     ///
     /// Secure expectation: a message whose claimed origin is not corroborated by the
     /// sending frame must obtain ZERO location fixes.
     ///
-    /// Current behaviour: the gate grants, `requestLocation()` is called once.
-    ///
-    /// NOTE ON PROOF STRENGTH: this test can only show that the native side trusts the
-    /// body verbatim (it passes a forged value and observes a grant). Proving a real
-    /// third-party iframe can send it requires the real-WKWebView fixture (BLOCKED).
+    /// NOTE ON PROOF STRENGTH: this proves the native side decides on the frame's attested
+    /// origin, not the body. Proving what WebKit attests for a real third-party iframe
+    /// requires the real-WKWebView fixture (BLOCKED).
     func test_handleMessage_givenForgedOriginInBody_returnsNoLocationFix() {
         let world = makeWorld()
 
@@ -198,7 +201,8 @@ final class LocationBridgeSecurityTests: XCTestCase {
         world.coordinator.handleMessage(
             GeoBridgeFakeScriptMessage(
                 requestId: GeoBridgeFixture.validRequestId,
-                origin: GeoBridgeFixture.trustedOrigin,   // forged — not the real frame origin
+                origin: GeoBridgeFixture.trustedOrigin,       // claimed by the page — forged
+                frameOrigin: GeoBridgeFixture.hostileOrigin,  // attested by WebKit — the truth
                 webView: world.webView
             )
         )
@@ -213,6 +217,79 @@ final class LocationBridgeSecurityTests: XCTestCase {
         )
     }
 
+    /// T23-a2 — EP-06F F2. When WebKit cannot attest the sending frame's origin, the
+    /// request must be refused even if the body claims the account's origin: an absent
+    /// attestation is never replaced by the page's claim.
+    func test_handleMessage_givenUnavailableFrameOrigin_returnsRejectWithoutFix() {
+        let world = makeWorld()
+
+        world.coordinator.handleMessage(
+            GeoBridgeFakeScriptMessage(
+                requestId: GeoBridgeFixture.validRequestId,
+                origin: GeoBridgeFixture.trustedOrigin,   // claimed by the page
+                frameOrigin: nil,                         // WebKit attests nothing
+                webView: world.webView
+            )
+        )
+
+        XCTAssertEqual(world.locationManager.requestLocationCallCount, 0,
+                       "No attested frame origin must mean no location fix")
+        XCTAssertEqual(world.locationManager.requestWhenInUseAuthorizationCallCount, 0,
+                       "An unattested frame must not be able to raise the OS prompt")
+        XCTAssertEqual(world.webView.evaluatedJavaScript.count, 1,
+                       "The refused request must still be answered exactly once")
+        XCTAssertTrue(world.webView.evaluatedJavaScript.first?.contains("origin-nil") == true,
+                      "Got: \(world.webView.evaluatedJavaScript)")
+    }
+
+    /// T23-a3 — EP-06F F2. The body's claim may veto but never grant: a frame WebKit
+    /// attests as the account origin, whose body claims some other origin, is refused.
+    func test_handleMessage_givenClaimDisagreeingWithTrustedFrame_returnsRejectWithoutFix() {
+        let world = makeWorld()
+
+        world.coordinator.handleMessage(
+            GeoBridgeFakeScriptMessage(
+                requestId: GeoBridgeFixture.validRequestId,
+                origin: GeoBridgeFixture.hostileOrigin,       // claimed by the page
+                frameOrigin: GeoBridgeFixture.trustedOrigin,  // attested by WebKit
+                webView: world.webView
+            )
+        )
+
+        XCTAssertEqual(world.locationManager.requestLocationCallCount, 0)
+        XCTAssertEqual(world.webView.evaluatedJavaScript.count, 1)
+        XCTAssertTrue(
+            world.webView.evaluatedJavaScript.first?.contains("origin-claim-mismatch") == true,
+            "Got: \(world.webView.evaluatedJavaScript)"
+        )
+    }
+
+    /// T23-a4 — EP-06F F2 regression guard. A same-origin sub-frame (an iframe the Odoo
+    /// page itself serves) is as trustworthy as the page: only scheme/host/port matter,
+    /// not whether the sender is the main frame. The attested origin here spells out the
+    /// default port, and the body omits it — still the same origin, still granted.
+    func test_handleMessage_givenSameOriginSubFrame_returnsLocationFix() {
+        let world = makeWorld()
+
+        world.coordinator.handleMessage(
+            GeoBridgeFakeScriptMessage(
+                requestId: GeoBridgeFixture.validRequestId,
+                origin: GeoBridgeFixture.trustedOrigin,
+                frameOrigin: "https://account-a.invalid:443",
+                webView: world.webView
+            )
+        )
+
+        XCTAssertEqual(world.locationManager.requestLocationCallCount, 1,
+                       "A same-origin frame must keep working (attendance clock-in)")
+        deliverLocation(world)
+        XCTAssertEqual(world.webView.evaluatedJavaScript.count, 1)
+        XCTAssertTrue(
+            world.webView.evaluatedJavaScript.first?.hasPrefix("__woowResolveGeo('\(GeoBridgeFixture.validRequestId)'") == true,
+            "Got: \(world.webView.evaluatedJavaScript)"
+        )
+    }
+
     /// T23-b — a genuinely hostile origin value must be rejected. EXPECTED GREEN
     /// (the gate does compare hosts, so an *honest* attacker is blocked; only a
     /// *lying* one gets through — which is exactly why T23-a matters).
@@ -222,6 +299,7 @@ final class LocationBridgeSecurityTests: XCTestCase {
             GeoBridgeFakeScriptMessage(
                 requestId: GeoBridgeFixture.validRequestId,
                 origin: GeoBridgeFixture.hostileOrigin,
+                frameOrigin: GeoBridgeFixture.hostileOrigin,
                 webView: world.webView
             )
         )
@@ -239,6 +317,7 @@ final class LocationBridgeSecurityTests: XCTestCase {
             GeoBridgeFakeScriptMessage(
                 requestId: GeoBridgeFixture.validRequestId,
                 origin: GeoBridgeFixture.httpOrigin,
+                frameOrigin: GeoBridgeFixture.httpOrigin,
                 webView: world.webView
             )
         )
@@ -256,6 +335,7 @@ final class LocationBridgeSecurityTests: XCTestCase {
             GeoBridgeFakeScriptMessage(
                 requestId: GeoBridgeFixture.validRequestId,
                 origin: GeoBridgeFixture.opaqueOrigin,
+                frameOrigin: GeoBridgeFixture.opaqueOrigin,
                 webView: world.webView
             )
         )
@@ -275,6 +355,7 @@ final class LocationBridgeSecurityTests: XCTestCase {
             GeoBridgeFakeScriptMessage(
                 requestId: GeoBridgeFixture.validRequestId,
                 origin: GeoBridgeFixture.trustedHostOtherPort,
+                frameOrigin: GeoBridgeFixture.trustedHostOtherPort,
                 webView: world.webView
             )
         )
@@ -304,6 +385,7 @@ final class LocationBridgeSecurityTests: XCTestCase {
             GeoBridgeFakeScriptMessage(
                 requestId: GeoBridgeFixture.injectingRequestId,
                 origin: GeoBridgeFixture.trustedOrigin,
+                frameOrigin: GeoBridgeFixture.trustedOrigin,
                 webView: world.webView
             )
         )
@@ -324,6 +406,7 @@ final class LocationBridgeSecurityTests: XCTestCase {
             GeoBridgeFakeScriptMessage(
                 requestId: GeoBridgeFixture.injectingRequestId,
                 origin: GeoBridgeFixture.trustedOrigin,
+                frameOrigin: GeoBridgeFixture.trustedOrigin,
                 webView: world.webView
             )
         )
@@ -353,6 +436,7 @@ final class LocationBridgeSecurityTests: XCTestCase {
             GeoBridgeFakeScriptMessage(
                 requestId: GeoBridgeFixture.injectingRequestId,
                 origin: GeoBridgeFixture.hostileOrigin,   // gate will reject
+                frameOrigin: GeoBridgeFixture.hostileOrigin,
                 webView: world.webView
             )
         )
@@ -387,6 +471,7 @@ final class LocationBridgeSecurityTests: XCTestCase {
             GeoBridgeFakeScriptMessage(
                 requestId: sharedId,
                 origin: GeoBridgeFixture.trustedOrigin,
+                frameOrigin: GeoBridgeFixture.trustedOrigin,
                 webView: world.webView
             )
         )
@@ -395,6 +480,7 @@ final class LocationBridgeSecurityTests: XCTestCase {
             GeoBridgeFakeScriptMessage(
                 requestId: sharedId,
                 origin: GeoBridgeFixture.trustedOrigin,
+                frameOrigin: GeoBridgeFixture.trustedOrigin,
                 webView: world.webView
             )
         )
@@ -424,6 +510,7 @@ final class LocationBridgeSecurityTests: XCTestCase {
             GeoBridgeFakeScriptMessage(
                 requestId: GeoBridgeFixture.validRequestId,
                 origin: GeoBridgeFixture.trustedOrigin,
+                frameOrigin: GeoBridgeFixture.trustedOrigin,
                 webView: world.webView
             )
         )
@@ -455,6 +542,7 @@ final class LocationBridgeSecurityTests: XCTestCase {
             GeoBridgeFakeScriptMessage(
                 requestId: GeoBridgeFixture.validRequestId,
                 origin: GeoBridgeFixture.trustedOrigin,
+                frameOrigin: GeoBridgeFixture.trustedOrigin,
                 webView: world.webView
             )
         )
@@ -488,6 +576,7 @@ final class LocationBridgeSecurityTests: XCTestCase {
             GeoBridgeFakeScriptMessage(
                 requestId: GeoBridgeFixture.validRequestId,
                 origin: GeoBridgeFixture.trustedOrigin,
+                frameOrigin: GeoBridgeFixture.trustedOrigin,
                 webView: world.webView
             )
         )
@@ -526,6 +615,7 @@ final class LocationBridgeSecurityTests: XCTestCase {
             GeoBridgeFakeScriptMessage(
                 requestId: GeoBridgeFixture.validRequestId,
                 origin: GeoBridgeFixture.trustedOrigin,
+                frameOrigin: GeoBridgeFixture.trustedOrigin,
                 webView: world.webView
             )
         )
@@ -567,6 +657,7 @@ final class LocationBridgeSecurityTests: XCTestCase {
                 GeoBridgeFakeScriptMessage(
                     requestId: GeoBridgeFixture.validRequestId,
                     origin: GeoBridgeFixture.trustedOrigin,
+                    frameOrigin: GeoBridgeFixture.trustedOrigin,
                     webView: transientWebView
                 )
             )
@@ -586,6 +677,7 @@ final class LocationBridgeSecurityTests: XCTestCase {
             GeoBridgeFakeScriptMessage(
                 requestId: GeoBridgeFixture.validRequestId,
                 origin: GeoBridgeFixture.trustedOrigin,
+                frameOrigin: GeoBridgeFixture.trustedOrigin,
                 webView: world.webView
             )
         )
@@ -610,6 +702,7 @@ final class LocationBridgeSecurityTests: XCTestCase {
             GeoBridgeFakeScriptMessage(
                 requestId: GeoBridgeFixture.validRequestId,
                 origin: GeoBridgeFixture.trustedOrigin,
+                frameOrigin: GeoBridgeFixture.trustedOrigin,
                 webView: world.webView
             )
         )
@@ -627,6 +720,7 @@ final class LocationBridgeSecurityTests: XCTestCase {
             GeoBridgeFakeScriptMessage(
                 requestId: GeoBridgeFixture.validRequestId,
                 origin: GeoBridgeFixture.trustedOrigin,
+                frameOrigin: GeoBridgeFixture.trustedOrigin,
                 webView: world.webView
             )
         )
@@ -636,6 +730,94 @@ final class LocationBridgeSecurityTests: XCTestCase {
 
         XCTAssertEqual(world.webView.evaluatedJavaScript.count, 1)
         XCTAssertTrue(world.webView.evaluatedJavaScript.first?.contains("os-denied") == true)
+    }
+
+    /// T24-h — EP-06F F2, deferred path. A frame that is really third-party but claims the
+    /// account origin while the OS status is `.notDetermined` must not raise the OS prompt,
+    /// and must obtain no fix when the user later authorises. (Before the fix, the forged
+    /// body origin was stashed in the pending request and re-resolved to a grant here.)
+    func test_didChangeAuthorization_givenForgedOriginWhileNotDetermined_returnsNoFix() {
+        let world = makeWorld(status: .notDetermined)
+
+        world.coordinator.handleMessage(
+            GeoBridgeFakeScriptMessage(
+                requestId: GeoBridgeFixture.validRequestId,
+                origin: GeoBridgeFixture.trustedOrigin,       // claimed by the page — forged
+                frameOrigin: GeoBridgeFixture.hostileOrigin,  // attested by WebKit
+                webView: world.webView
+            )
+        )
+
+        XCTAssertEqual(world.locationManager.requestWhenInUseAuthorizationCallCount, 0,
+                       "A third-party frame must not be able to raise the OS permission prompt")
+
+        // The user authorises location for some other, legitimate reason.
+        world.statusProvider.authorizationStatus = .authorizedWhenInUse
+        world.coordinator.locationManagerDidChangeAuthorization(world.locationManager)
+
+        XCTAssertEqual(world.locationManager.requestLocationCallCount, 0,
+                       "EP-06R F2 (deferred path): a forged origin obtained a fix after authorisation")
+        XCTAssertTrue(
+            world.webView.evaluatedJavaScript.filter { $0.hasPrefix("__woowResolveGeo(") }.isEmpty
+        )
+    }
+
+    /// T24-i — EP-06F F2 regression guard, deferred path. A request from the account's own
+    /// (attested) origin that waited on the runtime prompt must be re-resolved on that
+    /// attested origin and obtain exactly one fix and one resolve once the user authorises.
+    func test_didChangeAuthorization_givenTrustedFrameAfterUserAuthorizes_returnsSingleResolve() {
+        let world = makeWorld(status: .notDetermined)
+
+        world.coordinator.handleMessage(
+            GeoBridgeFakeScriptMessage(
+                requestId: GeoBridgeFixture.validRequestId,
+                origin: GeoBridgeFixture.trustedOrigin,
+                frameOrigin: GeoBridgeFixture.trustedOrigin,
+                webView: world.webView
+            )
+        )
+        XCTAssertEqual(world.locationManager.requestWhenInUseAuthorizationCallCount, 1)
+        XCTAssertEqual(world.locationManager.requestLocationCallCount, 0)
+
+        world.statusProvider.authorizationStatus = .authorizedWhenInUse
+        world.coordinator.locationManagerDidChangeAuthorization(world.locationManager)
+
+        XCTAssertEqual(world.locationManager.requestLocationCallCount, 1,
+                       "The deferred request must ask for exactly one fix once authorised")
+
+        deliverLocation(world)
+
+        XCTAssertEqual(world.webView.evaluatedJavaScript.count, 1)
+        XCTAssertTrue(
+            world.webView.evaluatedJavaScript.first?.hasPrefix("__woowResolveGeo('\(GeoBridgeFixture.validRequestId)'") == true,
+            "Got: \(world.webView.evaluatedJavaScript)"
+        )
+    }
+
+    // MARK: - Default requesting-origin resolver
+
+    /// EP-06F F2 — the production resolver turns WKSecurityOrigin components into the origin
+    /// URL the gate checks. WKSecurityOrigin reports port 0 for the scheme default.
+    func test_originURL_givenSecurityOriginComponents_returnsNormalizedOrigin() {
+        XCTAssertEqual(LocationCoordinator.originURL(scheme: "https", host: "account-a.invalid", port: 0)?.absoluteString,
+                       "https://account-a.invalid")
+        XCTAssertEqual(LocationCoordinator.originURL(scheme: "https", host: "account-a.invalid", port: 443)?.absoluteString,
+                       "https://account-a.invalid",
+                       "The default port is not part of the origin string")
+        XCTAssertEqual(LocationCoordinator.originURL(scheme: "https", host: "account-a.invalid", port: 8443)?.absoluteString,
+                       "https://account-a.invalid:8443",
+                       "A non-default port must survive so the gate can reject it")
+        XCTAssertEqual(LocationCoordinator.originURL(scheme: "HTTPS", host: "account-a.invalid", port: 0)?.scheme,
+                       "https")
+        XCTAssertEqual(LocationCoordinator.originURL(scheme: "http", host: "account-a.invalid", port: 80)?.absoluteString,
+                       "http://account-a.invalid")
+    }
+
+    /// EP-06F F2 — an opaque origin (e.g. a sandboxed iframe) has no scheme/host; the
+    /// resolver must report "unavailable" rather than invent an origin.
+    func test_originURL_givenOpaqueSecurityOrigin_returnsNil() {
+        XCTAssertNil(LocationCoordinator.originURL(scheme: "", host: "", port: 0))
+        XCTAssertNil(LocationCoordinator.originURL(scheme: "https", host: "", port: 0))
     }
 
     // MARK: - Malformed bodies
@@ -654,7 +836,8 @@ final class LocationBridgeSecurityTests: XCTestCase {
         for body in bodies {
             let world = makeWorld()
             world.coordinator.handleMessage(
-                GeoBridgeFakeScriptMessage(body: body, webView: world.webView)
+                GeoBridgeFakeScriptMessage(body: body, frameOrigin: GeoBridgeFixture.trustedOrigin,
+                                           webView: world.webView)
             )
             XCTAssertEqual(world.locationManager.requestLocationCallCount, 0,
                            "Malformed body must not reach Core Location: \(body)")

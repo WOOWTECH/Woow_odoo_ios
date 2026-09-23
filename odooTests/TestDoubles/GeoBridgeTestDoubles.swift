@@ -24,8 +24,13 @@
 //    properties `readonly`, so an ordinary Swift subclass overriding `body` and
 //    `webView` is well-defined and does not rely on memory-layout tricks. The same
 //    holds for WKWebView (`: UIView`) and CLLocationManager (`: NSObject`).
-//    `frameInfo` is deliberately NOT overridden — the production code never reads it,
-//    which is itself finding F2 in EP-06R-ANALYSIS.md.
+//    `frameInfo` is NOT overridden: WKFrameInfo / WKSecurityOrigin have no public
+//    initialiser. Instead the fake carries an explicit `frameOrigin` — the origin WebKit
+//    would attest for the sending frame — and tests inject
+//    `GeoBridgeFakeScriptMessage.trustedFrameOrigin` as the coordinator's
+//    `requestingOrigin` resolver (the EP-06R F2 seam). The body's "origin" is what the
+//    page CLAIMS; `frameOrigin` is what WebKit KNOWS. Keeping them separate is what lets
+//    a test model a lying frame.
 //
 
 import CoreLocation
@@ -64,24 +69,40 @@ final class GeoBridgeSpyWebView: WKWebView {
 /// A synthetic `{requestId, origin}` message, as the geolocation shim would post it.
 ///
 /// Mirrors exactly what `geolocation_shim.js` sends:
-/// `webkit.messageHandlers.requestLocation.postMessage({ requestId, origin })`.
+/// `webkit.messageHandlers.requestLocation.postMessage({ requestId, origin })`,
+/// plus the sending frame's WebKit-attested origin (`frameOrigin`), which in production
+/// comes from `WKScriptMessage.frameInfo.securityOrigin` and cannot be forged by the page.
 @MainActor
 final class GeoBridgeFakeScriptMessage: WKScriptMessage {
 
     private let stubBody: Any
     private weak var stubWebView: WKWebView?
 
+    /// The origin WebKit attests for the frame that posted this message, as an origin
+    /// string (`scheme://host[:port]`). `nil` models a frame whose security origin is
+    /// unavailable. Deliberately independent of `body["origin"]`.
+    let frameOrigin: String?
+
     /// Creates a message with an arbitrary body — including bodies a hostile frame
     /// could send (forged origin, malformed requestId, wrong value types).
-    init(body: Any, webView: WKWebView?) {
+    init(body: Any, frameOrigin: String?, webView: WKWebView?) {
         self.stubBody = body
+        self.frameOrigin = frameOrigin
         self.stubWebView = webView
         super.init()
     }
 
-    /// Convenience for the well-formed shape.
-    convenience init(requestId: String, origin: String, webView: WKWebView?) {
-        self.init(body: ["requestId": requestId, "origin": origin], webView: webView)
+    /// Convenience for the well-formed shape. `origin` is what the page claims in the
+    /// body; `frameOrigin` is what WebKit attests for the sending frame.
+    convenience init(requestId: String, origin: String, frameOrigin: String?, webView: WKWebView?) {
+        self.init(body: ["requestId": requestId, "origin": origin],
+                  frameOrigin: frameOrigin, webView: webView)
+    }
+
+    /// The test stand-in for `LocationCoordinator.frameSecurityOrigin(of:)`: reads the
+    /// stubbed `frameOrigin` instead of the (unconstructible) `frameInfo.securityOrigin`.
+    static func trustedFrameOrigin(of message: WKScriptMessage) -> URL? {
+        (message as? GeoBridgeFakeScriptMessage)?.frameOrigin.flatMap { URL(string: $0) }
     }
 
     override var body: Any { stubBody }

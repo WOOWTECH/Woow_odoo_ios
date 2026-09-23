@@ -20,8 +20,10 @@ struct PendingRequest {
     /// token so that two frames of the same page reusing one request id cannot displace each
     /// other's in-flight request.
     let requestId: String
-    /// The `window.location.origin` string from the JS postMessage.
-    let origin: String
+    /// The WebKit-attested origin of the frame that sent the request
+    /// (`frameInfo.securityOrigin`) — never the page-supplied `body["origin"]`, which any
+    /// frame can set to anything (EP-06R F2). Every re-resolution of this request uses it.
+    let origin: URL?
     /// The document generation that was current when the request arrived.
     ///
     /// A single WKWebView outlives the documents loaded into it (self-heal re-login, deep-link
@@ -38,7 +40,8 @@ struct PendingRequest {
 ///
 /// Lifecycle:
 /// - Installed once per WKWebViewConfiguration in OdooWebView.makeUIView.
-/// - Receives `{requestId, origin}` messages via the "requestLocation" handler.
+/// - Receives `{requestId, origin}` messages via the "requestLocation" handler. The body's
+///   `origin` is only a claim; the decision is made on the frame's WebKit-attested origin.
 /// - Resolves the gate, fetches a single location via CLLocationManager.requestLocation(),
 ///   then calls back into the WebView with __woowResolveGeo / __woowRejectGeo.
 ///
@@ -60,6 +63,11 @@ final class LocationCoordinator: NSObject, CLLocationManagerDelegate {
     /// HTTPS default. Read on every request for the same reason as `activeAccountHost`.
     private let activeAccountPort: () -> Int?
     private let locationManager: CLLocationManager
+    /// Returns the WebKit-attested origin of the frame that posted a message, or nil when it
+    /// is unavailable. This — never the page-supplied `body["origin"]` — is the origin every
+    /// permission decision is made on (EP-06R F2). Injectable only because WKFrameInfo and
+    /// WKSecurityOrigin cannot be constructed in tests.
+    private let requestingOrigin: @MainActor (WKScriptMessage) -> URL?
 
     // MARK: - Pending requests
 
@@ -89,12 +97,14 @@ final class LocationCoordinator: NSObject, CLLocationManagerDelegate {
         gate: LocationPermissionGate,
         activeAccountHost: @escaping () -> String?,
         activeAccountPort: @escaping () -> Int? = { nil },
-        locationManager: CLLocationManager = CLLocationManager()
+        locationManager: CLLocationManager = CLLocationManager(),
+        requestingOrigin: @escaping @MainActor (WKScriptMessage) -> URL? = LocationCoordinator.frameSecurityOrigin(of:)
     ) {
         self.gate = gate
         self.activeAccountHost = activeAccountHost
         self.activeAccountPort = activeAccountPort
         self.locationManager = locationManager
+        self.requestingOrigin = requestingOrigin
         super.init()
         self.locationManager.delegate = self
         self.locationManager.desiredAccuracy = kCLLocationAccuracyBest
@@ -104,10 +114,16 @@ final class LocationCoordinator: NSObject, CLLocationManagerDelegate {
 
     /// Processes an incoming `{requestId, origin}` message from the geolocation shim.
     /// Must be called on the main actor — `MessageHandlerProxy` ensures this.
+    ///
+    /// The permission decision is made on the sending frame's WebKit-attested origin
+    /// (`requestingOrigin`), never on `body["origin"]`: any frame in the page — including a
+    /// third-party iframe — can put the account's origin in the body (EP-06R F2). The body's
+    /// claim is still required (it is part of the shim's message shape) but can only ever
+    /// cause a rejection, when it disagrees with the attested origin; it can never grant.
     func handleMessage(_ message: WKScriptMessage) {
         guard let body = message.body as? [String: Any],
               let requestId = body["requestId"] as? String,
-              let originString = body["origin"] as? String,
+              let claimedOrigin = body["origin"] as? String,
               let webView = message.webView
         else {
             return
@@ -122,17 +138,24 @@ final class LocationCoordinator: NSObject, CLLocationManagerDelegate {
             return
         }
 
-        let originURL = URL(string: originString)
-        let decision = gate.resolve(
-            origin: originURL,
-            activeAccountHost: activeAccountHost(),
-            activeAccountPort: activeAccountPort()
-        )
+        let attestedOrigin = requestingOrigin(message)
+        let decision: LocationPermissionGate.Decision
+        if let attestedOrigin, !Self.isSameOrigin(claimed: claimedOrigin, attested: attestedOrigin) {
+            // The page lied about (or mis-reported) its own origin. Veto only — never a grant.
+            AppLogger.location.error("Rejected geolocation request: claimed origin differs from frame origin")
+            decision = .reject(reason: "origin-claim-mismatch")
+        } else {
+            decision = gate.resolve(
+                origin: attestedOrigin,
+                activeAccountHost: activeAccountHost(),
+                activeAccountPort: activeAccountPort()
+            )
+        }
 
         switch decision {
         case .grant:
             pendingRequests[UUID()] = PendingRequest(
-                requestId: requestId, origin: originString,
+                requestId: requestId, origin: attestedOrigin,
                 generation: currentGeneration, webView: webView)
             locationManager.requestLocation()
 
@@ -146,7 +169,7 @@ final class LocationCoordinator: NSObject, CLLocationManagerDelegate {
             // Stash the request and ask the OS for permission.
             // After the status changes, locationManagerDidChangeAuthorization re-resolves.
             pendingRequests[UUID()] = PendingRequest(
-                requestId: requestId, origin: originString,
+                requestId: requestId, origin: attestedOrigin,
                 generation: currentGeneration, webView: webView)
             locationManager.requestWhenInUseAuthorization()
         }
@@ -162,9 +185,8 @@ final class LocationCoordinator: NSObject, CLLocationManagerDelegate {
                 pendingRequests.removeValue(forKey: token)
                 continue
             }
-            let originURL = URL(string: request.origin)
             let decision = gate.resolve(
-                origin: originURL,
+                origin: request.origin,
                 activeAccountHost: activeAccountHost(),
                 activeAccountPort: activeAccountPort()
             )
@@ -221,7 +243,7 @@ final class LocationCoordinator: NSObject, CLLocationManagerDelegate {
 
             // Consent may have been withdrawn while the fix was in flight.
             let decision = gate.resolve(
-                origin: URL(string: request.origin),
+                origin: request.origin,
                 activeAccountHost: activeAccountHost(),
                 activeAccountPort: activeAccountPort()
             )
@@ -303,6 +325,52 @@ final class LocationCoordinator: NSObject, CLLocationManagerDelegate {
             guard let webView = request.webView else { continue }
             evaluateReject(requestId: request.requestId, code: 1, message: "context-changed", in: webView)
         }
+    }
+
+    // MARK: - Requesting origin
+
+    /// The origin WebKit attests for the frame that posted `message`
+    /// (`frameInfo.securityOrigin`), which page JavaScript cannot forge.
+    ///
+    /// Main frame or sub-frame does not matter: a same-origin iframe is as trustworthy as the
+    /// page itself, and the gate's scheme/host/port check is what separates it from a
+    /// third-party frame.
+    static func frameSecurityOrigin(of message: WKScriptMessage) -> URL? {
+        let origin = message.frameInfo.securityOrigin
+        return originURL(scheme: origin.protocol, host: origin.host, port: origin.port)
+    }
+
+    /// Whether the page's claimed origin string names the same web origin (scheme, host,
+    /// effective port) as the WebKit-attested one. An unparsable claim is not the same origin.
+    private static func isSameOrigin(claimed: String, attested: URL) -> Bool {
+        guard let claimedURL = URL(string: claimed),
+              let claimedScheme = claimedURL.scheme?.lowercased(),
+              let claimedHost = claimedURL.host,
+              let attestedScheme = attested.scheme?.lowercased(),
+              let attestedHost = attested.host
+        else { return false }
+        let defaultPorts = ["https": 443, "http": 80]
+        return claimedScheme == attestedScheme
+            && claimedHost.caseInsensitiveCompare(attestedHost) == .orderedSame
+            && (claimedURL.port ?? defaultPorts[claimedScheme]) == (attested.port ?? defaultPorts[attestedScheme])
+    }
+
+    /// Builds `scheme://host[:port]` from WKSecurityOrigin components.
+    ///
+    /// WKSecurityOrigin reports port 0 when the origin uses its scheme's default port; the
+    /// default port is omitted either way so "https://host" and "https://host:443" compare
+    /// equal. Returns nil for an opaque or otherwise unusable origin (empty scheme or host).
+    nonisolated static func originURL(scheme: String, host: String, port: Int) -> URL? {
+        let scheme = scheme.lowercased()
+        guard !scheme.isEmpty, !host.isEmpty else { return nil }
+        var components = URLComponents()
+        components.scheme = scheme
+        components.host = host
+        let defaultPort: Int? = ["https": 443, "http": 80][scheme]
+        if port > 0, port != defaultPort {
+            components.port = port
+        }
+        return components.url
     }
 
     // MARK: - Request id hardening
