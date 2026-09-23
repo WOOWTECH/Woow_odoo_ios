@@ -1181,7 +1181,8 @@ final class F14_SettingsGapTests: XCTestCase {
     // G4 — Help & Support (P3)
     // ──────────────────────────────────────────────────────
 
-    /// G4-X1: The Settings screen must display a Help & Support section with two link rows.
+    /// G4-X1: The Settings screen must display a Help & Support section with the WOOW
+    /// support / privacy policy / account deletion rows (no odoo.com links).
     @MainActor
     func test_F14_13_settings_hasHelpSection() {
         navigateToSettings()
@@ -1191,32 +1192,32 @@ final class F14_SettingsGapTests: XCTestCase {
             app.staticTexts["HELP & SUPPORT"].waitForExistence(timeout: 5),
             "Settings must have a Help & Support section header (UX-47, G4)"
         )
-        XCTAssertTrue(
-            app.staticTexts["Odoo Help Center"].waitForExistence(timeout: 3),
-            "Help section must contain an Odoo Help Center row (G4)"
-        )
-        XCTAssertTrue(
-            app.staticTexts["Community Forum"].waitForExistence(timeout: 3),
-            "Help section must contain a Community Forum row (G4)"
-        )
+        for row in ["Support", "Privacy Policy", "Delete Account"] {
+            XCTAssertTrue(
+                app.staticTexts[row].waitForExistence(timeout: 3),
+                "Help section must contain a \(row) row (G4)"
+            )
+        }
+        XCTAssertFalse(app.staticTexts["Odoo Help Center"].exists, "odoo.com help link must be gone")
+        XCTAssertFalse(app.staticTexts["Community Forum"].exists, "odoo.com forum link must be gone")
     }
 
-    /// G4-X2: Tapping the Odoo Help Center row must not crash the app.
+    /// G4-X2: Tapping the Support row must not crash the app.
     /// External URL taps are not verified for app.state transition to avoid flakiness.
     @MainActor
     func test_F14_14_helpLink_doesNotCrash() {
         navigateToSettings()
         app.swipeUp()
 
-        let helpLink = app.staticTexts["Odoo Help Center"]
+        let helpLink = app.staticTexts["Support"]
         XCTAssertTrue(
             helpLink.waitForExistence(timeout: 5),
-            "Odoo Help Center row must exist in Help & Support section (G4)"
+            "Support row must exist in Help & Support section (G4)"
         )
-        XCTAssertTrue(helpLink.isHittable, "Odoo Help Center row must be hittable")
+        XCTAssertTrue(helpLink.isHittable, "Support row must be hittable")
         helpLink.tap()
 
         _ = app.exists
-        XCTAssertTrue(true, "App did not crash after tapping Odoo Help Center (G4)")
+        XCTAssertTrue(true, "App did not crash after tapping Support (G4)")
     }
 }

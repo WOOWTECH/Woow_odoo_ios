@@ -70,6 +70,58 @@ enum SharedTestConfig {
     // AC6: nil means "use the single paired device automatically".
     static let deviceUDID: String? = ProcessInfo.processInfo.environment["TEST_DEVICE_UDID"]
         ?? plist["DeviceUDID"] as? String
+
+    // MARK: - App Store screenshot capture (StoreScreenshotTests)
+    //
+    // 這些鍵只給 `StoreScreenshotTests` 用。整組截圖流程預設**不執行** ——
+    // 必須明確 `RUN_STORE_SCREENSHOTS=1` 才會跑，否則一律 XCTSkip，
+    // 以免商店截圖流程污染一般測試回歸（與 `RUN_LOCATION_E2E=1` 同一種閘門）。
+    //
+    // 從 `xcodebuild test` 傳入時要加 `TEST_RUNNER_` 前綴才會抵達 runner 行程：
+    //   TEST_RUNNER_RUN_STORE_SCREENSHOTS=1 TEST_RUNNER_STORE_SHOT_PREFIX=ios-69 ...
+
+    /// 商店截圖總開關。未設為 "1" 時 `StoreScreenshotTests` 全部 skip。
+    static let storeScreenshotsEnabled: Bool =
+        (ProcessInfo.processInfo.environment["RUN_STORE_SCREENSHOTS"]
+            ?? plist["RunStoreScreenshots"] as? String
+            ?? "0") == "1"
+
+    /// 檔名前綴，用來區分裝置尺寸，例如 `ios-69`、`ipad-13`。
+    static let storeScreenshotPrefix = ProcessInfo.processInfo.environment["STORE_SHOT_PREFIX"]
+        ?? plist["StoreShotPrefix"] as? String
+        ?? "store"
+
+    /// 截圖語系。`zh-Hant`（預設，與現有送審素材一致）或 `en`。
+    static let storeScreenshotLocale = ProcessInfo.processInfo.environment["STORE_SHOT_LOCALE"]
+        ?? plist["StoreShotLocale"] as? String
+        ?? "zh-Hant"
+
+    /// 選用：直接寫入的 host 目錄。模擬器沙箱未必允許，寫不進去時會退回
+    /// runner 自己的 Documents（測試 log 會印出實際落點）。
+    static let storeScreenshotDir: String? = ProcessInfo.processInfo.environment["STORE_SHOT_DIR"]
+        ?? plist["StoreShotDir"] as? String
+
+    /// 截圖裡要填進伺服器欄位的值（非機密：展示用測試站主機名）。
+    static let storeShotServer = ProcessInfo.processInfo.environment["STORE_SHOT_SERVER"]
+        ?? plist["StoreShotServer"] as? String
+        ?? "demo111-odoo.woowtech.io"
+
+    static let storeShotDatabase = ProcessInfo.processInfo.environment["STORE_SHOT_DB"]
+        ?? plist["StoreShotDB"] as? String
+        ?? "demo111"
+
+    static let storeShotUser = ProcessInfo.processInfo.environment["STORE_SHOT_USER"]
+        ?? plist["StoreShotUser"] as? String
+        ?? "app.tester.a@woowtest.invalid"
+
+    /// 密碼**沒有預設值**。沒有明確注入就代表「拍不了登入後的畫面」，
+    /// 測試會 XCTSkip 並在 log 說明，絕不用假資料冒充已登入畫面。
+    static let storeShotPassword: String? = {
+        let raw = ProcessInfo.processInfo.environment["STORE_SHOT_PASSWORD"]
+            ?? plist["StoreShotPassword"] as? String
+        guard let raw, !raw.isEmpty else { return nil }
+        return raw
+    }()
 }
 
 /// Dummy class to locate the test bundle
