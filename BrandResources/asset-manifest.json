@@ -1,0 +1,19 @@
+{
+  "source": "/Users/elmolin/WOOW-mobile-app-analysis/sources/Woow_apporo_ha_app/tools/brand/assets/apporo-mark.png",
+  "source_sha256": "9db14c6e5e3a84c4b7600a330ad3ad084875f4cffa2785f778cff2493539fdfa",
+  "operation": "RGBA alpha-composite over #FFFFFF; RGB opaque PNG; no resizing or cropping",
+  "outputs": [
+    {
+      "path": "odoo/Assets.xcassets/ApporoAppIcon.appiconset/ApporoAppIcon.png",
+      "width": 1024,
+      "height": 1024,
+      "sha256": "20814047ff0c3c51792158d3e0f24c1d24ffb8f2bf4cc4a9274a614476257f73"
+    },
+    {
+      "path": "odoo/Assets.xcassets/ApporoLogo.imageset/ApporoLogo.png",
+      "width": 1024,
+      "height": 1024,
+      "sha256": "20814047ff0c3c51792158d3e0f24c1d24ffb8f2bf4cc4a9274a614476257f73"
+    }
+  ]
+}

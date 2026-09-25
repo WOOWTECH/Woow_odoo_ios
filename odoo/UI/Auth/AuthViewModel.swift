@@ -124,7 +124,7 @@ final class AuthViewModel: ObservableObject {
         recomputeUIState()
         let generation = lockGeneration
         Task {
-            let outcome = await authenticator.evaluateBiometrics(reason: String(localized: "biometric_reason"))
+            let outcome = await authenticator.evaluateBiometrics(reason: AppBrand.current.localized("biometric_reason"))
             applyBiometricOutcome(outcome, generation: generation)
         }
     }
@@ -178,7 +178,7 @@ final class AuthViewModel: ObservableObject {
         recomputeUIState()
         let generation = lockGeneration
         Task {
-            let ok = await authenticator.evaluateDeviceOwnerAuth(reason: String(localized: "biometric_reason"))
+            let ok = await authenticator.evaluateDeviceOwnerAuth(reason: AppBrand.current.localized("biometric_reason"))
             applyDevicePasscodeOutcome(success: ok, generation: generation)
         }
     }

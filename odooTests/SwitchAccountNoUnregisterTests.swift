@@ -59,7 +59,7 @@ final class SwitchAccountNoUnregisterTests: XCTestCase {
               "jsonrpc": "2.0",
               "id": "1",
               "result": {
-                "uid": 7,
+                "uid": 1,
                 "name": "Administrator",
                 "username": "admin",
                 "session_id": "sess-validated",
@@ -72,7 +72,7 @@ final class SwitchAccountNoUnregisterTests: XCTestCase {
                 url: request.url ?? URL(string: "https://demo888-odoo.woowtech.io")!,
                 statusCode: 200,
                 httpVersion: nil,
-                headerFields: nil
+                headerFields: ["Set-Cookie": "session_id=sess-validated; Path=/; Secure; HttpOnly"]
             )!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: data)
@@ -161,9 +161,26 @@ final class SwitchAccountNoUnregisterTests: XCTestCase {
         // Store a password for B so switchAccount's session-validation authenticate call runs.
         // (replaceAccountsForTesting seeds only the session cookie, not a password.)
         secureStorage.savePassword(serverUrl: serverB, username: usernameB, password: passwordB)
+
+        // Apporo must authenticate with the selected account's scoped credential,
+        // never the ambiguous legacy host+username password. WOOW retains that legacy fixture.
+        if AppBrand.current.code == .apporo {
+            let accountB = try XCTUnwrap(repo.getAllAccounts().first { $0.database == "demo888" })
+            secureStorage.savePushCredential(PushCredential(account: accountB,
+                password: passwordB, sessionId: "sess-b"))
+        }
     }
 
     override func tearDown() async throws {
+        for account in repo.getAllAccounts() {
+            secureStorage.deletePushCredential(accountId: account.id)
+            secureStorage.deleteSessionId(serverUrl: account.fullServerUrl, username: account.username)
+            if let url = URL(string: account.fullServerUrl) {
+                for cookie in HTTPCookieStorage.shared.cookies(for: url) ?? [] {
+                    HTTPCookieStorage.shared.deleteCookie(cookie)
+                }
+            }
+        }
         secureStorage.deleteFcmToken()
         secureStorage.deletePassword(serverUrl: serverB, username: usernameB)
         secureStorage.deleteSessionId(serverUrl: serverB, username: usernameB)
@@ -176,23 +193,46 @@ final class SwitchAccountNoUnregisterTests: XCTestCase {
 
     // MARK: - Tests
 
+    func test_apporo_switchAccount_givenMismatchedScopedCredential_preservesSelectionWithoutRequests() async throws {
+        // Explicit Apporo coverage also runs in the WOOW suite. A legacy password
+        // is present, but it must not rescue a credential bound to a different database.
+        let accountB = try XCTUnwrap(repo.getAllAccounts().first { $0.database == "demo888" })
+        let otherDatabase = OdooAccount(id: accountB.id, serverUrl: accountB.serverUrl,
+            database: "other-database", username: accountB.username,
+            displayName: accountB.displayName, userId: accountB.userId)
+        let mismatched = PushCredential(account: otherDatabase, password: passwordB, sessionId: "wrong-db")
+        secureStorage.savePushCredential(mismatched)
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [RecordingURLProtocol.self]
+        let apporoRepo = AccountRepository(persistence: persistence, secureStorage: secureStorage,
+            apiClient: OdooAPIClient(session: URLSession(configuration: config)), brand: .apporo)
+        let before = apporoRepo.getAllAccounts()
+
+        let switched = await apporoRepo.switchAccount(id: accountB.id)
+
+        XCTAssertFalse(switched)
+        XCTAssertEqual(apporoRepo.getAllAccounts(), before)
+        XCTAssertEqual(secureStorage.pushCredential(accountId: accountB.id), mismatched)
+        XCTAssertTrue(RecordingURLProtocol.recordedPaths.isEmpty)
+        XCTAssertTrue(RecordingURLProtocol.recordedMethods.isEmpty)
+    }
+
     /// AC9: switching accounts must NOT trigger an `unregister_device` call.
     /// switchAccount may hit `/web/session/authenticate` to validate the session — that's
     /// expected; the invariant is that it never emits the `unregister_device` CallKw.
     func test_switchAccount_doesNotTriggerUnregisterDevice() async throws {
         // Resolve B's id from the repository (ids are UUIDs assigned during seeding).
         let all = repo.getAllAccounts()
-        guard let accountB = all.first(where: { $0.database == "demo888" }) else {
-            throw XCTSkip("Seed for account B (demo888) not found — cannot exercise switchAccount")
-        }
+        let accountB = try XCTUnwrap(all.first { $0.database == "demo888" })
         XCTAssertEqual(repo.getActiveAccount()?.database, "demo777", "precondition: A (demo777) active")
 
         let switched = await repo.switchAccount(id: accountB.id)
 
-        // Whether or not the switch succeeds, the AC9 invariant must hold. We still surface the
-        // outcome to make failures diagnosable.
+        // Both build-selected brands must really authenticate and switch; no vacuous pass.
         XCTAssertTrue(switched, "switchAccount should succeed with a valid stored password and success-shaped auth")
         XCTAssertEqual(repo.getActiveAccount()?.database, "demo888", "B must be active after a successful switch")
+        XCTAssertEqual(RecordingURLProtocol.recordedPaths, ["/web/session/authenticate"])
+        XCTAssertFalse(try XCTUnwrap(repo.getAllAccounts().first { $0.database == "demo777" }).isActive)
 
         // Core assertion (AC9): no recorded request carried the unregister_device method.
         XCTAssertFalse(

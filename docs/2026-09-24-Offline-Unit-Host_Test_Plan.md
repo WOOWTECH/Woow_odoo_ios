@@ -21,3 +21,15 @@
 ## 結果分類
 
 本輪 worker 的 Python/source/diff 檢查可報 PASS；Swift runtime、Release compile-negative、兩品牌完整執行未跑，必須標 NOT RUN。offline-host 不覆蓋正常 bootstrap/通知權限/APNs/真 WebView load/Safari 真開啟/E2E/OS 全域封網。
+
+## 本輪輕量結果與實際 runner 結構
+
+- 兩份計畫已先提交：`ee87a55`（原 HEAD `b077db4`）；產品不 stage/commit。
+- 新增 6 條 XCTest，尚未編譯／執行；既有外部導航 case 改為 spy，不減少 cases。
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_offline_unit_host.py' -v`：10/10 PASS（含破壞 launch/default guard/mock 的負向 mutation checks）。
+- 完整 suite 使用 repo 內 TMPDIR、未設定外部 provenance 輸入：43 條 = 42 PASS + 既有 provenance 1 SKIP，0 failures/errors。SKIP 非 Swift case，也不是新增豁免。
+- `bash scripts/audit_test_hook_naming.sh`：8 個原 hook 註冊完整；無新增 runtime hook。
+- `git diff --check`、`git diff --cached --exit-code` 通過；原 TestHookGate/TestHookGateTest/WOOW scheme 均無 diff。
+- 唯讀檢查已生成外接碟 Apporo xctestrun：實際為 format-1，頂層 `odooTests` 與 `__xctestrun_metadata__`，非 TestConfigurations 格式。現有 EnvironmentVariables/TestingEnvironmentVariables 只列出欄位名稱供稽核，未輸出任何值；沒有 OnlyTestIdentifiers/SkipTestIdentifiers，CommandLineArguments 為空。
+- 專用 runner 若維持 format-1，只保留 `odooTests` 和 `__xctestrun_metadata__`。從新編譯結果保留 `TestBundlePath`、`TestHostPath`、`TestHostBundleIdentifier`、`DependentProductPaths`、`IsAppHostedTestBundle`、`TestingEnvironmentVariables` 的 XCTest loader 注入（DYLD/XCInjectBundleInto 等）；`EnvironmentVariables` 不繼承 live/custom 項，`CommandLineArguments=[]`，`InProcessParallelizationEnabled=false`。原產物不可重用作離線證據，必須新編譯 app+tests 並看到 6 條 OfflineUnitHostTests。
+- 主代理執行期仍需 `-only-testing:odooTests -parallel-testing-enabled NO` 與唯一專用 destination，不可傳 `-WoowTestRunner`。WOOW 若輸出 format-2，按上節 TestConfigurations/TestTargets 規則移除 UI target，但完整保留 unit cases。保留 XCTest framework injection 與路徑，不靠刪 loader／關驗證換綠燈。

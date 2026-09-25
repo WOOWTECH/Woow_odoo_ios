@@ -15,6 +15,22 @@ optimized_for_llm: true
 
 _Critical rules and patterns for implementing code in `worktrees/ios`. Focus is on unobvious details agents get wrong. Every claim here was read out of the code, not out of the docs — where CLAUDE.md and the code disagree, this file follows the code and says so._
 
+## 2026-09-24 stage-2 brand-layer delta (unverified at runtime)
+
+This section supersedes older identity/build/audit statements below only for this local branch. WOOW remains `io.woowtech.odoo`, scheme `woowodoo`, Debug/Release, 1.0 (3). Apporo is `com.apporo.odoo` / `.dev`, schemes `apporoodoo` / `apporoodoo-dev`, configurations ApporoRelease / ApporoDebug, 1.0 (1); target/module/product remain `odoo`. `AppBrand` validates the build identity and supplies UI/default color/logo/links/keychain service. WOOW keychain service is unchanged; Apporo gets bundle-scoped services.
+
+`Config/*.xcconfig` owns app identity. Filesystem membership exceptions now also exclude the original Firebase and localized InfoPlist.strings; the declared-input/output resource phase emits exactly one variant set from BrandResources (existing WOOW Firebase referenced by path). Apporo actual Firebase config/project ID are missing, intentionally fail-fast. `AppDelegate` validates selected Firebase bundle/project and configures once. Release audit uses `BRAND_RELEASE_AUDIT` for both Release configurations and invokes the source registry audit; both registries now cover all 8 existing hooks. No new hooks were added.
+
+The Apporo shared scheme defaults to unit tests only, not the legacy live location plan. UI test display identity is generated build metadata via SharedTestConfig. `verify_all.py` requires an explicit isolated Apporo dev identity and separate device-write approval; the two legacy live E2E tools are unconditionally BLOCKED pending tenant/row/config repair, before credential reads or side effects. No Xcode, devices, network or backend actions were executed. Stage 3 push contracts are untouched; Apporo is not live-login/push ready. See the dated plan/test/verification documents and BrandResources/README.md for limits and actual offline results.
+
+## 2026-09-25 stage-3 local push delta (Swift runtime NOT RUN)
+
+This section supersedes the earlier stage-2 claims that push contracts are untouched or Firebase configuration is absent. Protected configuration was not inspected. `PushDeviceRegistrar` is the sole register/unregister adapter, including AccountRepository logout/remove. Apporo pins each capability/write pair to one account-bound SID, requires v2/Apporo capability and register echo, and repeats the whole pair at most once after isolated healing. WOOW still omits capability/brand; its SessionHealingRegistrar/SessionReauthenticator files are unchanged.
+
+`PushCredential` is a new account-ID Keychain blob binding full base URL, DB, username and uid; the old host+username keys are NOT safely account-scoped and are never imported into push credentials. Manual Apporo login uses one isolated authentication response, requires a valid SID before account mutation, and atomically publishes account/scoped/legacy credentials plus UI cookie only for the winning attempt. Explicit selection/removal invalidates pending manual attempts. Push healing never publishes the UI cookie, uses per-login-generation single flight/circuit, and manual login resets only that account by issuing a new generation. Removed-account registration stops; already captured cleanup may finish, but cannot reauthenticate a removed account. Status is account-ID keyed and registration ACK is not delivery.
+
+See `docs/2026-09-25-Apporo-Push_Verification.md` for exact source checks and NOT RUN gates. No Xcode build, runtime XCTest, simulator, real service, configuration-secret reads, deployment or product commits were performed in this phase.
+
 **Anchor policy:** cite files and symbol names, not line numbers. Line numbers in this repo drift by 6–15 lines per release. If you need an exact site, grep for the symbol.
 
 ---
@@ -45,8 +61,8 @@ Read from `odoo.xcodeproj/project.pbxproj`, not from docs:
 
 ### Build-System Rules (read these first — they decide whether your code compiles)
 
-**B1. Never hand-edit `project.pbxproj` to add a file.**
-All three targets use Xcode 16 **`PBXFileSystemSynchronizedRootGroup`**. A `.swift` file is a member of a target purely by living under `odoo/`, `odooTests/`, or `odooUITests/`. There is **no `PBXBuildFile` entry, no Sources build-phase list** to update — and there is no way to exclude a file by editing the pbxproj either. The **only** membership exception declared in the project file is `odoo/Info.plist`. Same mechanism is why `PrivacyInfo.xcprivacy`, `Localizable.strings`, `geolocation_shim.js` and `TestConfig.plist` appear nowhere by name in the pbxproj.
+**B1. Do not hand-edit `project.pbxproj` to add synchronized Swift source files.**
+All three targets use Xcode 16 **`PBXFileSystemSynchronizedRootGroup`**. A `.swift` file is a member of a target purely by living under `odoo/`, `odooTests/`, or `odooUITests/`. There is **no `PBXBuildFile` entry, no Sources build-phase list** to update — resources can be excluded with `PBXFileSystemSynchronizedBuildFileExceptionSet.membershipExceptions`. Brand selection excludes original Firebase/InfoPlist.strings outputs alongside `odoo/Info.plist`. Build configurations, xcconfig references and build phases still require project edits. Same mechanism is why `PrivacyInfo.xcprivacy`, `Localizable.strings`, `geolocation_shim.js` and `TestConfig.plist` appear nowhere by name in the pbxproj.
 → To create a file: write it to the right directory. Done.
 → To keep a file out of Release: wrap the **entire file** in `#if DEBUG` (the pattern used by `SeededAccount.swift`, `E2EWebViewProbe.swift`, `TestNotificationTapInjector.swift`). Target membership cannot do it.
 
@@ -273,7 +289,7 @@ xcodebuild -project odoo.xcodeproj -scheme odoo \
 
 Ordered by blast radius. An agent who reads only this section avoids the most damaging mistakes.
 
-**C1. Do not hand-edit `project.pbxproj` to add or exclude a file.** `PBXFileSystemSynchronizedRootGroup`; membership is by directory. Exclude from Release with a whole-file `#if DEBUG`. Only `odoo/Info.plist` is an explicit membership entry. *(Build-breaking.)*
+**C1. Swift membership is by synchronized directory; do not add source build entries.** Debug-only code uses whole-file `#if DEBUG`. Resource exclusions belong to the synchronized membership exception set; brand-selected Firebase/InfoPlist.strings must never also be auto-copied. Configurations and phase wiring remain in `project.pbxproj`.
 
 **C2. `@Test` / `#expect` do not compile here.** XCTest only, Swift 5.0, no swift-testing dependency. *(Build-breaking.)*
 
@@ -309,7 +325,7 @@ Ordered by blast radius. An agent who reads only this section avoids the most da
 
 **C18. The UI suite needs `odooUITests/TestConfig.plist`** copied from `TestConfig.plist.example` before it can run; the default test plan (`LocationE2E.xctestplan`) hides the XCUITest suite — always pass `-only-testing:` explicitly.
 
-**C19. `scripts/audit_test_hook_naming.sh` fails on `main` today** (3 unregistered hooks) and nothing invokes it automatically. Run it manually before committing in that area.
+**C19. Both hook registries now cover the 8 existing hooks on the stage-2 branch.** Source audit is also invoked by both release build phases. Binary stripping still requires an actual archive audit; source PASS alone is not release evidence.
 
 **C20. No SwiftLint, no CI, no git hooks, and the milestone/iV pipeline is dormant.** Everything — plan docs, directory boundaries, localization completeness, test coverage, hook registration — is human-enforced. Do not claim a gate passed unless you actually ran the command and can quote its output.
 

@@ -108,7 +108,8 @@ final class HonestLogoutS4Tests: XCTestCase {
         repo = AccountRepository(
             persistence: persistence,
             secureStorage: secureStorage,
-            apiClient: apiClient
+            apiClient: apiClient,
+            brand: .woowtech
         )
 
         // A stored FCM token is required so the best-effort `unregister_device` actually fires

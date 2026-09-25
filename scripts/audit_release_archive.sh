@@ -39,6 +39,9 @@ KNOWN_HOOKS=(
     "WOOW_TEST_FORCE_PIN"
     "WOOW_TEST_AUTOTAP"
     "WOOW_SEED_ACCOUNT"
+    "WOOW_SEED_ACCOUNTS"
+    "WOOW_TEST_NOTIFICATION_TAP"
+    "WOOW_TEST_NOTIFICATION_TAP_MODE"
 )
 
 # Also flag the launch-argument marker — its presence in a Release

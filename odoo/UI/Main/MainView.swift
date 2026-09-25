@@ -57,7 +57,7 @@ struct MainView: View {
             .animation(.easeInOut(duration: 0.3), value: showLocationDeniedBanner)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text("WoowTech Odoo")
+                    Text(AppBrand.current.displayName)
                         .font(.headline)
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {

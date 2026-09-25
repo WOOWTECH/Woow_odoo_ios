@@ -128,18 +128,21 @@ final class SettingsGapTests: XCTestCase {
     /// G4-U1: Chinese (and any non-English) UI opens the non-suffixed WOOW pages.
     func test_helpLinks_nonEnglishUseDefaultPages() {
         for lang in ["zh-Hant", "zh-Hans", nil] as [String?] {
-            XCTAssertEqual(SettingsConstants.supportURL(forLanguage: lang), "https://aiot.woowtech.io/odoo-support")
-            XCTAssertEqual(SettingsConstants.privacyPolicyURL(forLanguage: lang), "https://aiot.woowtech.io/odoo-privacy")
-            XCTAssertEqual(SettingsConstants.accountDeletionURL(forLanguage: lang), "https://aiot.woowtech.io/odoo-account-deletion")
+            let base = AppBrand.current.code == .apporo ? "https://www.apporo.ai" : "https://aiot.woowtech.io"
+            let suffix = AppBrand.current.code == .apporo && lang == nil ? "-en" : ""
+            XCTAssertEqual(SettingsConstants.supportURL(forLanguage: lang), base + "/odoo-support" + suffix)
+            XCTAssertEqual(SettingsConstants.privacyPolicyURL(forLanguage: lang), base + "/odoo-privacy" + suffix)
+            XCTAssertEqual(SettingsConstants.accountDeletionURL(forLanguage: lang), base + "/odoo-account-deletion" + suffix)
         }
     }
 
     /// G4-U2: English UI opens the "-en" WOOW pages.
     func test_helpLinks_englishUsesEnPages() {
         for lang in ["en", "en-US", "en-GB"] {
-            XCTAssertEqual(SettingsConstants.supportURL(forLanguage: lang), "https://aiot.woowtech.io/odoo-support-en")
-            XCTAssertEqual(SettingsConstants.privacyPolicyURL(forLanguage: lang), "https://aiot.woowtech.io/odoo-privacy-en")
-            XCTAssertEqual(SettingsConstants.accountDeletionURL(forLanguage: lang), "https://aiot.woowtech.io/odoo-account-deletion-en")
+            let base = AppBrand.current.code == .apporo ? "https://www.apporo.ai" : "https://aiot.woowtech.io"
+            XCTAssertEqual(SettingsConstants.supportURL(forLanguage: lang), base + "/odoo-support-en")
+            XCTAssertEqual(SettingsConstants.privacyPolicyURL(forLanguage: lang), base + "/odoo-privacy-en")
+            XCTAssertEqual(SettingsConstants.accountDeletionURL(forLanguage: lang), base + "/odoo-account-deletion-en")
         }
     }
 
@@ -149,7 +152,7 @@ final class SettingsGapTests: XCTestCase {
             for raw in [SettingsConstants.supportURL(forLanguage: lang),
                         SettingsConstants.privacyPolicyURL(forLanguage: lang),
                         SettingsConstants.accountDeletionURL(forLanguage: lang)] {
-                XCTAssertEqual(URL(string: raw)?.host, "aiot.woowtech.io", raw)
+                XCTAssertEqual(URL(string: raw)?.host, AppBrand.current.code == .apporo ? "www.apporo.ai" : "aiot.woowtech.io", raw)
             }
         }
     }

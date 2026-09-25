@@ -344,7 +344,7 @@ final class AccountRepositoryTests: XCTestCase {
     }
 
     // switchAccount: marking a new account active must deactivate the previous one.
-    func test_switchAccount_givenTwoAccounts_deactivatesPrevious() async {
+    func test_switchAccount_givenTwoAccounts_deactivatesPrevious() async throws {
         let context = persistence.container.viewContext
 
         // Insert two accounts manually (bypassing authenticate to avoid network).
@@ -358,7 +358,30 @@ final class AccountRepositoryTests: XCTestCase {
         e2.username = "u2"; e2.displayName = "User Two"
         e2.isActive = false; e2.createdAt = Date()
 
-        try? context.save()
+        try context.save()
+
+        // No password means no reauthentication: Apporo still requires a usable
+        // account-bound cookie; WOOW preserves its legacy credential-free switch.
+        let account = e2.toDomainModel()
+        secureStorage.deletePassword(serverUrl: account.fullServerUrl, username: account.username)
+        secureStorage.deletePushCredential(accountId: account.id)
+        defer {
+            secureStorage.deletePushCredential(accountId: account.id)
+            secureStorage.deleteSessionId(serverUrl: account.fullServerUrl, username: account.username)
+            if let url = URL(string: account.fullServerUrl) {
+                for cookie in HTTPCookieStorage.shared.cookies(for: url) ?? [] {
+                    HTTPCookieStorage.shared.deleteCookie(cookie)
+                }
+            }
+        }
+        if AppBrand.current.code == .apporo {
+            let url = try XCTUnwrap(URL(string: account.fullServerUrl + "/web/session/authenticate"))
+            let cookie = try XCTUnwrap(HTTPCookie(properties: [.name: "session_id", .value: "switch-b",
+                .domain: "s2.com", .path: "/", .secure: "TRUE"]))
+            let policy = try XCTUnwrap(PushSessionCookie(cookie: cookie, responseURL: url))
+            secureStorage.savePushCredential(PushCredential(account: account, password: "",
+                sessionId: cookie.value, sessionCookie: policy))
+        }
 
         let switched = await repository.switchAccount(id: "acc-2")
         XCTAssertTrue(switched, "switchAccount must return true on success")
@@ -807,23 +830,31 @@ final class OdooWebViewCoordinatorTests: XCTestCase {
         wait(for: [expectation], timeout: 1)
     }
 
-    // External host must be cancelled (Safari opens it — but that's UIApplication side effect).
+    // External host must be handed off once and cancelled, without launching Safari in tests.
     func test_navigationPolicy_givenExternalHost_cancels() {
         var loadingFlag = false
+        var openedURLs: [URL] = []
+        var policyCalls = 0
+        let externalURL = URL(string: "https://external-site.com/page")!
         let coordinator = OdooWebViewCoordinator(
             serverUrl: "https://odoo.example.com",
             onSessionExpired: {},
-            isLoading: Binding(get: { loadingFlag }, set: { loadingFlag = $0 })
+            isLoading: Binding(get: { loadingFlag }, set: { loadingFlag = $0 }),
+            openExternalURL: { openedURLs.append($0) }
         )
 
         let expectation = XCTestExpectation(description: "Policy handler called")
-        let action = WKNavigationActionStub(request: URLRequest(url: URL(string: "https://external-site.com/page")!))
+        let action = WKNavigationActionStub(request: URLRequest(url: externalURL))
 
         coordinator.webView(WKWebView(), decidePolicyFor: action) { policy in
+            policyCalls += 1
+            XCTAssertEqual(openedURLs, [externalURL], "External hand-off must precede cancellation")
             XCTAssertEqual(policy, .cancel, "External URLs must be cancelled in the WebView")
             expectation.fulfill()
         }
         wait(for: [expectation], timeout: 1)
+        XCTAssertEqual(openedURLs, [externalURL], "Exactly one external hand-off")
+        XCTAssertEqual(policyCalls, 1, "Exactly one policy completion")
     }
 
     // Blob URLs must be allowed (OWL framework generates them for downloads).

@@ -844,7 +844,7 @@ final class E2E_DeepLinkSecurityTests: XCTestCase {
 
     // MARK: UX-72
 
-    /// UX-72: A `javascript:alert()` URL sent via the `woowodoo://` scheme is rejected —
+    /// UX-72: A `javascript:alert()` URL sent via the selected brand’s URL scheme is rejected —
     /// no JS alert appears and the WebView does not navigate.
     @MainActor
     func test_UX72_givenJavascriptURL_whenOpenedViaScheme_thenWebViewDoesNotNavigate() throws {
@@ -853,7 +853,7 @@ final class E2E_DeepLinkSecurityTests: XCTestCase {
         }
 
         // URL(string:) may return nil for some javascript: variants — guard gracefully
-        guard let badURL = URL(string: "woowodoo://open?url=javascript:alert('XSS')") else {
+        guard let badURL = URL(string: "\(SharedTestConfig.appURLScheme)://open?url=javascript:alert('XSS')") else {
             throw XCTSkip("UX-72: URL(string:) returned nil for javascript: URL — the OS will not route it; rejection is implicit")
         }
 
@@ -879,7 +879,7 @@ final class E2E_DeepLinkSecurityTests: XCTestCase {
 
     // MARK: UX-73
 
-    /// UX-73: A `data:text/html` URL sent via the `woowodoo://` scheme is rejected —
+    /// UX-73: A `data:text/html` URL sent via the selected brand’s URL scheme is rejected —
     /// injected HTML content does not appear and the WebView retains its Odoo content.
     @MainActor
     func test_UX73_givenDataSchemeURL_whenOpenedViaScheme_thenWebViewDoesNotNavigate() throws {
@@ -888,7 +888,7 @@ final class E2E_DeepLinkSecurityTests: XCTestCase {
         }
 
         // Use percent-encoded form to avoid URL(string:) returning nil for angle brackets
-        guard let badURL = URL(string: "woowodoo://open?url=data:text/html,%3Ch1%3EInjected%3C/h1%3E") else {
+        guard let badURL = URL(string: "\(SharedTestConfig.appURLScheme)://open?url=data:text/html,%3Ch1%3EInjected%3C/h1%3E") else {
             throw XCTSkip("UX-73: URL(string:) returned nil for data: URL — rejection is implicit")
         }
 
@@ -914,7 +914,7 @@ final class E2E_DeepLinkSecurityTests: XCTestCase {
 
     // MARK: UX-74
 
-    /// UX-74: A URL pointing to an external host (`evil.com`) sent via the `woowodoo://`
+    /// UX-74: A URL pointing to an external host (`evil.com`) sent via the selected brand’s URL
     /// scheme is rejected — the WebView does not navigate and the app stays in the foreground.
     @MainActor
     func test_UX74_givenExternalHostURL_whenOpenedViaScheme_thenWebViewDoesNotNavigate() throws {
@@ -922,7 +922,7 @@ final class E2E_DeepLinkSecurityTests: XCTestCase {
             throw XCTSkip("UX-74: Logged-in state with visible WebView is required")
         }
 
-        guard let badURL = URL(string: "woowodoo://open?url=https://evil.com/steal?data=123") else {
+        guard let badURL = URL(string: "\(SharedTestConfig.appURLScheme)://open?url=https://evil.com/steal?data=123") else {
             failWithScreenshot(in: self, named: "UX74_url_nil", reason: "UX-74: URL(string:) returned nil for external host URL — check URL encoding")
             return
         }
@@ -946,18 +946,18 @@ final class E2E_DeepLinkSecurityTests: XCTestCase {
 
     // MARK: UX-75
 
-    /// UX-75: Opening `woowodoo://open` from Springboard activates the app.
+    /// UX-75: Opening the selected brand’s `://open` URL from Springboard activates the app.
     ///
-    /// This verifies that the `woowodoo` URL scheme is registered in `Info.plist`
+    /// This verifies that the selected brand’s URL scheme is registered in `Info.plist`
     /// and that the app handles the activation correctly.
     @MainActor
-    func test_UX75_givenWoowodooURLScheme_whenOpenedFromSpringboard_thenAppActivates() throws {
+    func test_UX75_givenSelectedBrandURLScheme_whenOpenedFromSpringboard_thenAppActivates() throws {
         // Send the app to background first to simulate opening from Springboard
         XCUIDevice.shared.press(.home)
         _ = XCTWaiter.wait(for: [], timeout: 2)
 
-        guard let deepLink = URL(string: "woowodoo://open") else {
-            failWithScreenshot(in: self, named: "UX75_url_nil", reason: "UX-75: URL(string:) returned nil for woowodoo://open")
+        guard let deepLink = URL(string: "\(SharedTestConfig.appURLScheme)://open") else {
+            failWithScreenshot(in: self, named: "UX75_url_nil", reason: "UX-75: URL(string:) returned nil for selected brand scheme")
             return
         }
 
@@ -968,7 +968,7 @@ final class E2E_DeepLinkSecurityTests: XCTestCase {
 
         XCTAssertTrue(
             app.wait(for: .runningForeground, timeout: 10),
-            "UX-75: App must activate (come to foreground) when woowodoo:// URL is opened"
+            "UX-75: App must activate (come to foreground) when selected brand URL is opened"
         )
 
         // After activation the app must show either the login screen or the main screen

@@ -19,11 +19,11 @@ protocol SecureStorageProtocol: Sendable {
 /// All data stored with:
 /// - `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` (passwords, PIN)
 /// - `kSecAttrSynchronizable: false` (no iCloud sync)
-final class SecureStorage: SecureStorageProtocol, Sendable {
+final class SecureStorage: SecureStorageProtocol, PushCredentialStorage, Sendable {
 
     static let shared = SecureStorage()
 
-    private let service = "io.woowtech.odoo.keychain"
+    private let service = AppBrand.current.keychainService
 
     // MARK: - Password Storage (per account, scoped to server host)
 
@@ -95,6 +95,24 @@ final class SecureStorage: SecureStorageProtocol, Sendable {
     /// the session cannot be reused after the user explicitly signs out.
     func deleteSessionId(serverUrl: String, username: String) {
         delete(key: sessionKey(serverUrl: serverUrl, username: username))
+    }
+
+    // MARK: - Account-ID scoped Apporo push credentials
+
+    @MainActor func pushCredential(accountId: String) -> PushCredential? {
+        guard let value = get(key: "push_account_\(accountId)"),
+              let data = value.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(PushCredential.self, from: data)
+    }
+
+    @MainActor func savePushCredential(_ credential: PushCredential) {
+        guard let data = try? JSONEncoder().encode(credential),
+              let value = String(data: data, encoding: .utf8) else { return }
+        save(key: "push_account_\(credential.accountId)", value: value)
+    }
+
+    @MainActor func deletePushCredential(accountId: String) {
+        delete(key: "push_account_\(accountId)")
     }
 
     // MARK: - PIN Hash

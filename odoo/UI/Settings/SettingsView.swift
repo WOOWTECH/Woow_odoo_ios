@@ -7,11 +7,14 @@ struct SettingsView: View {
     /// Observes the user's theme color so the section icons reflect the
     /// current theme (UX-48). See `WoowTheme.swift`.
     @ObservedObject private var theme = WoowTheme.shared
+    @ObservedObject private var pushStatus = PushRegistrationStatusStore.shared
+    @State private var pushAccountId: String?
+    let accountRepository: AccountRepositoryProtocol = AccountRepository()
     let onBackClick: () -> Void
 
     @State private var showColorPicker = false
     @State private var showPinSetup = false
-    @State private var selectedColor = "#6183FC"
+    @State private var selectedColor = AppSettings.defaultThemeColor
 
     var body: some View {
         Form {
@@ -93,6 +96,15 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            if AppBrand.current.code == .apporo, let pushAccountId {
+                Section("Push Registration") {
+                    Text(pushStatus.status(for: pushAccountId).localizedDescription)
+                    Text("Registration acknowledgement does not confirm notification delivery.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             // ── Language (G1) ──
             Section("Language") {
                 Button {
@@ -114,7 +126,7 @@ struct SettingsView: View {
                 }
                 .foregroundStyle(.primary)
 
-                Text("Change language in iOS Settings")
+                Text(AppBrand.current.localized("Change language in iOS Settings"))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -198,11 +210,15 @@ struct SettingsView: View {
                 }
                 .foregroundStyle(.primary)
 
-                Text("\u{00A9} 2026 WoowTech")
+                Text(AppBrand.current.signature)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
             }
+        }
+        .onAppear { pushAccountId = accountRepository.getActiveAccount()?.id }
+        .onReceive(NotificationCenter.default.publisher(for: .activeAccountDidChange)) { _ in
+            pushAccountId = accountRepository.getActiveAccount()?.id
         }
         .navigationTitle("Settings")
         .toolbar {
@@ -260,31 +276,19 @@ struct SettingsView: View {
 /// Constants for Settings — URLs, email, display names.
 /// Extracted for testability and single source of truth.
 enum SettingsConstants {
-    static let websiteURL = "https://aiot.woowtech.io"
-    static let websiteDisplayName = "aiot.woowtech.io"
-    static let contactEmail = "woowtech@designsmart.com.tw"
-
-    // Public compliance pages on the WOOW website. Each exists in a default (Chinese) and an
-    // English ("-en") variant; `forLanguage` is the app's current UI localization
-    // (`Bundle.main.preferredLocalizations.first`): English → "-en", anything else → default page.
-    static let supportPath = "/odoo-support"
-    static let privacyPolicyPath = "/odoo-privacy"
-    static let accountDeletionPath = "/odoo-account-deletion"
+    static let websiteURL = AppBrand.current.websiteURL
+    static let websiteDisplayName = AppBrand.current.websiteHost
+    static let contactEmail = AppBrand.current.contactEmail
 
     static func supportURL(forLanguage code: String?) -> String {
-        localizedPageURL(supportPath, forLanguage: code)
+        AppBrand.current.pageURL(.support, language: code)
     }
 
     static func privacyPolicyURL(forLanguage code: String?) -> String {
-        localizedPageURL(privacyPolicyPath, forLanguage: code)
+        AppBrand.current.pageURL(.privacy, language: code)
     }
 
     static func accountDeletionURL(forLanguage code: String?) -> String {
-        localizedPageURL(accountDeletionPath, forLanguage: code)
-    }
-
-    static func localizedPageURL(_ path: String, forLanguage code: String?) -> String {
-        let isEnglish = code.map { $0 == "en" || $0.hasPrefix("en-") || $0.hasPrefix("en_") } ?? false
-        return websiteURL + path + (isEnglish ? "-en" : "")
+        AppBrand.current.pageURL(.accountDeletion, language: code)
     }
 }

@@ -35,25 +35,20 @@ final class PushTokenRepository: PushTokenRepositoryProtocol {
 
     private let secureStorage: SecureStorage
     private let accountRepository: AccountRepositoryProtocol
-    private let apiClient: OdooAPIClient
-    private let healingRegistrar: SessionHealingRegistrar
+    private let registrar: PushDeviceRegistrar
 
     init(
         secureStorage: SecureStorage = .shared,
         accountRepository: AccountRepositoryProtocol = AccountRepository(),
         apiClient: OdooAPIClient = OdooAPIClient(),
-        reauthenticator: SessionReauthenticator = SessionReauthenticator.shared
+        reauthenticator: SessionReauthenticator = SessionReauthenticator.shared,
+        brand: AppBrand.Code = AppBrand.current.code,
+        pushCredentials: PushCredentialStorage = SecureStorage.shared
     ) {
         self.secureStorage = secureStorage
         self.accountRepository = accountRepository
-        self.apiClient = apiClient
-        // The register call self-heals an expired session (WI-3 parity): re-auth once against the
-        // account's own https host and retry once, so an expired session never silently stops token
-        // updates. Shares the same api client so the refreshed cookie applies to the retry.
-        self.healingRegistrar = SessionHealingRegistrar(
-            apiClient: apiClient,
-            reauthenticator: reauthenticator
-        )
+        self.registrar = PushDeviceRegistrar(brand: brand, api: apiClient, accounts: accountRepository,
+            credentials: pushCredentials, legacyReauthenticator: reauthenticator)
     }
 
     func saveToken(_ token: String) {
@@ -89,29 +84,10 @@ final class PushTokenRepository: PushTokenRepositoryProtocol {
         let accounts = accountRepository.getAllAccounts()
         for account in accounts {
             do {
-                // Routed through the self-heal registrar (WI-3 parity): a session-expired response
-                // triggers exactly one re-auth against the account's own https host + one retry.
-                let response = try await healingRegistrar.callKwHealing(
-                    account: account,
-                    model: "woow.fcm.device",
-                    method: "register_device",
-                    args: [],
-                    kwargs: [
-                        "fcm_token": token,
-                        "device_name": deviceName(),
-                        "platform": "ios"
-                    ]
-                )
-                // Persist the server-issued tenant id so future push notifications for
-                // this server can be routed to this account. Backward-compatible: an
-                // older plugin that returns no tenant id leaves the field untouched.
-                if let tenantId = Self.parseTenantId(from: response) {
-                    // 以 account.id 回寫：此處已握有剛註冊的那一筆帳號，
-                    // 用 serverUrl 查會在同 host 多 DB 時對應到多筆而無從辨識。
-                    accountRepository.setTenantId(tenantId, forAccountId: account.id)
-                }
+                // Registrar atomically validates identity/generation and commits status + tenant.
+                _ = try await registrar.register(account: account, token: token, deviceName: deviceName())
             } catch {
-                AppLogger.push.error("Failed to register token with \(account.serverUrl): \(error.localizedDescription, privacy: .public)")
+                AppLogger.push.error("Push registration failed: \(PushDeviceRegistrar.status(for: error).rawValue, privacy: .public)")
             }
         }
     }
@@ -142,15 +118,9 @@ final class PushTokenRepository: PushTokenRepositoryProtocol {
     private func unregisterOldTokenFromAllAccounts(_ oldToken: String) async {
         for account in accountRepository.getAllAccounts() {
             do {
-                _ = try await apiClient.callKw(
-                    serverUrl: account.fullServerUrl,
-                    model: "woow.fcm.device",
-                    method: "unregister_device",
-                    args: [],
-                    kwargs: ["fcm_token": oldToken]
-                )
+                try await registrar.unregister(account: account, token: oldToken)
             } catch {
-                AppLogger.push.error("Failed to unregister rotated token from \(account.serverUrl): \(error.localizedDescription, privacy: .public)")
+                AppLogger.push.error("Rotated push token cleanup failed: \(PushDeviceRegistrar.status(for: error).rawValue, privacy: .public)")
             }
         }
     }
@@ -161,17 +131,21 @@ final class PushTokenRepository: PushTokenRepositoryProtocol {
     func unregisterToken(for serverUrl: String) async {
         guard let token = getToken() else { return }
 
+        if registrar.brand == .woowtech {
+            do { try await registrar.unregisterLegacyURL(serverUrl, token: token) }
+            catch { AppLogger.push.error("Legacy push cleanup failed") }
+            return
+        }
+        // A URL-only caller cannot select an arbitrary same-host database/account.
+        let matches = accountRepository.getAllAccounts().filter { $0.fullServerUrl == serverUrl.ensureHTTPS }
+        guard matches.count == 1, let account = matches.first else {
+            AppLogger.push.warning("Push unregister refused: ambiguous or missing account")
+            return
+        }
         do {
-            _ = try await apiClient.callKw(
-                serverUrl: serverUrl,
-                model: "woow.fcm.device",
-                method: "unregister_device",
-                args: [],
-                kwargs: ["fcm_token": token]
-            )
-            AppLogger.push.info("Token unregistered from \(serverUrl)")
+            try await registrar.unregister(account: account, token: token)
         } catch {
-            AppLogger.push.error("Failed to unregister token from \(serverUrl): \(error.localizedDescription, privacy: .public)")
+            AppLogger.push.error("Push cleanup failed: \(PushDeviceRegistrar.status(for: error).rawValue, privacy: .public)")
         }
     }
 

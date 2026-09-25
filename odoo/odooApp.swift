@@ -14,10 +14,15 @@ struct odooApp: App {
 
     var body: some Scene {
         WindowGroup {
+            #if DEBUG && UNIT_TEST_HOST
+            // Do not construct business dependencies or start checkSession.
+            EmptyView()
+            #else
             AppRootView()
                 .onOpenURL { url in
                     handleIncomingURL(url)
                 }
+            #endif
         }
     }
 
@@ -28,7 +33,7 @@ struct odooApp: App {
     /// user's actual server. Relative `/web` paths are validated against the strict
     /// path regex inside `DeepLinkValidator.isValid`.
     private func handleIncomingURL(_ url: URL) {
-        guard url.scheme == "woowodoo" else { return }
+        guard AppBrand.current.acceptsScheme(url.scheme) else { return }
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let urlParam = components.queryItems?.first(where: { $0.name == "url" })?.value else {
             return

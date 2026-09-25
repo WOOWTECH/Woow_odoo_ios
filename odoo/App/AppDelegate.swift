@@ -12,12 +12,25 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        #if DEBUG && UNIT_TEST_HOST
+        // No Firebase, notification permission, APNs, or runtime test seeding.
+        precondition(URLProtocol.registerClass(OfflineUnitHostURLProtocol.self))
+        return true
+        #else
         #if DEBUG
         processTestLaunchArguments()
         #endif
 
         #if canImport(FirebaseCore)
-        FirebaseApp.configure()
+        guard let path = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist"),
+              let options = FirebaseOptions(contentsOfFile: path),
+              options.bundleID == AppBrand.current.bundleID,
+              let expectedProject = Bundle.main.object(forInfoDictionaryKey: "FirebaseExpectedProjectID") as? String,
+              !expectedProject.isEmpty,
+              options.projectID == expectedProject else {
+            fatalError("Missing or mismatched variant Firebase configuration")
+        }
+        FirebaseApp.configure(options: options)
         Messaging.messaging().delegate = self
         #endif
 
@@ -41,6 +54,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         application.registerForRemoteNotifications()
 
         return true
+        #endif
     }
 
     // MARK: - XCUITest Debug Hooks

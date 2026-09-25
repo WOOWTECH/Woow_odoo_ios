@@ -1,5 +1,4 @@
 /* App */
-"WoowTech Odoo" = "woowtech platform";
 
 /* Login */
 "Add New Account" = "Add New Account";
@@ -41,7 +40,7 @@
 "unlock_with" = "Unlock with";
 "Use PIN" = "Use PIN";
 "use_pin_button" = "Use PIN";
-"biometric_reason" = "Unlock woowtech platform";
+"biometric_reason" = "Unlock %@";
 "error_biometric_unavailable" = "Biometric authentication not available";
 "error_biometric_lockout" = "Too many attempts. Use PIN instead.";
 "error_biometric_failed" = "Authentication failed. Try again.";
@@ -125,7 +124,7 @@
 "notification_channel_messages" = "Odoo Messages";
 
 /* Location permission purpose (NSLocationWhenInUseUsageDescription — also shown in system prompt) */
-"NSLocationWhenInUseUsageDescription" = "woowtech platform records your location when you clock in or clock out so your Odoo attendance record includes the GPS coordinates of where you checked in. Location is sent only to your own Odoo server and never to third parties.";
+"NSLocationWhenInUseUsageDescription" = "%@ records your location when you clock in or clock out so your Odoo attendance record includes the GPS coordinates of where you checked in. Location is sent only to your own Odoo server and never to third parties.";
 
 /* Location permanent-deny banner */
 "location_denied_message" = "Location access is denied. Enable it in Settings to record GPS with clock-in.";
@@ -141,3 +140,16 @@
 "logout_stay_signed_in" = "You'll stay signed in to %@.";
 "logout_last_account_message" = "This is your last account — you'll return to the login screen.";
 "account_switched_to" = "Switched to %@";
+
+/* Account-scoped push registration; acknowledgement is not delivery. */
+"Push Registration" = "Push Registration";
+"Registration acknowledgement does not confirm notification delivery." = "Registration acknowledgement does not confirm notification delivery.";
+"push_status_not_registered" = "Not registered";
+"push_status_registering" = "Registering…";
+"push_status_acknowledged" = "Server acknowledged registration";
+"push_status_not_configured" = "Server has not configured Apporo push";
+"push_status_invalid_response" = "Server registration response could not be verified";
+"push_status_sign_in_required" = "Sign in again to configure push";
+"push_status_unavailable" = "Push registration temporarily unavailable";
+"error_session_setup" = "The server did not establish a valid sign-in session. Please try again.";
+"error_login_superseded" = "A newer account selection replaced this sign-in attempt.";

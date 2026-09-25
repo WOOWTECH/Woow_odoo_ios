@@ -99,7 +99,25 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     private var e2eProbeLabel: UILabel?
     #endif
 
-    init(serverUrl: String, onSessionExpired: @escaping () -> Void, isLoading: Binding<Bool>) {
+    /// Injectable so navigation-policy unit tests never launch another application.
+    private let openExternalURL: (URL) -> Void
+    private let brand: AppBrand.Code
+    private let pushCredentials: PushCredentialStorage
+    private let websiteDataStore: (String) -> WKWebsiteDataStore
+    /// Injection keeps consumer-chain unit tests off the network, including WebKit.
+    private let loadBaseRequest: (WKWebView, URLRequest) -> Void
+
+    init(serverUrl: String, onSessionExpired: @escaping () -> Void, isLoading: Binding<Bool>,
+         openExternalURL: @escaping (URL) -> Void = { UIApplication.shared.open($0) },
+         brand: AppBrand.Code = AppBrand.current.code,
+         pushCredentials: PushCredentialStorage = SecureStorage.shared,
+         websiteDataStore: @escaping (String) -> WKWebsiteDataStore = { OdooWebViewCoordinator.dataStore(forAccountId: $0) },
+         loadBaseRequest: @escaping (WKWebView, URLRequest) -> Void = { webView, request in webView.load(request) }) {
+        self.openExternalURL = openExternalURL
+        self.brand = brand
+        self.pushCredentials = pushCredentials
+        self.websiteDataStore = websiteDataStore
+        self.loadBaseRequest = loadBaseRequest
         self.onSessionExpired = onSessionExpired
         self._isLoading = isLoading
         self.currentServerUrl = serverUrl
@@ -180,15 +198,20 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         // Inject the target account's session cookie into ITS OWN data store before loading,
         // then load the base page. The deep link (if any) is applied load-gated in didFinish.
         let store = config.websiteDataStore
-        if let sessionId,
-           let host = URL(string: serverUrl)?.host,
-           let cookie = HTTPCookie(properties: [
-               .name: "session_id",
-               .value: sessionId,
-               .domain: host,
-               .path: "/",
-               .secure: "TRUE",
-           ]) {
+        let sessionCookie: HTTPCookie?
+        if brand == .apporo {
+            // UIViewRepresentable's apply/rebuild lifecycle is main-actor owned.
+            sessionCookie = MainActor.assumeIsolated {
+                pushCredentials.webSessionCookie(accountId: accountId,
+                    serverURL: serverUrl, database: database)
+            }
+        } else if let sessionId, let host = URL(string: serverUrl)?.host {
+            sessionCookie = HTTPCookie(properties: [.name: "session_id", .value: sessionId,
+                .domain: host, .path: "/", .secure: "TRUE"])
+        } else {
+            sessionCookie = nil
+        }
+        if let cookie = sessionCookie {
             store.httpCookieStore.setCookie(cookie) { [weak self] in
                 self?.loadBase(into: newWebView, serverUrl: serverUrl, database: database)
             }
@@ -208,7 +231,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         // Per-account isolated cookie/data store — account A's cookies can never load under
         // account B (P0 cross-tenant isolation). iOS 17+ gets a durable per-identifier store;
         // older OSes and legacy/empty account ids fall back to the shared default store.
-        config.websiteDataStore = Self.dataStore(forAccountId: accountId)
+        config.websiteDataStore = websiteDataStore(accountId)
 
         // Install the geolocation shim so it runs before any page JavaScript.
         if let shimURL = Bundle.main.url(forResource: "geolocation_shim", withExtension: "js"),
@@ -237,7 +260,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
 
     private func loadBase(into webView: WKWebView, serverUrl: String, database: String) {
         guard let url = Self.baseURL(serverUrl: serverUrl, database: database) else { return }
-        webView.load(URLRequest(url: url))
+        loadBaseRequest(webView, URLRequest(url: url))
     }
 
     // MARK: - Deep-link application
@@ -464,7 +487,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
             onSessionExpired()
             decisionHandler(.cancel)
         case .openInSafari(let url):
-            UIApplication.shared.open(url)
+            openExternalURL(url)
             decisionHandler(.cancel)
         case .cancel:
             decisionHandler(.cancel)

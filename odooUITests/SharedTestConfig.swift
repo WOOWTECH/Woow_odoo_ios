@@ -14,20 +14,34 @@ enum SharedTestConfig {
         return dict
     }()
 
-    /// The app's user-visible display name, as rendered in the LoginView title and
-    /// the MainView toolbar.
-    ///
-    /// Single source of truth so a rename does not silently rot a dozen XCUITest
-    /// selectors. It was hardcoded as "WoowTech Odoo" in 13 places across 7 files;
-    /// the 2026-09-17 rename to "woowtech platform" (AP-15) broke every one of them.
-    ///
-    /// Keep in sync with the `"WoowTech Odoo"` VALUE in
-    /// `odoo/Resources/*.lproj/Localizable.strings` — the key stays as the old name
-    /// because `LoginView`/`MainView` use the string literal as the localization key.
-    /// The brand wordmark is intentionally identical across all locales.
-    static let appDisplayName = ProcessInfo.processInfo.environment["TEST_APP_DISPLAY_NAME"]
-        ?? plist["AppDisplayName"] as? String
-        ?? "woowtech platform"
+    /// Identity comes from this test target's matching build configuration, not
+    /// a saved TestConfig.plist from a different brand or environment.
+    static let appDisplayName: String = {
+        guard let name = Bundle(for: BundleToken.self).object(forInfoDictionaryKey: "TestAppDisplayName") as? String,
+              !name.isEmpty else { fatalError("Missing test target brand configuration") }
+        return name
+    }()
+
+    static let appBundleID: String = {
+        guard let bundleID = Bundle(for: BundleToken.self).object(forInfoDictionaryKey: "TestAppBundleID") as? String,
+              !bundleID.isEmpty else { fatalError("Missing test target bundle configuration") }
+        return bundleID
+    }()
+
+    /// No plist/env fallback: an old test fixture must never launch another brand.
+    static let appURLScheme: String = {
+        guard let scheme = Bundle(for: BundleToken.self).object(forInfoDictionaryKey: "TestAppURLScheme") as? String else {
+            fatalError("Missing test target URL scheme configuration")
+        }
+        switch (appBundleID, scheme) {
+        case ("io.woowtech.odoo", "woowodoo"),
+             ("com.apporo.odoo.dev", "apporoodoo-dev"),
+             ("com.apporo.odoo", "apporoodoo"):
+            return scheme
+        default:
+            fatalError("Inconsistent test target URL scheme configuration")
+        }
+    }()
 
     static let serverURL = ProcessInfo.processInfo.environment["TEST_SERVER_URL"]
         ?? plist["ServerURL"] as? String

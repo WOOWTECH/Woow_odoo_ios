@@ -39,6 +39,11 @@ row platform=ios). Run the happy-path login first if the iOS row is missing.
 
 from __future__ import annotations
 
+from brand_test_target import block_legacy_live_e2e, require_authorized_target
+
+block_legacy_live_e2e()  # Must precede credential reads, optional imports and all side effects.
+TARGET = require_authorized_target()
+
 import os
 import plistlib
 import subprocess
@@ -166,7 +171,7 @@ def _ios_app_alive() -> bool:
     try:
         r = subprocess.run(["xcrun", "devicectl", "device", "info", "processes",
                             "--device", UDID], capture_output=True, text=True, timeout=40)
-        return "io.woowtech.odoo" in r.stdout
+        return TARGET.bundle_id in r.stdout
     except Exception:
         return True  # don't fail the whole test if devicectl is flaky; note in proof
 

@@ -1,5 +1,13 @@
 # AI Instructions — Woow Odoo iOS App
 
+## Apporo local brand layer — 2026-09-24 (NOT release-ready)
+
+Stage 2 adds build-selected Apporo identity while retaining target/module `odoo` and WOOW Debug/Release/scheme at 1.0 (3). `apporoodoo` uses ApporoDebug / ApporoRelease, 1.0 (1). `AppBrand` is the only UI identity provider. See `BrandResources/README.md` and `docs/2026-09-24-Apporo-Brand-Layer_{Implementation,Test}_Plan.md`.
+
+Stage 3 now adds a local Apporo capability/brand push adapter and account-scoped session credentials, with response-derived manual login and a single compound cap/write retry. Missing/invalid login SID fails closed before account/session mutation; valid login is not rejected for missing push capabilities. WOOW's legacy wire behavior remains. See `docs/2026-09-25-Apporo-Push_{Implementation,Test}_Plan.md` and `docs/2026-09-25-Apporo-Push_Verification.md`. This is uncommitted and awaits independent review and Swift build/runtime validation, not release-ready.
+
+Firebase configuration is ignored/protected and was not read in this round; signing/configuration readiness is not asserted. Do not run live Apporo login/push against the legacy backend. Only offline lightweight source/stdlib checks and Swift parse ran; heavy Xcode compile/unit/archive work is deferred to the parent sequence. Device/simulator/E2E and online writes remain unauthorized. WOOW Debug is not isolated and must not be installed. Legacy live E2E scripts remain fail-closed before side effects, with no bypass. Preserve UNIT_TEST_HOST, the default HTTP guard, injected mock transport, Safari DI and TestHookGate.
+
 ## Project Overview
 
 iOS port of the Woow Odoo Android companion app. Wraps Odoo ERP in WKWebView with native auth, FCM push, multi-account, biometric lock, and brand theming.

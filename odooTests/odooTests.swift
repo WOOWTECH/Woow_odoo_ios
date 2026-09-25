@@ -62,7 +62,7 @@ final class DomainModelTests: XCTestCase {
 
     func testAppSettingsDefaults() {
         let settings = AppSettings()
-        XCTAssertEqual(settings.themeColor, "#6183FC")
+        XCTAssertEqual(settings.themeColor, AppBrand.current.code == .apporo ? "#8B6B24" : "#6183FC")
         XCTAssertEqual(settings.themeMode, .system)
         XCTAssertFalse(settings.appLockEnabled)
         XCTAssertFalse(settings.pinEnabled)
@@ -720,7 +720,7 @@ final class SettingsViewModelTests: XCTestCase {
 
     func test_initialState_loadsSettings() {
         let vm = SettingsViewModel()
-        XCTAssertEqual(vm.settings.themeColor, "#6183FC") // default
+        XCTAssertEqual(vm.settings.themeColor, AppBrand.current.code == .apporo ? "#8B6B24" : "#6183FC") // default
     }
 
     func test_updateThemeColor_setsColorString() {

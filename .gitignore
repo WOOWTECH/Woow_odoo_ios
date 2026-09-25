@@ -44,3 +44,7 @@ _bmad-output/
 # P5: TestConfig.plist contains live tunnel URLs and credentials — never commit.
 # Operators copy TestConfig.plist.example → TestConfig.plist and fill in values.
 odooUITests/TestConfig.plist
+
+# Brand-specific Firebase client files are injected locally, never fabricated.
+BrandResources/Firebase/
+Config/ApporoFirebase.local.xcconfig

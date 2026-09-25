@@ -6,7 +6,7 @@ enum WoowColors {
 
     // MARK: - Brand Colors
 
-    static let primaryBlue = Color(hex: "#6183FC")
+    static let primaryBlue = Color(hex: AppBrand.current.primaryColorHex)
     static let brandWhite = Color.white
     static let lightGray = Color(hex: "#EFF1F5")
     static let gray = Color(hex: "#646262")
@@ -27,7 +27,7 @@ enum WoowColors {
 
     /// All brand colors for the color picker (5 brand + 10 accent).
     static let brandColors: [String] = [
-        "#6183FC", "#FFFFFF", "#EFF1F5", "#646262", "#212121"
+        AppBrand.current.primaryColorHex, "#FFFFFF", "#EFF1F5", "#646262", "#212121"
     ]
 
     static let accentColors: [String] = [

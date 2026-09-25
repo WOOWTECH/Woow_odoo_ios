@@ -18,7 +18,12 @@ import subprocess
 import sys
 import time
 
-PKG = "io.woowtech.odoo"
+from pathlib import Path
+from brand_test_target import require_authorized_target
+from brand_verification import load_brand_settings, selected_firebase_path, verify_provider_color, verify_firebase_identity
+
+TARGET = require_authorized_target()
+PKG = TARGET.bundle_id
 PASS = 0
 FAIL = 0
 RESULTS = []
@@ -181,7 +186,7 @@ check("iV03a-M1", "App survives background→foreground cycle", still_running)
 # ═══════════════════════════════════════════════════════════
 section("iV04-M1: Bundle Configuration")
 
-check("iV04a-M1", f"Bundle ID is {PKG}", PKG == "io.woowtech.odoo")
+check("iV04a-M1", f"Bundle ID is {PKG}", PKG == TARGET.bundle_id)
 
 # Check app container exists (proves bundle ID is correct)
 container = get_app_info(udid)
@@ -196,7 +201,8 @@ section("iV05-M1: Domain Models (Build Verification)")
 # Run unit tests to verify models
 test_result = subprocess.run(
     ["xcodebuild", "-project", f"{sys.path[0]}/../odoo.xcodeproj",
-     "-scheme", "odoo",
+     "-scheme", TARGET.scheme,
+     "-configuration", TARGET.configuration,
      "-destination", f"platform=iOS Simulator,id={udid}",
      "-only-testing:odooTests",
      "test"],
@@ -241,14 +247,18 @@ for test_name in security_tests:
 # ═══════════════════════════════════════════════════════════
 section("iV07-M1: Brand Colors")
 
-# Verify by checking the Swift source file exists and contains correct hex values
+# Static source checks are configuration-selected, not proof of compiled UI.
+brand_root = Path(__file__).resolve().parents[1]
+brand_settings = load_brand_settings(brand_root, TARGET.configuration)
 import os
 colors_file = os.path.join(sys.path[0], "..", "odoo", "UI", "Theme", "WoowColors.swift")
 if os.path.exists(colors_file):
     with open(colors_file) as f:
         content = f.read()
     check("iV07a-M1", "WoowColors.swift exists", True)
-    check("iV07b-M1", "Primary Blue #6183FC defined", "#6183FC" in content)
+    provider = (brand_root / "odoo/App/AppBrand.swift").read_text()
+    check("iV07b-M1", f"{TARGET.configuration} provider primary color and theme wiring",
+          verify_provider_color(TARGET.configuration, brand_settings, provider, content))
     check("iV07c-M1", "10 accent colors defined", content.count("accent") >= 10 or content.count("Accent") >= 10)
 else:
     check("iV07a-M1", "WoowColors.swift exists", False)
@@ -412,9 +422,18 @@ check("iV34b-M6", "AppDelegate shows banner in foreground (UX-46)", ".banner" in
 check("iV35-M6", "PushTokenRepository registers with platform=ios",
       '"ios"' in open(os.path.join(repo_dir, "odoo/Data/Push/PushTokenRepository.swift")).read())
 
-# Check GoogleService-Info.plist exists
-plist = os.path.join(repo_dir, "odoo", "GoogleService-Info.plist")
-check("iV36-M6", "GoogleService-Info.plist exists", os.path.exists(plist))
+# Inspect only non-secret identifiers from the selected configuration's plist.
+# Missing config/fields are FAIL, never satisfied by the legacy WOOW source.
+firebase_path = selected_firebase_path(brand_root, brand_settings)
+firebase_identity = {}
+if firebase_path.is_file():
+    for key in ("BUNDLE_ID", "PROJECT_ID", "GOOGLE_APP_ID", "GCM_SENDER_ID"):
+        field = subprocess.run(["/usr/bin/plutil", "-extract", key, "raw", "-o", "-", str(firebase_path)],
+                               capture_output=True, text=True)
+        if field.returncode == 0:
+            firebase_identity[key] = field.stdout.strip()
+check("iV36-M6", f"{TARGET.configuration} Firebase path and non-secret identity match",
+      verify_firebase_identity(TARGET.configuration, brand_settings, brand_root, firebase_path, firebase_identity))
 
 
 # ═══════════════════════════════════════════════════════════

@@ -88,7 +88,7 @@ struct ColorPickerView: View {
 
 #Preview {
     ColorPickerView(
-        selectedColor: .constant("#6183FC"),
+        selectedColor: .constant(AppSettings.defaultThemeColor),
         onApply: { _ in }
     )
 }

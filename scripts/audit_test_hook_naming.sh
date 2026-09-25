@@ -19,7 +19,7 @@
 #   - binary side : every registered hook is absent from Release
 #
 # Usage: scripts/audit_test_hook_naming.sh
-# Exit:  0 = clean, 1 = violation found
+# Exit:  0 = clean, 1 = violation found, other nonzero = scan/tool failure
 
 set -euo pipefail
 
@@ -39,7 +39,30 @@ KNOWN_HOOKS=(
     "WOOW_TEST_FORCE_PIN"
     "WOOW_TEST_AUTOTAP"
     "WOOW_SEED_ACCOUNT"
+    "WOOW_SEED_ACCOUNTS"
+    "WOOW_TEST_NOTIFICATION_TAP"
+    "WOOW_TEST_NOTIFICATION_TAP_MODE"
 )
+
+# A missing root is an audit failure, not an empty source tree.
+if [ ! -d odoo ]; then
+    echo "❌ FAIL — source directory missing: odoo/" >&2
+    exit 2
+fi
+
+# grep: 0 = match, 1 = no match, anything else = incomplete/untrusted scan.
+# Check each invocation separately: pipelines with `|| true` hide read errors,
+# including a readable match followed by an unreadable file/directory.
+# Keep stderr visible and propagate failures before any PASS can be printed.
+checked_grep() {
+    local status=0
+    grep "$@" || status=$?
+    case "$status" in
+        0|1) return 0 ;;
+        *) echo "❌ FAIL — source audit grep failed (exit $status)" >&2
+           return "$status" ;;
+    esac
+}
 
 violations=0
 
@@ -47,8 +70,8 @@ violations=0
 # Check 1 — every WOOW_TEST_*/WOOW_SEED_* reference in source must be
 # a registered hook. Catches "added a hook but forgot to register it".
 # ---------------------------------------------------------------------
-referenced=$(grep -rhoE 'WOOW_(TEST|SEED)_[A-Z_][A-Z0-9_]*' odoo/ \
-    | sort -u || true)
+referenced=$(checked_grep -rhoE 'WOOW_(TEST|SEED)_[A-Z_][A-Z0-9_]*' odoo/)
+referenced=$(printf '%s\n' "$referenced" | sort -u)
 
 for token in $referenced; do
     found=0
@@ -71,9 +94,8 @@ done
 # allowed prefixes. Catches non-conforming names like ODOO_TUNNEL,
 # DEBUG_X, INTERNAL_FOO.
 # ---------------------------------------------------------------------
-nonconforming=$(grep -rhnE 'ProcessInfo\.processInfo\.environment\["[^"]+"\]' odoo/ \
-    | grep -vE 'environment\["WOOW_(TEST|SEED)_' \
-    || true)
+nonconforming=$(checked_grep -rhnE 'ProcessInfo\.processInfo\.environment\["[^"]+"\]' odoo/)
+nonconforming=$(printf '%s\n' "$nonconforming" | checked_grep -vE 'environment\["WOOW_(TEST|SEED)_')
 
 if [ -n "$nonconforming" ]; then
     echo "❌ FAIL — env-var lookup with non-conforming prefix:"
@@ -85,9 +107,8 @@ if [ -n "$nonconforming" ]; then
 fi
 
 # Same check for the `env[...]` pattern (after `let env = ProcessInfo...`)
-nonconforming_env=$(grep -rhnE '[^a-zA-Z_]env\["[^"]+"\]' odoo/ \
-    | grep -vE 'env\["WOOW_(TEST|SEED)_' \
-    || true)
+nonconforming_env=$(checked_grep -rhnE '[^a-zA-Z_]env\["[^"]+"\]' odoo/)
+nonconforming_env=$(printf '%s\n' "$nonconforming_env" | checked_grep -vE 'env\["WOOW_(TEST|SEED)_')
 
 if [ -n "$nonconforming_env" ]; then
     echo "❌ FAIL — env[...] lookup with non-conforming prefix:"

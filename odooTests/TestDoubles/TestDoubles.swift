@@ -121,35 +121,52 @@ final class MockSecureStorage: SecureStorageProtocol, @unchecked Sendable {
 /// on a detached `Task`, so `onRegister` lets a test `fulfill` an expectation and await it
 /// deterministically.
 final class MockPushTokenRepository: PushTokenRepositoryProtocol, @unchecked Sendable {
+    // Non-isolated async protocol calls can execute concurrently even when the test is
+    // @MainActor. Protect every mutable field; @unchecked Sendable alone is not a lock.
+    private let lock = NSLock()
+    private var token: String?
+    private var registrations: [String] = []
+    private var unregistrations: [String] = []
+    private var registrationCallback: (@Sendable () -> Void)?
 
-    /// The token returned by `getToken()`. Set this to simulate a token Firebase already
-    /// delivered (possibly BEFORE any account existed — the AC8.b race).
-    var storedToken: String?
+    var storedToken: String? {
+        get { synchronized { token } }
+        set { synchronized { token = newValue } }
+    }
 
-    /// Every token passed to `registerTokenWithAllAccounts`, in call order.
-    private(set) var registeredTokens: [String] = []
+    /// Snapshots ordered by the lock's serialization of calls.
+    var registeredTokens: [String] { synchronized { registrations } }
+    var unregisteredServerUrls: [String] { synchronized { unregistrations } }
 
-    /// Every server URL passed to `unregisterToken(for:)`, in call order.
-    private(set) var unregisteredServerUrls: [String] = []
-
-    /// Invoked at the end of each `registerTokenWithAllAccounts` call so a test can
-    /// fulfill an `XCTestExpectation` and await the detached reconcile Task.
-    var onRegister: (@Sendable () -> Void)?
+    var onRegister: (@Sendable () -> Void)? {
+        get { synchronized { registrationCallback } }
+        set { synchronized { registrationCallback = newValue } }
+    }
 
     init(storedToken: String? = nil) {
-        self.storedToken = storedToken
+        token = storedToken
+    }
+
+    private func synchronized<T>(_ body: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
     }
 
     func saveToken(_ token: String) { storedToken = token }
-
     func getToken() -> String? { storedToken }
 
     func registerTokenWithAllAccounts(_ token: String) async {
-        registeredTokens.append(token)
-        onRegister?()
+        let callback = synchronized {
+            registrations.append(token)
+            return registrationCallback
+        }
+        // A callback may re-enter the mock. Invoke it after releasing the lock, but
+        // only after publishing the corresponding registration to snapshot readers.
+        callback?()
     }
 
     func unregisterToken(for serverUrl: String) async {
-        unregisteredServerUrls.append(serverUrl)
+        synchronized { unregistrations.append(serverUrl) }
     }
 }

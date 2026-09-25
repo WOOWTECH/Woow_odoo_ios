@@ -1,0 +1,15 @@
+#include "Shared.xcconfig"
+APP_BRAND = apporo
+APP_DISPLAY_NAME = Apporo platform
+PRODUCT_BUNDLE_IDENTIFIER = com.apporo.odoo
+APP_URL_SCHEME = apporoodoo
+CURRENT_PROJECT_VERSION = 1
+ASSETCATALOG_COMPILER_APPICON_NAME = ApporoAppIcon
+ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = ApporoAccentColor
+CODE_SIGN_ENTITLEMENTS = odoo/odoo-Release.entitlements
+BRAND_RELEASE_AUDIT = YES
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = 
+FIREBASE_CONFIG_PATH = $(SRCROOT)/BrandResources/Firebase/ApporoRelease/GoogleService-Info.plist
+FIREBASE_EXPECTED_PROJECT_ID = 
+// Set the verified project ID only after the owner provisions Firebase. No fallback.
+#include? "ApporoFirebase.local.xcconfig"

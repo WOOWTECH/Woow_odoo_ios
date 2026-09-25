@@ -25,7 +25,7 @@
 ## 最小檔案
 
 新增 `odoo/App/OfflineUnitHost.swift`、`odooTests/OfflineUnitHostTests.swift`、`scripts/tests/test_offline_unit_host.py`。
-修改 `odoo/App/AppDelegate.swift`、`odoo/odooApp.swift`、`odoo/Data/API/OdooAPIClient.swift`、`odoo/UI/Main/OdooWebView.swift`、`odooTests/MissingTests.swift`，以及本次兩份計畫。
+修改 `odoo/App/AppDelegate.swift`、`odoo/odooApp.swift`、`odoo/Data/API/OdooAPIClient.swift`、`odoo/UI/Main/OdooWebView.swift`、`odooTests/MissingTests.swift`，以及本次兩份計畫。既有 `scripts/tests/test_brand_layer.py` 的全檔 baseline 比對只排除精確的離線 root 分支，繼續逐字驗一般業務路徑；不放寬 validator/FCM 原契約。
 
 ## 非本案驗收
 

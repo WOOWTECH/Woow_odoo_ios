@@ -15,6 +15,11 @@ Prerequisites:
 
 Usage: python3 scripts/e2e-fcm-test.py
 """
+
+from brand_test_target import block_legacy_live_e2e, require_authorized_target
+
+block_legacy_live_e2e()  # Must precede credential reads, optional imports and all side effects.
+TARGET = require_authorized_target()
 import json
 import os
 import subprocess
@@ -32,7 +37,7 @@ ADMIN_PASS = "admin"
 # Test user (used as sender so admin receives the FCM push)
 TEST_USER = "test@woowtech.com"
 TEST_PASS = "test1234"
-BUNDLE_ID = "io.woowtech.odoo.debug"
+BUNDLE_ID = TARGET.bundle_id
 SS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs", "verification-report", "screenshots-ios")
 STEPS = []
 N = 0
@@ -107,7 +112,8 @@ def run_xcuitest(test_class_method, timeout=120):
     cmd = [
         "xcodebuild", "test",
         "-project", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "odoo.xcodeproj"),
-        "-scheme", "odoo",
+        "-scheme", TARGET.scheme,
+        "-configuration", TARGET.configuration,
         "-destination", "platform=iOS,name=Alan 的 iPhone",
         "-only-testing", f"odooUITests/{test_class_method}",
         "-allowProvisioningUpdates",

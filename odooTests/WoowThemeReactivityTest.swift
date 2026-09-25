@@ -27,7 +27,7 @@ final class WoowThemeReactivityTest: XCTestCase {
     /// fails here because a prior failed run can leave SecureStorage
     /// polluted, so the captured "original" is already wrong.
     /// CLAUDE.md "Test Independence" rule.
-    private static let defaultThemeColor = "#6183FC"
+    private static let defaultThemeColor = AppBrand.current.code == .apporo ? "#8B6B24" : "#6183FC"
 
     override func setUp() async throws {
         try await super.setUp()

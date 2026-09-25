@@ -108,7 +108,8 @@ final class LogoutUnregisterURLTests: XCTestCase {
         repo = AccountRepository(
             persistence: persistence,
             secureStorage: secureStorage,
-            apiClient: apiClient
+            apiClient: apiClient,
+            brand: .woowtech
         )
 
         // Seed a LOCAL FCM token so `unregisterFcmToken` does NOT early-return — this is what makes

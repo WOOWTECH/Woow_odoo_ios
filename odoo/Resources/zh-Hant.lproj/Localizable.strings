@@ -1,5 +1,4 @@
 /* App */
-"WoowTech Odoo" = "woowtech platform";
 
 /* Login */
 "Add New Account" = "新增帳號";
@@ -41,7 +40,7 @@
 "unlock_with" = "使用";
 "Use PIN" = "使用 PIN 碼";
 "use_pin_button" = "使用 PIN 碼";
-"biometric_reason" = "解鎖 woowtech platform";
+"biometric_reason" = "解鎖 %@";
 "error_biometric_unavailable" = "生物辨識認證不可用";
 "error_biometric_lockout" = "嘗試次數過多，請使用 PIN 碼";
 "error_biometric_failed" = "認證失敗，請重試";
@@ -87,7 +86,7 @@
 
 /* Settings -- Language */
 "Language" = "語言";
-"Change language in iOS Settings" = "前往 設定 > woowtech platform > 語言 變更語言";
+"Change language in iOS Settings" = "前往 設定 > %@ > 語言 變更語言";
 
 /* Settings -- Help & Support */
 "Help & Support" = "說明與支援";
@@ -125,7 +124,7 @@
 "notification_channel_messages" = "Odoo 訊息";
 
 /* Location permission purpose */
-"NSLocationWhenInUseUsageDescription" = "woowtech platform 會在您打卡上下班時記錄您的位置，以便您的 Odoo 出勤紀錄包含打卡時的 GPS 座標。位置資訊僅傳送至您自己的 Odoo 伺服器，絕不會傳送給第三方。";
+"NSLocationWhenInUseUsageDescription" = "%@ 會在您打卡上下班時記錄您的位置，以便您的 Odoo 出勤紀錄包含打卡時的 GPS 座標。位置資訊僅傳送至您自己的 Odoo 伺服器，絕不會傳送給第三方。";
 
 /* Location permanent-deny banner */
 "location_denied_message" = "位置存取已被拒絕。請在設定中啟用，以在打卡時記錄 GPS。";
@@ -141,3 +140,16 @@
 "logout_stay_signed_in" = "你將維持登入 %@。";
 "logout_last_account_message" = "這是你最後一個帳號 —— 將返回登入畫面。";
 "account_switched_to" = "已切換至 %@";
+
+/* Account-scoped push registration; acknowledgement is not delivery. */
+"Push Registration" = "推播註冊";
+"Registration acknowledgement does not confirm notification delivery." = "伺服器確認註冊不代表通知已送達。";
+"push_status_not_registered" = "尚未註冊";
+"push_status_registering" = "註冊中⋯";
+"push_status_acknowledged" = "伺服器已確認註冊";
+"push_status_not_configured" = "伺服器尚未設定 Apporo 推播";
+"push_status_invalid_response" = "無法驗證伺服器的註冊回應";
+"push_status_sign_in_required" = "請重新登入以設定推播";
+"push_status_unavailable" = "推播註冊暫時無法使用";
+"error_session_setup" = "伺服器未建立有效的登入工作階段，請再試一次。";
+"error_login_superseded" = "較新的帳號選擇已取代此次登入。";

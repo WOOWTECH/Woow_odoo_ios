@@ -238,7 +238,7 @@ final class E2E_WebViewTests: XCTestCase {
     // UX-26: WebView blocks navigation to external host via deep link
     // ──────────────────────────────────────────────────────
 
-    /// Verifies that a `woowodoo://open?url=https://evil.com/test` deep link is silently
+    /// Verifies that a selected-brand external-host deep link is silently
     /// rejected by DeepLinkValidator and does not navigate the WebView to an external host.
     /// The app remains in the foreground and the WebView is still present.
     ///
@@ -261,7 +261,7 @@ final class E2E_WebViewTests: XCTestCase {
         }
 
         // Send a deep link with an external host that DeepLinkValidator must reject
-        guard let badURL = URL(string: "woowodoo://open?url=https://evil.com/test") else {
+        guard let badURL = URL(string: "\(SharedTestConfig.appURLScheme)://open?url=https://evil.com/test") else {
             XCTFail("UX-26: Could not construct the bad deep link URL")
             return
         }
@@ -326,7 +326,7 @@ final class E2E_WebViewTests: XCTestCase {
 
         // Send a deep link with an external host URL. Our app must reject it
         // (DeepLinkValidator blocks non-Odoo-server hosts).
-        guard let externalURL = URL(string: "woowodoo://open?url=https://example.com/page") else {
+        guard let externalURL = URL(string: "\(SharedTestConfig.appURLScheme)://open?url=https://example.com/page") else {
             XCTFail("UX-27: Could not construct deep link URL")
             return
         }

@@ -1,0 +1,6 @@
+"CFBundleDisplayName" = "Apporo platform";
+"CFBundleName" = "Apporo platform";
+"NSCameraUsageDescription" = "Apporo platform needs camera access to upload photos in Odoo.";
+"NSFaceIDUsageDescription" = "Apporo platform uses Face ID to secure access to your Odoo account data.";
+"NSLocationWhenInUseUsageDescription" = "Apporo platform records your location when you clock in or clock out so your Odoo attendance record includes the GPS coordinates of where you checked in. Location is sent only to your own Odoo server and never to third parties.";
+"NSPhotoLibraryUsageDescription" = "Apporo platform needs photo library access to upload images in Odoo.";

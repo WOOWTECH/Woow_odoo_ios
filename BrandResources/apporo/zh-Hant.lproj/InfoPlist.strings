@@ -1,0 +1,6 @@
+"CFBundleDisplayName" = "Apporo platform";
+"CFBundleName" = "Apporo platform";
+"NSCameraUsageDescription" = "Apporo platform 需要使用相機，以便在 Odoo 中上傳照片。";
+"NSFaceIDUsageDescription" = "Apporo platform 使用 Face ID 來保護您的 Odoo 帳號資料。";
+"NSLocationWhenInUseUsageDescription" = "Apporo platform 會在您打卡上下班時記錄您的位置，以便您的 Odoo 出勤紀錄包含打卡時的 GPS 座標。位置資訊僅傳送至您自己的 Odoo 伺服器，絕不會傳送給第三方。";
+"NSPhotoLibraryUsageDescription" = "Apporo platform 需要存取照片圖庫，以便在 Odoo 中上傳圖片。";

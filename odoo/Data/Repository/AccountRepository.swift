@@ -30,15 +30,21 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
     private let persistence: PersistenceController
     private let secureStorage: SecureStorage
     private let apiClient: OdooAPIClient
+    private let brand: AppBrand.Code
+    private let pushCredentials: PushCredentialStorage
 
     init(
         persistence: PersistenceController = .shared,
         secureStorage: SecureStorage = .shared,
-        apiClient: OdooAPIClient = OdooAPIClient()
+        apiClient: OdooAPIClient = OdooAPIClient(),
+        brand: AppBrand.Code = AppBrand.current.code,
+        pushCredentials: PushCredentialStorage = SecureStorage.shared
     ) {
         self.persistence = persistence
         self.secureStorage = secureStorage
         self.apiClient = apiClient
+        self.brand = brand
+        self.pushCredentials = pushCredentials
         migratePasswordKeysIfNeeded()
     }
 
@@ -54,13 +60,27 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         // Auto-prefix https
         let fullUrl = serverUrl.ensureHTTPS
 
-        let result = await apiClient.authenticate(
-            serverUrl: fullUrl, database: database, username: username, password: password
-        )
+        let attempt = brand == .apporo ? await PushManualLoginOrder.begin() : nil
+        let result: AuthResult
+        if brand == .apporo {
+            result = await apiClient.authenticatePushSession(
+                serverUrl: fullUrl, database: database, username: username, password: password)
+        } else {
+            result = await apiClient.authenticate(
+                serverUrl: fullUrl, database: database, username: username, password: password)
+        }
 
         if case .success(let auth) = result {
             let context = persistence.container.viewContext
-            await MainActor.run {
+            let rejection = await MainActor.run { () -> AuthResult? in
+                if let attempt, !PushManualLoginOrder.isCurrent(attempt) {
+                    return .error(String(localized: "error_login_superseded"), .unknown)
+                }
+                // A short-lived response cookie may expire while waiting to commit.
+                let cookie = auth.sessionCookie?.cookie()
+                if brand == .apporo && cookie == nil {
+                    return .error(String(localized: "error_session_setup"), .serverError)
+                }
                 // Deactivate all existing accounts
                 let allRequest = OdooAccountEntity.fetchAllRequest()
                 if let existing = try? context.fetch(allRequest) {
@@ -93,7 +113,26 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
                 }
 
                 try? context.save()
+                if brand == .apporo,
+                   let saved = getAllAccounts().first(where: {
+                       $0.fullServerUrl == fullUrl && $0.database == database && $0.username == username && $0.isActive
+                   }) {
+                    pushCredentials.savePushCredential(PushCredential(account: saved, password: password,
+                                                                       sessionId: auth.sessionId, sessionCookie: auth.sessionCookie))
+                    PushRegistrationStatusStore.shared.set(.notRegistered, for: saved.id)
+                    // Keep legacy UI credentials in the same winning-login transaction.
+                    secureStorage.savePassword(serverUrl: fullUrl, username: username, password: password)
+                    secureStorage.saveSessionId(serverUrl: fullUrl, username: username, sessionId: auth.sessionId)
+                    // Only the winning manual login publishes to the legacy WebView jar.
+                    // Push healing uses the isolated response SID without publishing it.
+                    if let cookie {
+                        HTTPCookieStorage.shared.setCookie(cookie)
+                    }
+                }
+                return nil
             }
+            if let rejection { return rejection }
+            if brand == .apporo { return result }
 
             // Save password in Keychain, scoped to this server + username
             secureStorage.savePassword(serverUrl: fullUrl, username: username, password: password)
@@ -173,7 +212,10 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         let saved = (try? context.save()) != nil
         // Broadcast so MainViewModel reloads the WebView onto the newly active account (the fast,
         // synchronous switch used on a notification deep-link tap).
-        if saved { NotificationCenter.default.post(name: .activeAccountDidChange, object: nil) }
+        if saved {
+            if brand == .apporo { MainActor.assumeIsolated { PushManualLoginOrder.invalidate() } }
+            NotificationCenter.default.post(name: .activeAccountDidChange, object: nil)
+        }
         return saved
     }
 
@@ -219,6 +261,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
     /// Switches to the specified account after validating the session.
     /// Re-authenticates with stored password if the session cookie is expired. (G8)
     func switchAccount(id: String) async -> Bool {
+        if brand == .apporo { return await switchApporoAccount(id: id) }
         let context = persistence.container.viewContext
         let allRequest = OdooAccountEntity.fetchAllRequest()
         guard let all = try? context.fetch(allRequest) else { return false }
@@ -252,6 +295,50 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         return saved
     }
 
+    /// Selection and manual login share an order and transaction owner. Never borrow
+    /// host-keyed credentials: they cannot identify the selected database/account.
+    @MainActor
+    private func switchApporoAccount(id: String) async -> Bool {
+        let attempt = PushManualLoginOrder.begin()
+        guard let account = getAllAccounts().first(where: { $0.id == id }),
+              let captured = pushCredentials.pushCredential(accountId: id),
+              captured.matches(account) else { return false }
+
+        let selected: PushCredential
+        if !captured.password.isEmpty {
+            let result = await apiClient.authenticatePushSession(serverUrl: account.fullServerUrl,
+                database: account.database, username: account.username, password: captured.password)
+            guard case .success(let auth) = result,
+                  account.userId == nil || account.userId == auth.userId else { return false }
+            selected = PushCredential(account: account, password: captured.password,
+                sessionId: auth.sessionId, sessionCookie: auth.sessionCookie)
+        } else {
+            selected = captured
+        }
+
+        // No suspension from revalidation through active/credential/cookie publication.
+        let context = persistence.container.viewContext
+        guard PushManualLoginOrder.isCurrent(attempt),
+              let all = try? context.fetch(OdooAccountEntity.fetchAllRequest()),
+              let target = all.first(where: { $0.id == id }),
+              captured.matches(target.toDomainModel()),
+              pushCredentials.pushCredential(accountId: id)?.generation == captured.generation,
+              let cookie = selected.sessionCookie?.cookie(),
+              !selected.sessionId.isEmpty, cookie.value == selected.sessionId else { return false }
+        all.forEach { $0.isActive = false }
+        target.isActive = true
+        guard (try? context.save()) != nil else { return false }
+        pushCredentials.savePushCredential(selected)
+        if selected.generation != captured.generation {
+            PushRegistrationStatusStore.shared.set(.notRegistered, for: id)
+        }
+        secureStorage.saveSessionId(serverUrl: account.fullServerUrl,
+            username: account.username, sessionId: selected.sessionId)
+        HTTPCookieStorage.shared.setCookie(cookie)
+        NotificationCenter.default.post(name: .activeAccountDidChange, object: nil)
+        return true
+    }
+
     /// Honest logout (FCM token-lifecycle S4 / AC9): logging out an account must leave **no trace**
     /// of it that a later reconcile could resurrect.
     ///
@@ -269,6 +356,10 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
     /// This is deliberately minimal — there is no pruning counter or state machine (that was the
     /// abandoned option-A machinery). Honest row removal is the whole story.
     func logout(accountId: String? = nil) async {
+        if brand == .apporo {
+            await removeApporoAccount(id: accountId, logout: true)
+            return
+        }
         let context = persistence.container.viewContext
         let account: OdooAccountEntity?
 
@@ -279,15 +370,18 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         }
 
         guard let account else { return }
+        if brand == .apporo { await PushManualLoginOrder.invalidate() }
         let wasActive = account.isActive
 
         // Unregister FCM token from THIS account's server (G9 — best-effort, never blocks logout).
-        await unregisterFcmToken(serverUrl: account.serverUrl)
+        await unregisterFcmToken(account: account.toDomainModel())
 
         await apiClient.clearCookies(for: account.serverUrl)
         secureStorage.deletePassword(serverUrl: account.serverUrl, username: account.username)
         // Delete the Keychain session_id copy so the session cannot be reused after logout.
         secureStorage.deleteSessionId(serverUrl: account.serverUrl, username: account.username)
+        await pushCredentials.deletePushCredential(accountId: account.id)
+        await PushRegistrationStatusStore.shared.remove(accountId: account.id)
         context.delete(account)
         try? context.save()
 
@@ -311,13 +405,21 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
     }
 
     func removeAccount(id: String) async {
+        if brand == .apporo {
+            await removeApporoAccount(id: id, logout: false)
+            return
+        }
         let context = persistence.container.viewContext
         guard let entity = (try? context.fetch(OdooAccountEntity.fetchByIdRequest(id: id)))?.first else { return }
 
+        if brand == .apporo { await PushManualLoginOrder.invalidate() }
         // Unregister FCM token from Odoo server (G9)
-        await unregisterFcmToken(serverUrl: entity.serverUrl)
+        await unregisterFcmToken(account: entity.toDomainModel())
 
         secureStorage.deletePassword(serverUrl: entity.serverUrl, username: entity.username)
+        secureStorage.deleteSessionId(serverUrl: entity.serverUrl, username: entity.username)
+        await pushCredentials.deletePushCredential(accountId: entity.id)
+        await PushRegistrationStatusStore.shared.remove(accountId: entity.id)
         context.delete(entity)
         try? context.save()
 
@@ -325,6 +427,50 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         let remaining = (try? context.fetch(OdooAccountEntity.fetchAllRequest())) ?? []
         if remaining.isEmpty {
             secureStorage.deleteFcmToken()
+        }
+    }
+
+    /// Remove local state before suspending for best-effort remote cleanup. This
+    /// shares MainActor with manual commit and healer CAS, across all instances.
+    private func removeApporoAccount(id: String?, logout: Bool) async {
+        let captured = await MainActor.run { () -> (OdooAccount, PushCredential?, String?)? in
+            let context = persistence.container.viewContext
+            let request = id.map { OdooAccountEntity.fetchByIdRequest(id: $0) } ?? OdooAccountEntity.fetchActiveRequest()
+            guard let entity = (try? context.fetch(request))?.first else { return nil }
+            PushManualLoginOrder.invalidate()
+            let account = entity.toDomainModel()
+            let credential = pushCredentials.pushCredential(accountId: account.id)
+            let token = secureStorage.getFcmToken()
+            pushCredentials.deletePushCredential(accountId: account.id)
+            PushRegistrationStatusStore.shared.remove(accountId: account.id)
+            secureStorage.deletePassword(serverUrl: account.serverUrl, username: account.username)
+            secureStorage.deleteSessionId(serverUrl: account.serverUrl, username: account.username)
+            if logout, let cookie = credential?.sessionCookie?.cookie() {
+                // Never clear another account's same-host jar cookie.
+                for existing in HTTPCookieStorage.shared.cookies ?? [] where
+                    existing.name == cookie.name && existing.domain == cookie.domain &&
+                    existing.path == cookie.path && existing.value == cookie.value {
+                    HTTPCookieStorage.shared.deleteCookie(existing)
+                }
+            }
+            context.delete(entity)
+            try? context.save()
+            let remaining = (try? context.fetch(OdooAccountEntity.fetchAllRequest())) ?? []
+            if remaining.isEmpty { secureStorage.deleteFcmToken() }
+            else if logout && (account.isActive || !remaining.contains(where: { $0.isActive })) {
+                remaining.forEach { $0.isActive = false }
+                remaining.first?.isActive = true
+                try? context.save()
+                NotificationCenter.default.post(name: .activeAccountDidChange, object: nil)
+            }
+            return (account, credential, token)
+        }
+        guard let (account, credential, token) = captured, let credential, let token else { return }
+        do {
+            try await PushDeviceRegistrar(brand: brand, api: apiClient, accounts: self,
+                credentials: pushCredentials).unregister(account: account, token: token, capturedCredential: credential)
+        } catch {
+            AppLogger.push.error("FCM unregister failed: \(PushDeviceRegistrar.status(for: error).rawValue, privacy: .public)")
         }
     }
 
@@ -337,25 +483,17 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
     /// produced `https://https://…` — a malformed URL that made every unregister throw and get
     /// swallowed, leaving the logged-out tenant's device row active. `ensureHTTPS` is idempotent, so
     /// it fixes the double-prefix without breaking a rare non-prefixed value.
-    private func unregisterFcmToken(serverUrl: String) async {
+    private func unregisterFcmToken(account: OdooAccount) async {
         guard let token = secureStorage.getFcmToken() else {
-            // Not an error, but must not be silent — a missing local token means we cannot tell the
-            // server to stop pushing, so the row stays active until the token rotates.
-            AppLogger.push.info("FCM unregister skipped for \(serverUrl, privacy: .public): no local token")
+            AppLogger.push.info("FCM unregister skipped: no local token")
             return
         }
         do {
-            _ = try await apiClient.callKw(
-                serverUrl: serverUrl.ensureHTTPS,
-                model: "woow.fcm.device",
-                method: "unregister_device",
-                args: [],
-                kwargs: ["fcm_token": token]
-            )
+            // Lazy construction avoids AccountRepository → shared reauthenticator init recursion.
+            try await PushDeviceRegistrar(brand: brand, api: apiClient, accounts: self,
+                credentials: pushCredentials).unregister(account: account, token: token)
         } catch {
-            // Best-effort: logout still completes. Logged for retry/reconciliation — the server keeps
-            // the row active until a later unregister succeeds or the token rotates.
-            AppLogger.push.error("FCM unregister failed for \(serverUrl, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            AppLogger.push.error("FCM unregister failed: \(PushDeviceRegistrar.status(for: error).rawValue, privacy: .public)")
         }
     }
 
@@ -452,4 +590,13 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         print("[TestHook] replaceAccountsForTesting: installed \(seeded.username)@\(host) active=\(isActive) tenant=\(seeded.tenantId ?? "nil")")
     }
 #endif
+}
+
+/// A late Apporo login or switch cannot replace a newer explicit selection.
+@MainActor
+private enum PushManualLoginOrder {
+    private static var current = UUID()
+    static func begin() -> UUID { current = UUID(); return current }
+    static func invalidate() { current = UUID() }
+    static func isCurrent(_ attempt: UUID) -> Bool { current == attempt }
 }

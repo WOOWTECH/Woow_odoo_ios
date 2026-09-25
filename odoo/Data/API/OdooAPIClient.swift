@@ -23,6 +23,10 @@ actor OdooAPIClient {
         config.httpShouldSetCookies = true
         config.httpCookieAcceptPolicy = .always
         config.httpCookieStorage = .shared
+        #if DEBUG && UNIT_TEST_HOST
+        // Explicit session configuration, independent of global URLProtocol precedence.
+        config.protocolClasses = [OfflineUnitHostURLProtocol.self]
+        #endif
         self.session = URLSession(configuration: config)
     }
 
@@ -49,6 +53,22 @@ actor OdooAPIClient {
         username: String,
         password: String
     ) async -> AuthResult {
+        await authenticate(serverUrl: serverUrl, database: database, username: username,
+                           password: password, isolatedPushSession: false)
+    }
+
+    /// Account-scoped push healing never reads or writes the shared cookie jar.
+    func authenticatePushSession(
+        serverUrl: String, database: String, username: String, password: String
+    ) async -> AuthResult {
+        await authenticate(serverUrl: serverUrl, database: database, username: username,
+                           password: password, isolatedPushSession: true)
+    }
+
+    private func authenticate(
+        serverUrl: String, database: String, username: String, password: String,
+        isolatedPushSession: Bool
+    ) async -> AuthResult {
         // HTTPS enforcement (ported from Android)
         guard serverUrl.hasPrefix("https://") else {
             return .error("HTTPS required", .httpsRequired)
@@ -59,7 +79,7 @@ actor OdooAPIClient {
         let request = JsonRpcRequest(id: nextRequestId(), params: params)
 
         do {
-            let (data, response) = try await post(url: url, body: request)
+            let (data, response) = try await post(url: url, body: request, pushSessionId: isolatedPushSession ? "" : nil)
 
             guard let httpResponse = response as? HTTPURLResponse,
                   httpResponse.statusCode == 200 else {
@@ -80,18 +100,44 @@ actor OdooAPIClient {
                 return .error("Invalid credentials", .invalidCredentials)
             }
 
-            let sessionId = getSessionId(for: serverUrl) ?? ""
+            let sessionId: String
+            var sessionCookie: PushSessionCookie?
+            if isolatedPushSession {
+                let headers = httpResponse.allHeaderFields.reduce(into: [String: String]()) {
+                    if let key = $1.key as? String, let value = $1.value as? String { $0[key] = value }
+                }
+                guard let responseURL = httpResponse.url, responseURL.absoluteString == url else {
+                    return .error(String(localized: "error_session_setup"), .serverError)
+                }
+                let cookies = HTTPCookie.cookies(withResponseHeaderFields: headers, for: responseURL)
+                    .filter { $0.name == "session_id" }
+                guard cookies.count == 1, let cookie = cookies.first,
+                      let validated = PushSessionCookie(cookie: cookie, responseURL: responseURL) else {
+                    return .error(String(localized: "error_session_setup"), .serverError)
+                }
+                sessionCookie = validated
+                sessionId = cookie.value
+                guard Self.isValidPushSessionId(sessionId),
+                      result.db == nil || result.db == database,
+                      result.username == nil || result.username == username else {
+                    return .error(String(localized: "error_session_setup"), .serverError)
+                }
+            } else {
+                sessionId = getSessionId(for: serverUrl) ?? ""
+            }
             let name = result.name ?? username
 
             return .success(AuthResult.AuthSuccess(
                 userId: uid,
                 sessionId: sessionId,
                 username: username,
-                displayName: name
+                displayName: name,
+                sessionCookie: sessionCookie
             ))
         } catch is URLError {
             return .error("Unable to connect to server", .networkError)
         } catch {
+            if isolatedPushSession { return .error(String(localized: "error_session_setup"), .serverError) }
             return .error("Error: \(error.localizedDescription)", .unknown)
         }
     }
@@ -107,11 +153,36 @@ actor OdooAPIClient {
         args: [Any] = [],
         kwargs: [String: Any] = [:]
     ) async throws -> Any? {
+        try await executeCallKw(serverUrl: serverUrl, model: model, method: method,
+                                args: args, kwargs: kwargs, pushSessionId: nil)
+    }
+
+    /// Only the Apporo compound registrar uses this pinned, account-owned SID.
+    func callKwWithPushSession(
+        serverUrl: String, sessionId: String, method: String, kwargs: [String: Any] = [:]
+    ) async throws -> Any? {
+        guard URL(string: serverUrl)?.scheme == "https", Self.isValidPushSessionId(sessionId) else {
+            throw OdooAPIError.invalidUrl
+        }
+        return try await executeCallKw(serverUrl: serverUrl, model: "woow.fcm.device", method: method,
+                                       args: [], kwargs: kwargs, pushSessionId: sessionId)
+    }
+
+    private static func isValidPushSessionId(_ value: String) -> Bool {
+        !value.isEmpty && value.unicodeScalars.allSatisfy {
+            $0.value >= 0x21 && $0.value <= 0x7E && ![0x22, 0x2C, 0x3B, 0x5C].contains($0.value)
+        }
+    }
+
+    private func executeCallKw(
+        serverUrl: String, model: String, method: String, args: [Any], kwargs: [String: Any],
+        pushSessionId: String?
+    ) async throws -> Any? {
         let url = "\(serverUrl)/web/dataset/call_kw"
         let params = CallKwParams(model: model, method: method, args: args, kwargs: kwargs)
         let request = JsonRpcRequest(id: nextRequestId(authenticated: true), params: params)
 
-        let (data, response) = try await post(url: url, body: request)
+        let (data, response) = try await post(url: url, body: request, pushSessionId: pushSessionId)
 
         // WI-3 self-heal detection: an expired Odoo session arrives on these `type='json'` routes as
         // HTTP 200 with a `SessionExpiredException` error envelope (not HTTP 401), so body inspection
@@ -122,6 +193,8 @@ actor OdooAPIClient {
         if SessionExpiry.isSessionExpired(httpCode: httpCode, body: data) {
             throw OdooAPIError.sessionExpired
         }
+
+        if pushSessionId != nil && httpCode != 200 { throw OdooAPIError.invalidResponse }
 
         let decoded = try JSONDecoder().decode(
             JsonRpcResponse<AnyCodable>.self,
@@ -189,7 +262,7 @@ actor OdooAPIClient {
 
     // MARK: - Private Helpers
 
-    private func post<T: Encodable>(url: String, body: T) async throws -> (Data, URLResponse) {
+    private func post<T: Encodable>(url: String, body: T, pushSessionId: String? = nil) async throws -> (Data, URLResponse) {
         guard let requestUrl = URL(string: url) else {
             throw OdooAPIError.invalidUrl
         }
@@ -203,6 +276,14 @@ actor OdooAPIClient {
         logger.debug("POST \(url)")
         #endif
 
+        if let pushSessionId {
+            // Disable both automatic Cookie and Set-Cookie processing for this request.
+            urlRequest.httpShouldHandleCookies = false
+            if !pushSessionId.isEmpty {
+                urlRequest.setValue("session_id=\(pushSessionId)", forHTTPHeaderField: "Cookie")
+            }
+            return try await session.data(for: urlRequest, delegate: PushNoRedirectDelegate())
+        }
         return try await session.data(for: urlRequest)
     }
 
@@ -238,5 +319,15 @@ enum OdooAPIError: Error, LocalizedError, Equatable {
         case .serverError(let msg): return msg
         case .sessionExpired: return "Session expired"
         }
+    }
+}
+
+/// Never forward an account-bound push session or credentials to a redirect target.
+private final class PushNoRedirectDelegate: NSObject, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
     }
 }
