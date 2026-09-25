@@ -1,0 +1,72 @@
+test_apporo_firebase_is_external_and_has_no_woow_fallback (test_brand_layer.BrandLayerTests) ... ok
+test_apporo_white_primary_contrast (test_brand_layer.BrandLayerTests) ... ok
+test_asset_source_provenance_when_explicitly_supplied (test_brand_layer.BrandLayerTests) ... skipped 'Source provenance not checked: set APPORO_ASSET_SOURCE to the original PNG'
+test_assets_are_hashed_opaque_white_mark (test_brand_layer.BrandLayerTests) ... ok
+test_device_target_requires_isolation_and_explicit_authorization (test_brand_layer.BrandLayerTests) ... ok
+test_four_configuration_identities (test_brand_layer.BrandLayerTests) ... ok
+test_hook_registries_cover_existing_hooks_in_both_audits (test_brand_layer.BrandLayerTests) ... ok
+test_legacy_e2e_is_blocked_before_imports_credentials_or_side_effects (test_brand_layer.BrandLayerTests) ... ok
+test_localized_brand_resources_live_outside_synchronized_sources (test_brand_layer.BrandLayerTests) ... ok
+test_localized_resources_and_woow_baseline (test_brand_layer.BrandLayerTests) ... ok
+test_missing_apporo_configs_fail_before_any_output (test_brand_layer.BrandLayerTests) ... ok
+test_missing_verified_project_fails_before_output (test_brand_layer.BrandLayerTests) ... ok
+test_project_and_three_targets_have_matching_configurations (test_brand_layer.BrandLayerTests) ... ok
+test_provider_is_wired_not_just_defined (test_brand_layer.BrandLayerTests) ... ok
+test_release_flags_apns_and_audit_not_skipped (test_brand_layer.BrandLayerTests) ... ok
+test_resource_outputs_have_one_owner_and_declared_inputs (test_brand_layer.BrandLayerTests) ... ok
+test_resource_selection_rejects_cross_brand_firebase (test_brand_layer.BrandLayerTests) ... ok
+test_resource_selection_rejects_unknown_or_mixed_variant (test_brand_layer.BrandLayerTests) ... ok
+test_scheme_branding_does_not_change_auth_validator_or_fcm_protocol (test_brand_layer.BrandLayerTests) ... FAIL
+test_schemes_preserve_woow_and_select_apporo (test_brand_layer.BrandLayerTests) ... ok
+test_test_target_brand_metadata_is_build_selected (test_brand_layer.BrandLayerTests) ... ok
+test_woow_selection_copies_only_selected_resources (test_brand_layer.BrandLayerTests) ... ok
+test_firebase_accepts_matching_nonsecret_identity_for_all_configurations (test_brand_verification.BrandVerificationTests) ... ok
+test_firebase_missing_config_or_verified_project_never_passes (test_brand_verification.BrandVerificationTests) ... ok
+test_firebase_rejects_woow_source_even_with_apporo_fields (test_brand_verification.BrandVerificationTests) ... ok
+test_firebase_rejects_wrong_brand_project_bundle_sender_or_missing_fields (test_brand_verification.BrandVerificationTests) ... ok
+test_live_verifier_wires_helpers_without_legacy_assertions (test_brand_verification.BrandVerificationTests) ... ok
+test_missing_provenance_skips_only_source_and_wrong_source_fails (test_brand_verification.BrandVerificationTests) ... ok
+test_provider_colors_match_each_selected_configuration (test_brand_verification.BrandVerificationTests) ... ok
+test_provider_rejects_wrong_color_missing_wiring_or_mixed_configuration (test_brand_verification.BrandVerificationTests) ... ok
+test_settings_include_verified_local_override_without_fallback (test_brand_verification.BrandVerificationTests) ... ok
+test_six_validator_entries_use_selected_scheme_and_unit_rejects_other_brand (test_brand_verification.BrandVerificationTests) ... ok
+test_ui_test_scheme_metadata_matches_app_configuration (test_brand_verification.BrandVerificationTests) ... ok
+test_audited_urlsession_constructor_inventory (test_offline_unit_host.OfflineUnitHostSourceTests) ... FAIL
+test_external_navigation_spy_preserves_default_order (test_offline_unit_host.OfflineUnitHostSourceTests) ... ok
+test_flag_not_persisted_in_build_configuration_or_runtime_gate (test_offline_unit_host.OfflineUnitHostSourceTests) ... ok
+test_launch_contract_rejects_firebase_and_business_root_mutations (test_offline_unit_host.OfflineUnitHostSourceTests) ... ok
+test_launch_excludes_business_bootstrap_and_url_routing (test_offline_unit_host.OfflineUnitHostSourceTests) ... ok
+test_release_compile_error_and_guard_has_no_forwarding_transport (test_offline_unit_host.OfflineUnitHostSourceTests) ... ok
+test_runtime_cases_exist_without_skipping_existing_cases (test_offline_unit_host.OfflineUnitHostSourceTests) ... ok
+test_transport_contract_rejects_missing_guard_and_replaced_mock (test_offline_unit_host.OfflineUnitHostSourceTests) ... ok
+test_transport_explicit_default_guard_and_unchanged_injected_session (test_offline_unit_host.OfflineUnitHostSourceTests) ... ok
+test_unit_webkit_calls_are_not_remote_loads (test_offline_unit_host.OfflineUnitHostSourceTests) ... ok
+
+======================================================================
+FAIL: test_scheme_branding_does_not_change_auth_validator_or_fcm_protocol (test_brand_layer.BrandLayerTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/elmolin/projects/apporo-odoo-worktrees/ios/scripts/tests/test_brand_layer.py", line 252, in test_scheme_branding_does_not_change_auth_validator_or_fcm_protocol
+    self.assertEqual(result.stdout, b"", file)
+AssertionError: b'diff --git a/odoo/Data/Push/PushTokenRepo[6224 chars]n \n' != b'' : odoo/Data/Push/PushTokenRepository.swift
+
+======================================================================
+FAIL: test_audited_urlsession_constructor_inventory (test_offline_unit_host.OfflineUnitHostSourceTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/elmolin/projects/apporo-odoo-worktrees/ios/scripts/tests/test_offline_unit_host.py", line 116, in test_audited_urlsession_constructor_inventory
+    self.assertEqual(actual, expected)
+AssertionError: {'Hon[42 chars]l', 'SessionReauthenticatorTests.swift': 'Sequ[335 chars]col'} != {'Hon[42 chars]l', 'LogoutUnregisterURLTests.swift': 'Recordi[274 chars]col'}
+  {'HonestLogoutS4Tests.swift': 'LogoutURLProtocol',
+   'LogoutUnregisterURLTests.swift': 'RecordingURLProtocol',
+   'MissingTests.swift': 'StubURLProtocol',
+   'OfflineUnitHostTests.swift': 'OfflineHostMockURLProtocol',
+-  'PushDeviceRegistrarTests.swift': 'PushContractURLProtocol',
+   'SessionReauthenticatorTests.swift': 'SequencedURLProtocol',
+   'SwitchAccountNoUnregisterTests.swift': 'RecordingURLProtocol',
+   'odooTests.swift': 'MockURLProtocol'}
+
+----------------------------------------------------------------------
+Ran 43 tests in 3.071s
+
+FAILED (failures=2, skipped=1)
