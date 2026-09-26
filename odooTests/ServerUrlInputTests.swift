@@ -124,3 +124,87 @@ final class ServerUrlInputLoginFormTests: XCTestCase {
         XCTAssertEqual(vm.displayUrl, "https://demo222-odoo.woowtech.io")
     }
 }
+
+// MARK: - Accepted path containing "://" reaches every consumer with one https
+
+/// Review finding (iOS P2): `classify` accepts `https://example.invalid/erp/a://b` and
+/// returns the scheme-less `example.invalid/erp/a://b`, but `ensureHTTPS` used to treat
+/// the `://` inside the path as an existing scheme and return the bare value — the
+/// summary lost `https://` and `OdooAPIClient` rejected the login as "HTTPS required".
+/// One fixture, walked through classify → ViewModel summary → the URL the real
+/// repository + API client actually request.
+@MainActor
+final class ServerUrlPathSchemeChainTests: XCTestCase {
+
+    private static let fixture = "https://example.invalid/erp/a://b"
+
+    /// Records the one authenticate POST and answers HTTP 500 so no account is created.
+    private final class AuthRecordingURLProtocol: URLProtocol {
+        static var recordedURLs: [URL] = []
+
+        override class func canInit(with request: URLRequest) -> Bool { true }
+        override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+        override func startLoading() {
+            if let url = request.url { Self.recordedURLs.append(url) }
+            let response = HTTPURLResponse(url: request.url ?? URL(string: "https://localhost")!,
+                                           statusCode: 500, httpVersion: nil, headerFields: nil)!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data())
+            client?.urlProtocolDidFinishLoading(self)
+        }
+
+        override func stopLoading() {}
+    }
+
+    override func setUp() {
+        super.setUp()
+        AuthRecordingURLProtocol.recordedURLs = []
+    }
+
+    override func tearDown() {
+        AuthRecordingURLProtocol.recordedURLs = []
+        super.tearDown()
+    }
+
+    func test_classify_givenColonSlashInPath_keepsPathWithoutScheme() {
+        XCTAssertEqual(ServerUrlInput.classify(Self.fixture), .valid("example.invalid/erp/a://b"))
+    }
+
+    func test_loginFlow_givenColonSlashInPath_summaryAndAuthenticateUseSingleHttpsWithPath() async {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [AuthRecordingURLProtocol.self]
+        let repository = AccountRepository(
+            persistence: PersistenceController(inMemory: true),
+            apiClient: OdooAPIClient(session: URLSession(configuration: config)),
+            brand: .woowtech
+        )
+        let vm = LoginViewModel(addingAccount: true, repository: repository,
+                                secureStorage: MockSecureStorage())
+        vm.serverUrl = Self.fixture
+        vm.database = "mydb"
+
+        vm.goToNextStep()
+
+        XCTAssertNil(vm.error)
+        XCTAssertEqual(vm.step, .credentials)
+        XCTAssertEqual(vm.serverUrl, "example.invalid/erp/a://b")
+        XCTAssertEqual(vm.displayUrl, "https://example.invalid/erp/a://b")
+        XCTAssertEqual(vm.displayUrl.components(separatedBy: "https://").count - 1, 1,
+                       "summary shows exactly one https://")
+
+        vm.username = "admin"
+        vm.password = "fixture-password"
+        vm.login(onSuccess: {})
+        for _ in 0..<500 where vm.isLoading {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        XCTAssertFalse(vm.isLoading, "login did not finish")
+        XCTAssertNotEqual(vm.error, String(localized: "error_https_required"),
+                          "API client must not reject the accepted URL as non-HTTPS")
+        XCTAssertEqual(AuthRecordingURLProtocol.recordedURLs.map(\.absoluteString),
+                       ["https://example.invalid/erp/a://b/web/session/authenticate"],
+                       "authenticate serverUrl is the full https URL with the path kept")
+    }
+}
