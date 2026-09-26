@@ -1,3 +1,9 @@
 /* 桌面圖示與所有系統權限提示顯示的 App 名稱（品牌名跨語系維持英文） */
 "CFBundleDisplayName" = "woowtech platform";
 "CFBundleName" = "woowtech platform";
+
+/* 系统权限提示；iOS 只从 InfoPlist.strings 读取这些键 */
+"NSCameraUsageDescription" = "woowtech platform 需要使用相机，才能在 Odoo 中上传照片。";
+"NSFaceIDUsageDescription" = "woowtech platform 使用 Face ID 保护您的 Odoo 账号数据。";
+"NSLocationWhenInUseUsageDescription" = "woowtech platform 会在您打卡上下班时记录您的位置，以便您的 Odoo 考勤记录包含打卡时的 GPS 坐标。位置信息仅发送至您自己的 Odoo 服务器，绝不会发送给第三方。";
+"NSPhotoLibraryUsageDescription" = "woowtech platform 需要访问照片图库，才能在 Odoo 中上传图片。";

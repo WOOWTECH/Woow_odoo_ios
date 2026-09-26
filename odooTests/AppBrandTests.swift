@@ -17,7 +17,7 @@ final class AppBrandTests: XCTestCase {
 
     func test_identity_givenApporo_returnsApprovedBrandValues() throws {
         let apporo = try brand("apporo", "com.apporo.odoo", "apporoodoo")
-        XCTAssertEqual(apporo.displayName, "Apporo platform")
+        XCTAssertEqual(apporo.displayName(localization: "en"), "Apporo platform")
         XCTAssertEqual(apporo.signature, "APPORO UNION INC.")
         XCTAssertEqual(apporo.primaryColorHex, "#8B6B24")
         XCTAssertEqual(apporo.logoAsset, "ApporoLogo")
@@ -28,7 +28,7 @@ final class AppBrandTests: XCTestCase {
 
     func test_identity_givenWoow_returnsUnchangedValues() throws {
         let woow = try brand("woowtech", "io.woowtech.odoo", "woowodoo")
-        XCTAssertEqual(woow.displayName, "woowtech platform")
+        XCTAssertEqual(woow.displayName(localization: "en"), "woowtech platform")
         XCTAssertEqual(woow.signature, "\u{00A9} 2026 WoowTech")
         XCTAssertEqual(woow.primaryColorHex, "#6183FC")
         XCTAssertEqual(woow.logoAsset, "WoowLogo")
@@ -36,6 +36,31 @@ final class AppBrandTests: XCTestCase {
         XCTAssertEqual(woow.contactEmail, "woowtech@designsmart.com.tw")
         XCTAssertEqual(woow.keychainService, "io.woowtech.odoo.keychain")
         XCTAssertEqual(woow.pageURL(.support, language: nil), "https://aiot.woowtech.io/odoo-support")
+    }
+
+    func test_displayName_givenWoowTraditionalChinese_returnsWoowPlatformChineseName() throws {
+        let woow = try brand("woowtech", "io.woowtech.odoo", "woowodoo")
+        XCTAssertEqual(woow.displayName(localization: "zh-Hant"), "渥屋平台")
+        for lang in ["en", "zh-Hans", nil] as [String?] {
+            XCTAssertEqual(woow.displayName(localization: lang), "woowtech platform")
+        }
+    }
+
+    func test_displayName_givenApporoAnyLocalization_returnsApporoPlatform() throws {
+        for (bundleID, scheme) in [("com.apporo.odoo", "apporoodoo"), ("com.apporo.odoo.dev", "apporoodoo-dev")] {
+            let apporo = try brand("apporo", bundleID, scheme)
+            for lang in ["en", "zh-Hans", "zh-Hant", nil] as [String?] {
+                XCTAssertEqual(apporo.displayName(localization: lang), "Apporo platform")
+            }
+        }
+    }
+
+    func test_displayName_givenRunningApp_matchesSelectedInfoPlistDisplayName() {
+        // The in-app title must agree with the home-screen name that the
+        // brand-selected InfoPlist.strings gives the same localization.
+        let bundleName = Bundle.main.localizedInfoDictionary?["CFBundleDisplayName"] as? String
+            ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+        XCTAssertEqual(AppBrand.current.displayName, bundleName)
     }
 
     func test_scheme_givenOtherBrandOrEnvironment_returnsFalse() throws {

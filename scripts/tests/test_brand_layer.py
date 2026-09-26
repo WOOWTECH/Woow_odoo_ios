@@ -219,9 +219,18 @@ class BrandLayerTests(unittest.TestCase):
                 if lang != "en":
                     self.assertRegex(apporo[key], r"[\u4e00-\u9fff]")
             path = f"odoo/Resources/{lang}.lproj/InfoPlist.strings"
-            original = subprocess.run(["git", "show", "a50c4df:" + path], cwd=ROOT, check=True, capture_output=True).stdout
+            # WOOW baseline is the 1.0.1 engineering fix (acff782): zh-Hant name
+            # 「渥屋平台」 plus zh-Hans/zh-Hant permission prompts; en is unchanged
+            # from ios-1.0-b3 (a50c4df).
+            original = subprocess.run(["git", "show", "acff782:" + path], cwd=ROOT, check=True, capture_output=True).stdout
             self.assertFalse((ROOT / path).exists(), "No duplicate auto-copied InfoPlist source")
             self.assertEqual(original, (ROOT / f"BrandResources/woowtech/{lang}.lproj/InfoPlist.strings").read_bytes())
+            woow = plist(f"BrandResources/woowtech/{lang}.lproj/InfoPlist.strings")
+            self.assertEqual(woow["CFBundleDisplayName"], "渥屋平台" if lang == "zh-Hant" else "woowtech platform")
+            if lang != "en":
+                for key in ["NSCameraUsageDescription", "NSPhotoLibraryUsageDescription", "NSFaceIDUsageDescription", "NSLocationWhenInUseUsageDescription"]:
+                    self.assertRegex(woow[key], r"[\u4e00-\u9fff]")
+                    self.assertNotIn("apporo", woow[key].lower())
             shared = plist(f"odoo/Resources/{lang}.lproj/Localizable.strings")
             keysets.append(set(shared))
             self.assertIn("%@", shared["biometric_reason"])

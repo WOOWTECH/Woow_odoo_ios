@@ -34,7 +34,19 @@ struct AppBrand: Sendable, Equatable {
         return brand
     }()
 
-    var displayName: String { code == .apporo ? "Apporo platform" : "woowtech platform" }
+    /// In-app name for the running app localization. Must mirror the selected
+    /// `BrandResources/<brand>/<lang>.lproj/InfoPlist.strings` CFBundleDisplayName,
+    /// because shared `Localizable.strings` cannot carry a brand-specific name.
+    var displayName: String { displayName(localization: Bundle.main.preferredLocalizations.first) }
+
+    /// WOOW 1.0.1 uses 「渥屋平台」 in Traditional Chinese only; every other WOOW
+    /// localization keeps "woowtech platform". Apporo is "Apporo platform" in all locales.
+    func displayName(localization: String?) -> String {
+        switch code {
+        case .apporo: return "Apporo platform"
+        case .woowtech: return localization == "zh-Hant" ? "渥屋平台" : "woowtech platform"
+        }
+    }
     var primaryColorHex: String { code == .apporo ? "#8B6B24" : "#6183FC" }
     var logoAsset: String { code == .apporo ? "ApporoLogo" : "WoowLogo" }
     var signature: String { code == .apporo ? "APPORO UNION INC." : "\u{00A9} 2026 WoowTech" }
