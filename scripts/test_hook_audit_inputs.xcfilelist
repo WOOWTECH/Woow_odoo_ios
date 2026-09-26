@@ -98,6 +98,7 @@ $(SRCROOT)/odoo/UI/Config/ConfigViewModel.swift
 $(SRCROOT)/odoo/UI/Login
 $(SRCROOT)/odoo/UI/Login/LoginView.swift
 $(SRCROOT)/odoo/UI/Login/LoginViewModel.swift
+$(SRCROOT)/odoo/UI/Login/ServerUrlInput.swift
 $(SRCROOT)/odoo/UI/Main
 $(SRCROOT)/odoo/UI/Main/MainView.swift
 $(SRCROOT)/odoo/UI/Main/MainViewModel.swift

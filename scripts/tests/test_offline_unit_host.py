@@ -70,6 +70,7 @@ AUDITED_SESSION_PROTOCOLS = {
     "odooTests.swift": ("MockURLProtocol",),
     "OfflineUnitHostTests.swift": ("OfflineHostMockURLProtocol",),
     "PushDeviceRegistrarTests.swift": ("PushContractURLProtocol",),
+    "ServerUrlInputTests.swift": ("AuthRecordingURLProtocol",),
 }
 
 
