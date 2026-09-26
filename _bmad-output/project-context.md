@@ -45,7 +45,7 @@ Read from `odoo.xcodeproj/project.pbxproj`, not from docs:
 - **SwiftUI** for all UI. **WKWebView** hosts the Odoo web app.
 - **Storage:** Core Data (`NSPersistentContainer`, store `"WoowOdoo"`) + Keychain (`SecItem*`, service `io.woowtech.odoo.keychain`). `UserDefaults` is used by `DeepLinkManager` only.
 - **Networking:** `URLSession` async/await + hand-rolled **JSON-RPC 2.0**. No Alamofire/Moya.
-- **Push:** Firebase iOS SDK, SPM, `upToNextMajorVersion` from 11.0.0. **Only `FirebaseMessaging` is linked.** `Package.resolved` is **gitignored** — the version is not pinned in the repo (locally untracked at `odoo.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`, currently firebase-ios-sdk 11.15.0). A fresh clone is not reproducible.
+- **Push:** Firebase iOS SDK, SPM, `upToNextMajorVersion` from 11.0.0. **Only `FirebaseMessaging` is linked.** `Package.resolved` is **tracked** at `odoo.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved` (14 pins, firebase-ios-sdk 11.15.0; tracked since 2026-09-26 W1-8 on the Apporo branch). Build with `-onlyUsePackageVersionsFromResolvedFile` so a fresh clone resolves the same pins; changing a pin is a reviewed diff.
 - **Dependency manager:** SPM only, exactly one package. No CocoaPods/Carthage/`Package.swift`.
 - **Tests:** **XCTest only** (39 test files `import XCTest`; **0** files `import Testing`). See Testing Rules — this is a compile-blocking constraint.
 - **Frameworks imported in source:** SwiftUI, WebKit, CoreData, Security, LocalAuthentication, CoreLocation, CommonCrypto, `os`, Combine, UIKit, **UserNotifications**, **FirebaseCore** (`AppDelegate` imports FirebaseCore even though only the FirebaseMessaging product is linked — it resolves transitively; swapping the SPM product breaks `AppDelegate`).
@@ -274,7 +274,7 @@ xcodebuild -project odoo.xcodeproj -scheme odoo \
 - Short-lived `feature/*` and `fix/*` branches merged to `main` via GitHub PR. `main` tracks `origin/main`.
 - Never `--amend` after a hook failure (the commit didn't happen; amend destroys the previous one). Never `--no-verify`. Never force-push `main`.
 - **Never commit:** `.env`, credentials, `*.p8`/`*.p12`/`*.cer`, `*.mobileprovision`, `xcuserdata/`, `odooUITests/TestConfig.plist`. **`GoogleService-Info.plist` IS checked in** — public Firebase config.
-- `.gitignore` (current) covers `xcuserdata/`, `DerivedData/`, `build/`, `*.ipa`, `*.dSYM`, `Package.resolved`, `Pods/`, `.DS_Store`, `_bmad/config.user.yaml`, `_bmad-output/`, `odooUITests/TestConfig.plist`.
+- `.gitignore` (current) covers `xcuserdata/`, `DerivedData/`, `build/`, `*.ipa`, `*.dSYM`, `Pods/` (`Package.resolved` is tracked, not ignored), `.DS_Store`, `_bmad/config.user.yaml`, `_bmad-output/`, `odooUITests/TestConfig.plist`.
 
 **Privacy manifest discipline.** `odoo/PrivacyInfo.xcprivacy` is the source of truth. Adding any new data collection — analytics, crash reporting, advertising ids, or a new Firebase module — requires, in order: (1) update the manifest, (2) update App Store Connect's App Privacy disclosure, (3) get product sign-off (an explicit approval on the PR — there is no other channel), (4) *then* link the module / write the code. Linking `FirebaseAnalytics` or `Crashlytics` "to improve observability" without those steps is a shipped App Store rejection.
 

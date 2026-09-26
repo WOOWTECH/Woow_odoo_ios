@@ -15,9 +15,10 @@ xcuserdata/
 *.dSYM
 
 # Swift Package Manager
+# Package.resolved is intentionally tracked so a clean clone resolves the same
+# 14 SwiftPM pins (build with -onlyUsePackageVersionsFromResolvedFile).
 .build/
 Packages/
-Package.resolved
 
 # CocoaPods (if used later)
 Pods/
