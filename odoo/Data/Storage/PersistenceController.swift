@@ -28,10 +28,21 @@ final class PersistenceController: @unchecked Sendable {
 
     let container: NSPersistentContainer
 
+    /// The ONE managed object model for the whole process, shared by every controller.
+    ///
+    /// `OdooAccountEntity(context:)` resolves its entity through `+[NSManagedObject entity]`,
+    /// which searches every model loaded in the process by class name. When each controller
+    /// built its own model, unit tests (one in-memory controller per test, plus `.shared` in the
+    /// test host) left several descriptions claiming `OdooAccountEntity`, and Core Data logged
+    /// "Multiple NSEntityDescriptions claim the NSManagedObject subclass" / "+[OdooAccountEntity
+    /// entity] Failed to find a unique match". The app itself only ever creates `.shared`, so
+    /// for it this is the same single model as before; `static let` is lazily and thread-safely
+    /// initialised.
+    private static let managedObjectModel: NSManagedObjectModel = buildManagedObjectModel()
+
     init(inMemory: Bool = false) {
-        // Build Core Data model programmatically (no .xcdatamodeld file needed)
-        let model = Self.buildManagedObjectModel()
-        container = NSPersistentContainer(name: "WoowOdoo", managedObjectModel: model)
+        // Build Core Data model programmatically (no .xcdatamodeld file needed), once per process.
+        container = NSPersistentContainer(name: "WoowOdoo", managedObjectModel: Self.managedObjectModel)
 
         if inMemory {
             let description = NSPersistentStoreDescription()

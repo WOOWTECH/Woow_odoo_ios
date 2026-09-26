@@ -81,7 +81,9 @@ final class PushTokenRepository: PushTokenRepositoryProtocol {
 
         saveToken(token)
 
-        let accounts = accountRepository.getAllAccounts()
+        // AccountRepository reads the main-queue Core Data viewContext; this async method runs
+        // on the cooperative pool, so hop to the main actor for the snapshot (as the registrar does).
+        let accounts = await MainActor.run { accountRepository.getAllAccounts() }
         for account in accounts {
             do {
                 // Registrar atomically validates identity/generation and commits status + tenant.
@@ -116,7 +118,8 @@ final class PushTokenRepository: PushTokenRepositoryProtocol {
     /// Best-effort per account — a failure is logged and never blocks the new token's
     /// registration. Uses `fullServerUrl` to match the register call form (MA-1).
     private func unregisterOldTokenFromAllAccounts(_ oldToken: String) async {
-        for account in accountRepository.getAllAccounts() {
+        let accounts = await MainActor.run { accountRepository.getAllAccounts() } // viewContext is main-queue
+        for account in accounts {
             do {
                 try await registrar.unregister(account: account, token: oldToken)
             } catch {
@@ -137,7 +140,8 @@ final class PushTokenRepository: PushTokenRepositoryProtocol {
             return
         }
         // A URL-only caller cannot select an arbitrary same-host database/account.
-        let matches = accountRepository.getAllAccounts().filter { $0.fullServerUrl == serverUrl.ensureHTTPS }
+        let matches = await MainActor.run { accountRepository.getAllAccounts() } // viewContext is main-queue
+            .filter { $0.fullServerUrl == serverUrl.ensureHTTPS }
         guard matches.count == 1, let account = matches.first else {
             AppLogger.push.warning("Push unregister refused: ambiguous or missing account")
             return

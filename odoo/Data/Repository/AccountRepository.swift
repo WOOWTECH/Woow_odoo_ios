@@ -260,6 +260,15 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
 
     /// Switches to the specified account after validating the session.
     /// Re-authenticates with stored password if the session cookie is expired. (G8)
+    ///
+    /// `@MainActor` (Core Data confinement): every Core Data access here goes through the
+    /// main-queue `viewContext`. A plain `async` method on this non-isolated class runs on the
+    /// Swift cooperative pool, so before this annotation the WOOW branch fetched/deleted/saved
+    /// `viewContext` off the main thread — racing the main run loop's own change processing and
+    /// crashing intermittently (`-[__NSCFSet addObject:]: attempt to insert nil`, SIGTRAP/SEGV).
+    /// Awaited network work (unregister/authenticate) still suspends off-main; only the Core Data
+    /// and bookkeeping between awaits runs on main — the same owner the Apporo branch already uses.
+    @MainActor
     func switchAccount(id: String) async -> Bool {
         if brand == .apporo { return await switchApporoAccount(id: id) }
         let context = persistence.container.viewContext
@@ -355,6 +364,9 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
     ///
     /// This is deliberately minimal — there is no pruning counter or state machine (that was the
     /// abandoned option-A machinery). Honest row removal is the whole story.
+    ///
+    /// `@MainActor` for Core Data confinement — see ``switchAccount(id:)``.
+    @MainActor
     func logout(accountId: String? = nil) async {
         if brand == .apporo {
             await removeApporoAccount(id: accountId, logout: true)
@@ -370,7 +382,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         }
 
         guard let account else { return }
-        if brand == .apporo { await PushManualLoginOrder.invalidate() }
+        if brand == .apporo { PushManualLoginOrder.invalidate() }
         let wasActive = account.isActive
 
         // Unregister FCM token from THIS account's server (G9 — best-effort, never blocks logout).
@@ -380,8 +392,8 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         secureStorage.deletePassword(serverUrl: account.serverUrl, username: account.username)
         // Delete the Keychain session_id copy so the session cannot be reused after logout.
         secureStorage.deleteSessionId(serverUrl: account.serverUrl, username: account.username)
-        await pushCredentials.deletePushCredential(accountId: account.id)
-        await PushRegistrationStatusStore.shared.remove(accountId: account.id)
+        pushCredentials.deletePushCredential(accountId: account.id)
+        PushRegistrationStatusStore.shared.remove(accountId: account.id)
         context.delete(account)
         try? context.save()
 
@@ -404,6 +416,8 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         }
     }
 
+    /// `@MainActor` for Core Data confinement — see ``switchAccount(id:)``.
+    @MainActor
     func removeAccount(id: String) async {
         if brand == .apporo {
             await removeApporoAccount(id: id, logout: false)
@@ -412,14 +426,14 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         let context = persistence.container.viewContext
         guard let entity = (try? context.fetch(OdooAccountEntity.fetchByIdRequest(id: id)))?.first else { return }
 
-        if brand == .apporo { await PushManualLoginOrder.invalidate() }
+        if brand == .apporo { PushManualLoginOrder.invalidate() }
         // Unregister FCM token from Odoo server (G9)
         await unregisterFcmToken(account: entity.toDomainModel())
 
         secureStorage.deletePassword(serverUrl: entity.serverUrl, username: entity.username)
         secureStorage.deleteSessionId(serverUrl: entity.serverUrl, username: entity.username)
-        await pushCredentials.deletePushCredential(accountId: entity.id)
-        await PushRegistrationStatusStore.shared.remove(accountId: entity.id)
+        pushCredentials.deletePushCredential(accountId: entity.id)
+        PushRegistrationStatusStore.shared.remove(accountId: entity.id)
         context.delete(entity)
         try? context.save()
 

@@ -173,7 +173,7 @@ actor SessionReauthenticator {
     /// one authenticate network call for that host (guardrail 4).
     func reauthenticateForHost(_ requestHost: String) async -> Bool {
         // Guardrail 1: refuse anything that is not an exact stored https host.
-        guard let account = resolveAccountForHost(requestHost) else {
+        guard let account = await resolveAccountForHost(requestHost) else {
             AppLogger.auth.warning("Re-auth: no stored https account matches request host — declining")
             return false
         }
@@ -206,8 +206,12 @@ actor SessionReauthenticator {
     ///
     /// Enforces guardrail 1: only accounts whose STORED url is `https` are considered, and the bare
     /// host must match exactly (case-insensitive). Returns nil when there is no such account.
-    private func resolveAccountForHost(_ requestHost: String) -> OdooAccount? {
-        accountRepository.getAllAccounts().first { account in
+    ///
+    /// The account snapshot is taken on the main actor: `AccountRepository` reads the main-queue
+    /// Core Data `viewContext`, and this actor's executor is not the main thread.
+    private func resolveAccountForHost(_ requestHost: String) async -> OdooAccount? {
+        let accounts = await MainActor.run { accountRepository.getAllAccounts() }
+        return accounts.first { account in
             // The account's STORED url must itself be https (not merely https after the
             // ensureHTTPS fallback) — an http-stored account is never a re-auth target.
             guard account.serverUrl.hasPrefix("https://") else { return false }
