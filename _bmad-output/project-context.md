@@ -150,7 +150,7 @@ Zero files import swift-testing, there is no swift-testing dependency, and `SWIF
 - `javaScriptCanOpenWindowsAutomatically = false`; `WKUIDelegate.createWebViewWith` reloads `target=_blank` in place and returns nil.
 - `decideNavigation(for:)` is a pure function returning `.allow / .sessionExpired / .openInSafari / .cancel`; `/web/login` in the URL means session expired.
 - `injectOWLLayoutFixes` runs on every `didFinish` — Odoo's OWL needs it for viewport sizing. It will silently regress if you refactor the WebView and drop it.
-- **`CacheService.clearWebViewCache()` deliberately excludes cookies to preserve login** — it clears only `DiskCache`/`MemoryCache`/`OfflineWebApplicationCache` and the code says so ("cookies excluded to preserve login"). Do not "helpfully" add `WKWebsiteDataTypeCookies`. It also touches only `WKWebsiteDataStore.default()`, so it **misses every per-account store**, and it is called **only** from `SettingsViewModel`'s "Clear Cache" action — **logout never calls it**.
+- **`CacheService.clearWebViewCache()` deliberately excludes cookies to preserve login.** Since W1-10 (2026-09-26) it removes `CacheService.webViewDataTypes` (HTTP disk/memory/fetch cache, offline app cache, local/session storage, IndexedDB, WebSQL, service workers) from `.default()` **and every account's `dataStore(forAccountId:)` store** (deduplicated), via the `WebsiteDataRemoving` seam. Do not "helpfully" add `WKWebsiteDataTypeCookies`. It is called **only** from `SettingsViewModel`'s "Clear Cache" action — **logout never calls it**.
 
 **Push / FCM / multi-account routing**
 - `AppDelegate.handleNotificationTap(userInfo:accountRepository:)` is a thin executor; the decision lives in the pure `NotificationDeepLinkRouter.decide(userInfo:resolveTenant:activeAccount:) -> Decision` (`.switchAndRoute / .useActive / .drop(DropReason)`). Payload keys are constants: `odoo_action_url`, `odoo_tenant_id`.
@@ -303,7 +303,7 @@ Ordered by blast radius. An agent who reads only this section avoids the most da
 
 **C7. A push with an unresolved `odoo_tenant_id` MUST be dropped, never applied to the active account.** `NotificationDeepLinkRouter.decide` → `.drop(.unresolvedTenant)`. Adding a "fall back to active" branch is a cross-tenant data-exposure regression. Same invariant in `getAccount(byTenantId:)` — an empty id never matches.
 
-**C8. Cookie stores are N+1, not 2.** `HTTPCookieStorage.shared` plus one `WKWebsiteDataStore(forIdentifier:)` per account on iOS 17+. Writing into `.default()` does nothing for a real account. And `CacheService.clearWebViewCache()` **intentionally excludes cookies** (to preserve login), clears only `.default()`, and is never called by logout.
+**C8. Cookie stores are N+1, not 2.** `HTTPCookieStorage.shared` plus one `WKWebsiteDataStore(forIdentifier:)` per account on iOS 17+. Writing into `.default()` does nothing for a real account. And `CacheService.clearWebViewCache()` **intentionally excludes cookies** (to preserve login), clears `.default()` plus every account store, and is never called by logout.
 
 **C9. The session cookie must commit before the first load** — the load lives inside `setCookie`'s completion handler. Fire-and-forget lands on the public Odoo page.
 
