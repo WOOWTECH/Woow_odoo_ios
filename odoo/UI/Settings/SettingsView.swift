@@ -96,7 +96,11 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            if AppBrand.current.code == .apporo, let pushAccountId {
+            if PushDiagnosticsVisibility.isVisible(
+                brand: AppBrand.current.code,
+                hasActiveAccount: pushAccountId != nil,
+                isDebugBuild: PushDiagnosticsVisibility.isDebugBuild
+            ), let pushAccountId {
                 Section("Push Registration") {
                     Text(pushStatus.status(for: pushAccountId).localizedDescription)
                     Text("Registration acknowledgement does not confirm notification delivery.")

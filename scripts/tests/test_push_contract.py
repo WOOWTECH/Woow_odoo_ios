@@ -206,6 +206,25 @@ class PushContractSourceTests(unittest.TestCase):
                      "odoo/Data/Repository/AccountRepository.swift"]:
             self.assertNotIn("error.localizedDescription", source(path))
 
+    def test_push_diagnostics_are_debug_only(self):
+        # W1-5: the Settings diagnostics section is gated on a DEBUG-compiled
+        # build, and neither Release configuration defines DEBUG.
+        view = source("odoo/UI/Settings/SettingsView.swift")
+        self.assertIn("PushDiagnosticsVisibility.isVisible(", view)
+        self.assertIn("isDebugBuild: PushDiagnosticsVisibility.isDebugBuild", view)
+        self.assertNotIn("if AppBrand.current.code == .apporo, let pushAccountId", view)
+        gate = source("odoo/UI/Settings/PushDiagnosticsVisibility.swift")
+        self.assertIn("#if DEBUG", gate)
+        self.assertIn("brand == .apporo && hasActiveAccount && isDebugBuild", gate)
+        for name in ["WoowRelease", "ApporoRelease"]:
+            line = next(l for l in source(f"Config/{name}.xcconfig").splitlines()
+                        if l.startswith("SWIFT_ACTIVE_COMPILATION_CONDITIONS"))
+            self.assertNotIn("DEBUG", line, name)
+        for name in ["WoowDebug", "ApporoDebug"]:
+            line = next(l for l in source(f"Config/{name}.xcconfig").splitlines()
+                        if l.startswith("SWIFT_ACTIVE_COMPILATION_CONDITIONS"))
+            self.assertIn("DEBUG", line, name)
+
     def test_review_shared_main_actor_owns_cas_manual_and_remove(self):
         assert_serialized_credentials(source("odoo/Data/Push/PushCredential.swift"),
                                       source("odoo/Data/Storage/SecureStorage.swift"),

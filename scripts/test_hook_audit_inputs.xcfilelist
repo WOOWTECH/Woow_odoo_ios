@@ -105,6 +105,7 @@ $(SRCROOT)/odoo/UI/Main/OdooWebView.swift
 $(SRCROOT)/odoo/UI/Settings
 $(SRCROOT)/odoo/UI/Settings/ColorPickerView.swift
 $(SRCROOT)/odoo/UI/Settings/PinSetupView.swift
+$(SRCROOT)/odoo/UI/Settings/PushDiagnosticsVisibility.swift
 $(SRCROOT)/odoo/UI/Settings/SettingsView.swift
 $(SRCROOT)/odoo/UI/Settings/SettingsViewModel.swift
 $(SRCROOT)/odoo/UI/Theme
