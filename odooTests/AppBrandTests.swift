@@ -63,6 +63,41 @@ final class AppBrandTests: XCTestCase {
         XCTAssertEqual(AppBrand.current.displayName, bundleName)
     }
 
+    /// Real shared template from the app bundle's `<lang>.lproj/Localizable.strings`.
+    private func template(_ key: String, _ lang: String) throws -> String {
+        let path = try XCTUnwrap(Bundle(for: SettingsViewModel.self).path(forResource: lang, ofType: "lproj"))
+        return try XCTUnwrap(Bundle(path: path)).localizedString(forKey: key, value: nil, table: nil)
+    }
+
+    func test_localizedFill_givenWoow_matchesWoow101Copy() throws {
+        // Expected values are the WOOW 1.0.1 engineering strings (acff782).
+        let woow = try brand("woowtech", "io.woowtech.odoo", "woowodoo")
+        let expected: [(key: String, lang: String, text: String)] = [
+            ("biometric_reason", "zh-Hant", "解鎖渥屋平台"),
+            ("Change language in iOS Settings", "zh-Hant", "前往 設定 > 渥屋平台 > 語言 變更語言"),
+            ("biometric_reason", "zh-Hans", "解锁 woowtech platform"),
+            ("biometric_reason", "en", "Unlock woowtech platform"),
+        ]
+        for item in expected {
+            let text = AppBrand.fill(try template(item.key, item.lang), name: woow.displayName(localization: item.lang))
+            XCTAssertEqual(text, item.text, "\(item.key) \(item.lang)")
+        }
+    }
+
+    func test_localizedFill_givenApporo_keepsSpaceBeforeLatinName() throws {
+        let apporo = try brand("apporo", "com.apporo.odoo", "apporoodoo")
+        let expected: [(key: String, lang: String, text: String)] = [
+            ("biometric_reason", "zh-Hant", "解鎖 Apporo platform"),
+            ("biometric_reason", "zh-Hans", "解锁 Apporo platform"),
+            ("biometric_reason", "en", "Unlock Apporo platform"),
+            ("Change language in iOS Settings", "zh-Hant", "前往 設定 > Apporo platform > 語言 變更語言"),
+        ]
+        for item in expected {
+            let text = AppBrand.fill(try template(item.key, item.lang), name: apporo.displayName(localization: item.lang))
+            XCTAssertEqual(text, item.text, "\(item.key) \(item.lang)")
+        }
+    }
+
     func test_scheme_givenOtherBrandOrEnvironment_returnsFalse() throws {
         let prod = try brand("apporo", "com.apporo.odoo", "apporoodoo")
         let dev = try brand("apporo", "com.apporo.odoo.dev", "apporoodoo-dev")

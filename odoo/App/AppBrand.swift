@@ -77,6 +77,22 @@ struct AppBrand: Sendable, Equatable {
     func acceptsScheme(_ scheme: String?) -> Bool { scheme == urlScheme }
 
     func localized(_ key: String) -> String {
-        String(format: NSLocalizedString(key, comment: "Brand-aware text"), displayName)
+        Self.fill(NSLocalizedString(key, comment: "Brand-aware text"), name: displayName)
+    }
+
+    /// Inserts the brand name into a shared brand-neutral `%@` template.
+    /// Shared templates keep a space next to `%@` for Latin names
+    /// ("解鎖 Apporo platform", "解鎖 woowtech platform"); a Han-script name joins
+    /// an adjacent Han character directly, matching the WOOW 1.0.1 (`acff782`)
+    /// zh-Hant copy ("解鎖渥屋平台"). Spaces next to punctuation such as `>` stay.
+    static func fill(_ template: String, name: String) -> String {
+        var template = template
+        if name.range(of: #"^\p{Han}"#, options: .regularExpression) != nil {
+            template = template.replacingOccurrences(of: #"(\p{Han}) %@"#, with: "$1%@", options: .regularExpression)
+        }
+        if name.range(of: #"\p{Han}$"#, options: .regularExpression) != nil {
+            template = template.replacingOccurrences(of: #"%@ (\p{Han})"#, with: "%@$1", options: .regularExpression)
+        }
+        return String(format: template, name)
     }
 }
