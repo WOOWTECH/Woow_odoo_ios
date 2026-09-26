@@ -15,6 +15,13 @@
 # fragments — Apple Review may extract strings from the IPA and reject
 # on undocumented capabilities.
 #
+# Second check: the binary must carry no LLVM coverage instrumentation
+# (`__llvm_prf_*` / `__llvm_cov*` sections, `___llvm_profile_*` /
+# `___profc_*` symbols). A scheme whose test plan gathers coverage makes
+# Xcode's *build* action inject CLANG_COVERAGE_MAPPING=YES /
+# -profile-generate even for a Release configuration; such a binary
+# writes .profraw files at runtime and must never ship.
+#
 # Usage:
 #   scripts/audit_release_archive.sh <path-to-ipa-or-app>
 #   scripts/audit_release_archive.sh build/Release-iphoneos/odoo.app
@@ -23,7 +30,9 @@
 # When invoked without arguments, scans common build-output locations
 # and audits whichever archive/app is found.
 #
-# Exit:  0 = clean (no hook strings in binary), 1 = leak detected, 2 = no archive found
+# Exit:  0 = clean (no hook strings, no coverage instrumentation),
+#        1 = leak/instrumentation detected or binary not inspectable,
+#        2 = no archive found
 
 set -euo pipefail
 
@@ -193,8 +202,78 @@ for hook in "${KNOWN_HOOKS[@]}"; do
 done
 
 # ---------------------------------------------------------------------
+# COVERAGE CHECK — LLVM profile/coverage instrumentation.
+# Section names from the load commands are authoritative: `strip`
+# removes the local ___profc_/___profd_/___llvm_profile_* symbols but
+# never the __llvm_prf_*/__llvm_cov* sections, so a symbol-only check
+# would false-pass a stripped archive. Symbols (`nm -m` lines that live
+# in those sections or are named ___llvm_profile_*) are reported as
+# extra evidence when still present; the name is whatever follows the
+# last "external " / "(was a private external) " marker.
+# Both tools must succeed and otool must show load commands — real
+# otool exits 0 with "is not an object file" for non-Mach-O input, and
+# an unreadable load-command table cannot support a PASS.
+# ---------------------------------------------------------------------
+COVERAGE_SYMBOL_SAMPLE=20
+
+if ! OTOOL_OUT="$(otool -l "$BINARY")"; then
+    echo "❌ FAIL — otool -l failed on $BINARY; cannot check coverage sections."
+    exit 1
+fi
+# Here-string, not `printf | grep -q`: grep -q exits at the first match,
+# SIGPIPEs the writer, and pipefail would turn that into a false FAIL.
+if ! grep -q '^Load command ' <<< "$OTOOL_OUT"; then
+    echo "❌ FAIL — otool -l reported no load commands for $BINARY"
+    echo "         (not a Mach-O?). No clean result without load commands."
+    exit 1
+fi
+if ! NM_OUT="$(nm -m "$BINARY")"; then
+    echo "❌ FAIL — nm -m failed on $BINARY; cannot check coverage symbols."
+    exit 1
+fi
+
+# Plain assignments (not process substitution) so an awk/sort failure
+# aborts under `set -e -o pipefail` instead of yielding an empty list.
+SECTIONS_OUT="$(printf '%s\n' "$OTOOL_OUT" | awk '$1 == "sectname" && $2 ~ /^__llvm_(prf_|cov)/ { print $2 }' | sort -u)"
+SYMBOLS_OUT="$(printf '%s\n' "$NM_OUT" | awk '/__llvm_(prf_|cov|profile_)/ { sub(/.*external\)? /, ""); print }' | sort -u)"
+
+coverage_sections=()
+while IFS= read -r line; do
+    [ -n "$line" ] && coverage_sections+=("$line")
+done <<< "$SECTIONS_OUT"
+
+coverage_symbols=()
+while IFS= read -r line; do
+    [ -n "$line" ] && coverage_symbols+=("$line")
+done <<< "$SYMBOLS_OUT"
+
+coverage_hits=$(( ${#coverage_sections[@]} + ${#coverage_symbols[@]} ))
+
+# ---------------------------------------------------------------------
 # Result
 # ---------------------------------------------------------------------
+if [ "$coverage_hits" -gt 0 ]; then
+    echo
+    echo "❌ FAIL — coverage instrumentation found in Release binary:"
+    for s in ${coverage_sections[@]+"${coverage_sections[@]}"}; do
+        echo "    • section $s"
+    done
+    shown=0
+    for s in ${coverage_symbols[@]+"${coverage_symbols[@]}"}; do
+        if [ "$shown" -ge "$COVERAGE_SYMBOL_SAMPLE" ]; then
+            echo "    • … and $(( ${#coverage_symbols[@]} - shown )) more symbols (${#coverage_symbols[@]} total)"
+            break
+        fi
+        echo "    • symbol $s"
+        shown=$((shown + 1))
+    done
+    echo
+    echo "The binary was built with -profile-generate / CLANG_COVERAGE_MAPPING."
+    echo "Likely cause: an Xcode *build* action through a scheme whose test plan"
+    echo "gathers coverage (ENABLE_CODE_COVERAGE=YES). Ship only an archive built"
+    echo "without coverage instrumentation."
+fi
+
 if [ "$violations" -gt 0 ]; then
     echo
     echo "❌ FAIL — debug-hook strings found in Release binary:"
@@ -212,9 +291,14 @@ if [ "$violations" -gt 0 ]; then
     echo "     literal (e.g. an error message containing the hook name)."
     echo
     echo "See CLAUDE.md § 'Debug Test Hooks — Naming, Gating & Registry'."
+fi
+
+if [ "$violations" -gt 0 ] || [ "$coverage_hits" -gt 0 ]; then
     exit 1
 fi
 
 echo "✅ PASS — no debug-hook strings present in Release binary"
 echo "         Checked ${#KNOWN_HOOKS[@]} registered hook strings against"
 echo "         $(basename "$BINARY") ($EXEC_NAME)"
+echo "✅ PASS — no coverage instrumentation (__llvm_prf_*/__llvm_cov* sections,"
+echo "         ___llvm_profile_* symbols) in $(basename "$BINARY")"
