@@ -91,6 +91,29 @@ class BrandLayerTests(unittest.TestCase):
         self.assertIn('audit_test_hook_naming.sh', phase["shellScript"])
         self.assertIn('audit_release_archive.sh', phase["shellScript"])
 
+    def test_release_configs_never_instrument_coverage(self):
+        # A scheme whose test plan gathers coverage makes the *build* action
+        # inject CLANG_COVERAGE_MAPPING=YES above xcconfig precedence, even for
+        # Release. The xcconfig must turn off the gates the Swift/Clang compiler
+        # and linker specs consult, so the in-build Release audit (coverage
+        # check) passes. Debug keeps Xcode's defaults for unit-test coverage.
+        keys = ["CLANG_COVERAGE_MAPPING", "ENABLE_CODE_COVERAGE", "CLANG_ENABLE_CODE_COVERAGE",
+                "CLANG_COVERAGE_MAPPING_LINKER_ARGS", "LD_DEBUG_VARIANT"]
+        for name in ["WoowRelease", "ApporoRelease"]:
+            c = config(name)
+            for key in keys:
+                with self.subTest(name=name, key=key):
+                    self.assertEqual(c.get(key), "NO")
+        for name in ["WoowDebug", "ApporoDebug", "Shared"]:
+            c = config(name)
+            for key in keys:
+                with self.subTest(name=name, key=key):
+                    self.assertNotIn(key, c)
+        for c in self.objects.values():
+            if c.get("isa") == "XCBuildConfiguration":
+                for key in keys:
+                    self.assertNotIn(key, c["buildSettings"], "project/target level would override xcconfig")
+
     def test_schemes_preserve_woow_and_select_apporo(self):
         original = subprocess.run(["git", "show", "a50c4df:odoo.xcodeproj/xcshareddata/xcschemes/odoo.xcscheme"], cwd=ROOT, capture_output=True, check=True).stdout
         self.assertEqual(original, (ROOT / "odoo.xcodeproj/xcshareddata/xcschemes/odoo.xcscheme").read_bytes())
