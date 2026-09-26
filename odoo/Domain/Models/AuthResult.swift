@@ -31,6 +31,8 @@ enum AuthResult: Sendable, Equatable {
         case sessionExpired
         case httpsRequired
         case serverError
+        /// The server answered sign-in with this non-200 HTTP status (e.g. Cloudflare 530).
+        case serverHTTPStatus(Int)
         case unknown
     }
 

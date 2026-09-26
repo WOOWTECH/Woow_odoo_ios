@@ -62,6 +62,7 @@ def allow_audited_cookie_consumer_apply(text):
 
 AUDITED_SESSION_PROTOCOLS = {
     "HonestLogoutS4Tests.swift": ("LogoutURLProtocol",),
+    "LoginServerErrorMessageTests.swift": ("CloudflareOriginDownURLProtocol",),
     "LogoutUnregisterURLTests.swift": ("RecordingURLProtocol",),
     "MissingTests.swift": ("StubURLProtocol",),
     "SessionReauthenticatorTests.swift": ("SequencedURLProtocol",),

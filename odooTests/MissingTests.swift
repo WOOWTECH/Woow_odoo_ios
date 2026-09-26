@@ -263,8 +263,8 @@ final class OdooAPIClientAuthTests: XCTestCase {
         }
     }
 
-    // 500 HTTP status → .serverError.
-    func test_authenticate_given500Response_returnsServerError() async throws {
+    // 500 HTTP status → .serverHTTPStatus(500) (the status reaches the localized login message).
+    func test_authenticate_given500Response_returnsServerHTTPStatus() async throws {
         StubURLProtocol.handler = { _ in
             let html = "<html>Internal Server Error</html>"
             let data = html.data(using: .utf8)!
@@ -284,9 +284,9 @@ final class OdooAPIClientAuthTests: XCTestCase {
             password: "pass"
         )
         if case .error(_, let type) = result {
-            XCTAssertEqual(type, .serverError)
+            XCTAssertEqual(type, .serverHTTPStatus(500))
         } else {
-            XCTFail("Expected .serverError, got \(result)")
+            XCTFail("Expected .serverHTTPStatus(500), got \(result)")
         }
     }
 
@@ -473,7 +473,7 @@ final class LoginViewModelAsyncTests: XCTestCase {
         let types: [AuthResult.ErrorType] = [
             .networkError, .invalidUrl, .databaseNotFound,
             .invalidCredentials, .sessionExpired, .httpsRequired,
-            .serverError, .unknown
+            .serverError, .serverHTTPStatus(530), .unknown
         ]
         let unique = Set(types.map { "\($0)" })
         XCTAssertEqual(unique.count, types.count, "All error types must have distinct string representations")

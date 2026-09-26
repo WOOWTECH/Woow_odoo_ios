@@ -24,19 +24,24 @@ final class LoginViewModel: ObservableObject {
 
     private let repository: AccountRepositoryProtocol
     private let secureStorage: any SecureStorageProtocol
+    /// Source of every user-facing message; tests pass a `<lang>.lproj` bundle.
+    private let localizationBundle: Bundle
 
     /// Creates a LoginViewModel.
     /// - Parameter addingAccount: When true, the server info step is always shown
     ///   so the user can enter credentials for a new, distinct account. When false
     ///   (the default), existing active-account credentials are pre-filled for a
     ///   faster session re-authentication after expiry.
+    /// - Parameter localizationBundle: Bundle that localizes error messages (default `.main`).
     init(
         addingAccount: Bool = false,
         repository: AccountRepositoryProtocol = AccountRepository(),
-        secureStorage: any SecureStorageProtocol = SecureStorage.shared
+        secureStorage: any SecureStorageProtocol = SecureStorage.shared,
+        localizationBundle: Bundle = .main
     ) {
         self.repository = repository
         self.secureStorage = secureStorage
+        self.localizationBundle = localizationBundle
         if !addingAccount {
             prefillFromActiveAccount()
         }
@@ -65,21 +70,21 @@ final class LoginViewModel: ObservableObject {
 
         let trimmed = serverUrl.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            error = String(localized: "error_server_url_required")
+            error = String(localized: "error_server_url_required", bundle: localizationBundle)
             return
         }
 
         guard !database.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            error = String(localized: "error_database_required")
+            error = String(localized: "error_database_required", bundle: localizationBundle)
             return
         }
 
         switch ServerUrlInput.classify(serverUrl) {
         case .httpsRequired:
-            error = String(localized: "error_https_required")
+            error = String(localized: "error_https_required", bundle: localizationBundle)
             return
         case .invalid:
-            error = String(localized: "error_invalid_server_url")
+            error = String(localized: "error_invalid_server_url", bundle: localizationBundle)
             return
         case .valid(let normalized):
             // Write back so the credentials summary and login() see one scheme.
@@ -104,11 +109,11 @@ final class LoginViewModel: ObservableObject {
         let trimmedPass = password.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !trimmedUser.isEmpty else {
-            error = String(localized: "error_username_required")
+            error = String(localized: "error_username_required", bundle: localizationBundle)
             return
         }
         guard !trimmedPass.isEmpty else {
-            error = String(localized: "error_password_required")
+            error = String(localized: "error_password_required", bundle: localizationBundle)
             return
         }
 
@@ -141,13 +146,15 @@ final class LoginViewModel: ObservableObject {
 
     private func mapError(message: String, type: AuthResult.ErrorType) -> String {
         switch type {
-        case .networkError: return String(localized: "error_network")
-        case .invalidUrl: return String(localized: "error_invalid_url")
-        case .databaseNotFound: return String(localized: "error_database_not_found")
-        case .invalidCredentials: return String(localized: "error_invalid_credentials")
-        case .sessionExpired: return String(localized: "error_session_expired")
-        case .httpsRequired: return String(localized: "error_https_required")
-        case .serverError: return String(format: String(localized: "error_server_%@"), message)
+        case .networkError: return String(localized: "error_network", bundle: localizationBundle)
+        case .invalidUrl: return String(localized: "error_invalid_url", bundle: localizationBundle)
+        case .databaseNotFound: return String(localized: "error_database_not_found", bundle: localizationBundle)
+        case .invalidCredentials: return String(localized: "error_invalid_credentials", bundle: localizationBundle)
+        case .sessionExpired: return String(localized: "error_session_expired", bundle: localizationBundle)
+        case .httpsRequired: return String(localized: "error_https_required", bundle: localizationBundle)
+        case .serverError: return String(format: String(localized: "error_server_%@", bundle: localizationBundle), message)
+        case .serverHTTPStatus(let code):
+            return String(format: String(localized: "error_server_http_%lld", bundle: localizationBundle), code)
         case .unknown: return message
         }
     }

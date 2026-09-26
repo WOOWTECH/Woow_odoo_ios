@@ -81,9 +81,13 @@ actor OdooAPIClient {
         do {
             let (data, response) = try await post(url: url, body: request, pushSessionId: isolatedPushSession ? "" : nil)
 
-            guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200 else {
-                return .error("Server error", .serverError)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                // URLSession reports malformed responses as URLError(.badServerResponse); same bucket.
+                return .error("Unable to connect to server", .networkError)
+            }
+            guard httpResponse.statusCode == 200 else {
+                // Status only; LoginViewModel renders the localized text (`error_server_http_%lld`).
+                return .error("HTTP \(httpResponse.statusCode)", .serverHTTPStatus(httpResponse.statusCode))
             }
 
             let decoded = try JSONDecoder().decode(
