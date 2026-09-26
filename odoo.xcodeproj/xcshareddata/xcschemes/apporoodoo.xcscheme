@@ -29,6 +29,15 @@
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES"
       shouldAutocreateTestPlan = "NO">
+      <TestPlans>
+         <TestPlanReference
+            reference = "container:ApporoUnit.xctestplan"
+            default = "YES">
+         </TestPlanReference>
+         <TestPlanReference
+            reference = "container:ApporoUI.xctestplan">
+         </TestPlanReference>
+      </TestPlans>
       <Testables>
          <TestableReference
             skipped = "NO"
@@ -38,6 +47,17 @@
                BlueprintIdentifier = "0435CDDF2F74B70200751CCD"
                BuildableName = "odooTests.xctest"
                BlueprintName = "odooTests"
+               ReferencedContainer = "container:odoo.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "0435CDE92F74B70200751CCD"
+               BuildableName = "odooUITests.xctest"
+               BlueprintName = "odooUITests"
                ReferencedContainer = "container:odoo.xcodeproj">
             </BuildableReference>
          </TestableReference>

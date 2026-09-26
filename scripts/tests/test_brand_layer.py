@@ -99,8 +99,17 @@ class BrandLayerTests(unittest.TestCase):
             self.assertEqual(scheme.find(action).get("buildConfiguration"), "ApporoDebug")
         for action in ["ProfileAction", "ArchiveAction"]:
             self.assertEqual(scheme.find(action).get("buildConfiguration"), "ApporoRelease")
-        self.assertIsNone(scheme.find("TestAction/TestPlans"), "No default live location E2E")
-        self.assertEqual([e.get("BlueprintName") for e in scheme.findall("TestAction/Testables/TestableReference/BuildableReference")], ["odooTests"])
+        # Default plan stays unit-only (no live location E2E); UI tests are
+        # reachable only by explicitly choosing -testPlan ApporoUI.
+        plans = {p.get("reference"): p.get("default") for p in scheme.findall("TestAction/TestPlans/TestPlanReference")}
+        self.assertEqual(plans, {"container:ApporoUnit.xctestplan": "YES", "container:ApporoUI.xctestplan": None})
+        self.assertEqual([e.get("BlueprintName") for e in scheme.findall("TestAction/Testables/TestableReference/BuildableReference")], ["odooTests", "odooUITests"])
+        for plan_name, target in [("ApporoUnit", "odooTests"), ("ApporoUI", "odooUITests")]:
+            plan = json.loads(text(f"{plan_name}.xctestplan"))
+            self.assertEqual([t["target"]["name"] for t in plan["testTargets"]], [target])
+            self.assertTrue(all(t.get("enabled", True) for t in plan["testTargets"]))
+            self.assertNotIn("environmentVariableEntries", json.dumps(plan))
+            self.assertNotIn("RUN_LOCATION_E2E", json.dumps(plan))
 
     def test_resource_outputs_have_one_owner_and_declared_inputs(self):
         exceptions = next(v for v in self.objects.values() if v.get("isa") == "PBXFileSystemSynchronizedBuildFileExceptionSet")["membershipExceptions"]
