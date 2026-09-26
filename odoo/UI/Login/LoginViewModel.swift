@@ -74,17 +74,16 @@ final class LoginViewModel: ObservableObject {
             return
         }
 
-        // Reject http:// explicitly
-        if trimmed.lowercased().hasPrefix("http://") {
+        switch ServerUrlInput.classify(serverUrl) {
+        case .httpsRequired:
             error = String(localized: "error_https_required")
             return
-        }
-
-        // Validate URL format before proceeding
-        let normalized = trimmed.ensureHTTPS
-        guard let parsedUrl = URL(string: normalized), parsedUrl.host != nil else {
+        case .invalid:
             error = String(localized: "error_invalid_server_url")
             return
+        case .valid(let normalized):
+            // Write back so the credentials summary and login() see one scheme.
+            serverUrl = normalized
         }
 
         step = .credentials

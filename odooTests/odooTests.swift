@@ -40,6 +40,16 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(account.fullServerUrl, "https://odoo.example.com")
     }
 
+    /// A doubled scheme typed into the login form must not survive into the stored
+    /// account URL (simulator evidence en-light-32-double-https: `https://https://…`).
+    func test_fullServerUrl_givenRepeatedHttpsPrefix_collapsesToSingleScheme() {
+        let account = OdooAccount(
+            serverUrl: "https://HTTPS://https://odoo.example.com", database: "db",
+            username: "admin", displayName: "Admin"
+        )
+        XCTAssertEqual(account.fullServerUrl, "https://odoo.example.com")
+    }
+
     func testOdooAccountEquality() {
         let id = "test-id"
         let fixedDate = Date(timeIntervalSince1970: 1000000)
@@ -447,6 +457,66 @@ final class LoginViewModelTests: XCTestCase {
         XCTAssertNotNil(vm.error)
         vm.clearError()
         XCTAssertNil(vm.error)
+    }
+
+    // MARK: - Server URL input normalization (parity with Android ServerUrlInput.kt)
+
+    /// Fresh add-account form, isolated from any real Core Data / Keychain state.
+    private func makeServerStepViewModel(serverUrl: String) -> LoginViewModel {
+        let vm = LoginViewModel(addingAccount: true,
+                                repository: MockAccountRepository(),
+                                secureStorage: MockSecureStorage())
+        vm.serverUrl = serverUrl
+        vm.database = "mydb"
+        return vm
+    }
+
+    func test_goToNextStep_givenDoubledHttpsScheme_advancesWithSingleScheme() {
+        let vm = makeServerStepViewModel(serverUrl: "https://https://example.invalid")
+        vm.goToNextStep()
+        XCTAssertNil(vm.error)
+        XCTAssertEqual(vm.step, .credentials)
+        XCTAssertEqual(vm.displayUrl, "https://example.invalid",
+                       "credentials-step summary must show a single scheme")
+        XCTAssertEqual(vm.serverUrl, "example.invalid",
+                       "field keeps only host[/path]; the form already shows the https:// prefix")
+    }
+
+    func test_goToNextStep_givenMixedCaseRepeatedSchemeAndWhitespace_trimsAndNormalizes() {
+        let vm = makeServerStepViewModel(serverUrl: "  HTTPS://https://HTTPS://example.invalid/erp  ")
+        vm.goToNextStep()
+        XCTAssertNil(vm.error)
+        XCTAssertEqual(vm.step, .credentials)
+        XCTAssertEqual(vm.serverUrl, "example.invalid/erp")
+        XCTAssertEqual(vm.displayUrl, "https://example.invalid/erp")
+    }
+
+    func test_goToNextStep_givenHttpBeforeHttps_showsHttpsError() {
+        let vm = makeServerStepViewModel(serverUrl: " http://https://example.invalid")
+        vm.goToNextStep()
+        XCTAssertEqual(vm.error, String(localized: "error_https_required"))
+        XCTAssertEqual(vm.step, .serverInfo)
+    }
+
+    func test_goToNextStep_givenHttpHiddenBehindHttps_showsInvalidUrlError() {
+        let vm = makeServerStepViewModel(serverUrl: "https://http://example.invalid")
+        vm.goToNextStep()
+        XCTAssertEqual(vm.error, String(localized: "error_invalid_server_url"))
+        XCTAssertEqual(vm.step, .serverInfo)
+    }
+
+    func test_goToNextStep_givenOtherSchemeBehindHttps_showsInvalidUrlError() {
+        let vm = makeServerStepViewModel(serverUrl: "https://ftp://example.invalid")
+        vm.goToNextStep()
+        XCTAssertEqual(vm.error, String(localized: "error_invalid_server_url"))
+        XCTAssertEqual(vm.step, .serverInfo)
+    }
+
+    func test_goToNextStep_givenSchemeOnly_showsInvalidUrlError() {
+        let vm = makeServerStepViewModel(serverUrl: "https://https://")
+        vm.goToNextStep()
+        XCTAssertEqual(vm.error, String(localized: "error_invalid_server_url"))
+        XCTAssertEqual(vm.step, .serverInfo)
     }
 }
 
