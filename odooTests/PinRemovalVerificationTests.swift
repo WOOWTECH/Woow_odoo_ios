@@ -33,7 +33,7 @@ final class PinRemovalVerificationTests: XCTestCase {
     func test_removePin_givenCorrectCurrentPin_removesPin() {
         let vm = SettingsViewModel(settingsRepo: repo)
 
-        XCTAssertEqual(vm.removePin(verifyingCurrentPin: Self.currentPin), .removed)
+        XCTAssertEqual(vm.removePin(verifyingCurrentPin: Self.currentPin), .accepted)
         XCTAssertFalse(vm.settings.pinEnabled)
         XCTAssertNil(vm.settings.pinHash)
         XCTAssertNil(repo.getSettings().pinHash, "PIN 雜湊必須真的從儲存中移除")
@@ -71,9 +71,9 @@ final class PinRemovalVerificationTests: XCTestCase {
         let path = try XCTUnwrap(Bundle(for: SettingsViewModel.self).path(forResource: "zh-Hant", ofType: "lproj"))
         let zhHant = try XCTUnwrap(Bundle(path: path))
 
-        XCTAssertEqual(PinRemovalOutcome.incorrectPin.errorMessage(bundle: zhHant), "PIN 碼不正確")
-        XCTAssertEqual(PinRemovalOutcome.lockedOut(remainingSeconds: 30).errorMessage(bundle: zhHant), "30 秒後重試")
-        XCTAssertNil(PinRemovalOutcome.removed.errorMessage(bundle: zhHant))
+        XCTAssertEqual(CurrentPinOutcome.incorrectPin.errorMessage(bundle: zhHant), "PIN 碼不正確")
+        XCTAssertEqual(CurrentPinOutcome.lockedOut(remainingSeconds: 30).errorMessage(bundle: zhHant), "30 秒後重試")
+        XCTAssertNil(CurrentPinOutcome.accepted.errorMessage(bundle: zhHant))
     }
 }
 

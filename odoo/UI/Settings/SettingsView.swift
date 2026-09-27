@@ -14,6 +14,7 @@ struct SettingsView: View {
     @State private var showColorPicker = false
     @State private var showPinSetup = false
     @State private var showPinRemoval = false
+    @State private var showAppLockDisable = false
     @State private var selectedColor = AppSettings.defaultThemeColor
 
     var body: some View {
@@ -53,7 +54,11 @@ struct SettingsView: View {
             Section("Security") {
                 Toggle("App Lock", isOn: Binding(
                     get: { viewModel.settings.appLockEnabled },
-                    set: { viewModel.toggleAppLock($0) }
+                    set: { enabled in
+                        // With a PIN set, "off" is refused until the current PIN is verified; the
+                        // switch stays on and the PIN prompt decides.
+                        if !viewModel.toggleAppLock(enabled) { showAppLockDisable = true }
+                    }
                 ))
 
                 if viewModel.settings.appLockEnabled {
@@ -243,10 +248,20 @@ struct SettingsView: View {
             )
         }
         .sheet(isPresented: $showPinRemoval) {
-            PinRemovalView(
-                verifyAndRemove: { viewModel.removePin(verifyingCurrentPin: $0) },
-                onRemoved: { showPinRemoval = false },
+            CurrentPinPromptView(
+                title: String(localized: "Remove PIN"),
+                verify: { viewModel.removePin(verifyingCurrentPin: $0) },
+                onAccepted: { showPinRemoval = false },
                 onCancel: { showPinRemoval = false }
+            )
+        }
+        .sheet(isPresented: $showAppLockDisable) {
+            CurrentPinPromptView(
+                title: String(localized: "App Lock"),
+                subtitle: String(localized: "app_lock_disable_pin_subtitle"),
+                verify: { viewModel.disableAppLock(verifyingCurrentPin: $0) },
+                onAccepted: { showAppLockDisable = false },
+                onCancel: { showAppLockDisable = false }
             )
         }
     }

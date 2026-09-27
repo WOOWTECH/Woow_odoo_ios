@@ -48,9 +48,30 @@ final class SettingsViewModel: ObservableObject {
         theme.setThemeMode(mode)
     }
 
-    func toggleAppLock(_ enabled: Bool) {
+    /// Turns App Lock on, or off when no PIN is set. Turning it off while a PIN is set is refused
+    /// (returns `false`, the switch stays on) and must go through `disableAppLock(verifyingCurrentPin:)`
+    /// — an unlocked phone handed to someone must not let them switch the lock off with one tap
+    /// (Android f9a0207 parity). Only the legacy PIN-less state can still be switched off here.
+    @discardableResult
+    func toggleAppLock(_ enabled: Bool) -> Bool {
+        if !enabled && settingsRepo.getSettings().pinEnabled {
+            AppLogger.settings.warning("App Lock can only be turned off after verifying the current PIN")
+            return false
+        }
         settingsRepo.setAppLock(enabled)
         settings.appLockEnabled = enabled
+        return true
+    }
+
+    /// Turns App Lock off only after `pin` verifies as the current PIN, through the same check,
+    /// failed-attempt counter and lockout as the unlock screen (`verifyCurrentPin(_:)`).
+    func disableAppLock(verifyingCurrentPin pin: String) -> CurrentPinOutcome {
+        let outcome = verifyCurrentPin(pin)
+        if outcome == .accepted {
+            settingsRepo.setAppLock(false)
+            settings.appLockEnabled = false
+        }
+        return outcome
     }
 
     func toggleBiometric(_ enabled: Bool) {
@@ -94,7 +115,19 @@ final class SettingsViewModel: ObservableObject {
     /// be one unverified tap). Verification goes through `SettingsRepository.verifyPin`, the unlock
     /// path, so wrong entries count toward the same lockout and a lockout refuses even a correct PIN.
     /// There is deliberately no unverified removal entry point on the ViewModel.
-    func removePin(verifyingCurrentPin pin: String) -> PinRemovalOutcome {
+    func removePin(verifyingCurrentPin pin: String) -> CurrentPinOutcome {
+        let outcome = verifyCurrentPin(pin)
+        if outcome == .accepted {
+            settingsRepo.removePin()
+            settings = settingsRepo.getSettings()
+        }
+        return outcome
+    }
+
+    /// The one "is this the current PIN?" check behind every PIN-gated Settings action. It goes
+    /// through `SettingsRepository.verifyPin` — the unlock path — so wrong entries count toward the
+    /// same failed-attempt counter and lockout, and a lockout refuses even a correct PIN.
+    private func verifyCurrentPin(_ pin: String) -> CurrentPinOutcome {
         if settingsRepo.isLockedOut() {
             return .lockedOut(remainingSeconds: settingsRepo.getLockoutRemainingSeconds())
         }
@@ -105,9 +138,7 @@ final class SettingsViewModel: ObservableObject {
             }
             return .incorrectPin
         }
-        settingsRepo.removePin()
-        settings = settingsRepo.getSettings()
-        return .removed
+        return .accepted
     }
 
     func clearCache() {
@@ -124,11 +155,12 @@ final class SettingsViewModel: ObservableObject {
     }
 }
 
-// MARK: - PinRemovalOutcome
+// MARK: - CurrentPinOutcome
 
-/// Result of a verified PIN removal attempt.
-enum PinRemovalOutcome: Equatable {
-    case removed
+/// Result of checking the current PIN before a PIN-gated Settings action (remove PIN, turn App
+/// Lock off).
+enum CurrentPinOutcome: Equatable {
+    case accepted
     case incorrectPin
     case lockedOut(remainingSeconds: Int)
 
@@ -136,7 +168,7 @@ enum PinRemovalOutcome: Equatable {
     /// strings so every language already has them.
     func errorMessage(bundle: Bundle = .main) -> String? {
         switch self {
-        case .removed:
+        case .accepted:
             return nil
         case .incorrectPin:
             return String(localized: "incorrect_pin", bundle: bundle)

@@ -1193,9 +1193,11 @@ final class SettingsViewModelCacheTests: XCTestCase {
         _ = sizeBefore // suppress unused warning
     }
 
-    // toggleAppLock must persist through settings round-trip.
+    // toggleAppLock must persist through settings round-trip. Without a PIN: with one, "off" needs
+    // the current PIN (AppLockDisableRequiresPinTests).
     func test_toggleAppLock_persistsToSettingsRepository() {
         let repo = SettingsRepository()
+        repo.removePin()
         let vm = SettingsViewModel(settingsRepo: repo)
 
         vm.toggleAppLock(true)
@@ -1212,7 +1214,7 @@ final class SettingsViewModelCacheTests: XCTestCase {
         _ = vm.setPin("123400")
         XCTAssertTrue(vm.settings.pinEnabled)
 
-        XCTAssertEqual(vm.removePin(verifyingCurrentPin: "123400"), .removed)
+        XCTAssertEqual(vm.removePin(verifyingCurrentPin: "123400"), .accepted)
         XCTAssertFalse(vm.settings.pinEnabled, "removePin must update vm.settings.pinEnabled to false")
         XCTAssertNil(vm.settings.pinHash, "removePin must clear vm.settings.pinHash")
     }

@@ -79,6 +79,7 @@
 "Change PIN" = "Change PIN";
 "Set PIN" = "Set PIN";
 "Remove PIN" = "Remove PIN";
+"app_lock_disable_pin_subtitle" = "Enter your current PIN to turn off App Lock";
 "Data & Storage" = "Data & Storage";
 "Clear Cache" = "Clear Cache";
 "About" = "About";

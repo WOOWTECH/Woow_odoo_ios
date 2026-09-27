@@ -811,6 +811,8 @@ final class SettingsViewModelTests: XCTestCase {
     }
 
     func test_toggleAppLock_enables() {
+        // No PIN, so the cleanup "off" below is allowed without verification.
+        SettingsRepository().removePin()
         let vm = SettingsViewModel()
         vm.toggleAppLock(true)
         XCTAssertTrue(vm.settings.appLockEnabled)
@@ -820,7 +822,7 @@ final class SettingsViewModelTests: XCTestCase {
     func test_setPin_givenValidPin_returnsTrue() {
         let vm = SettingsViewModel()
         XCTAssertTrue(vm.setPin("123456"))
-        XCTAssertEqual(vm.removePin(verifyingCurrentPin: "123456"), .removed)
+        XCTAssertEqual(vm.removePin(verifyingCurrentPin: "123456"), .accepted)
     }
 
     func test_setPin_givenTooShort_returnsFalse() {

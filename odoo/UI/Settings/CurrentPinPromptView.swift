@@ -1,13 +1,19 @@
 import SwiftUI
 
-/// Confirms the current PIN before it is removed (LIVE-0927-4). Presented as a sheet from
-/// SettingsView. Render-and-collect only: verification, failed-attempt counting and lockout all
-/// happen in `SettingsViewModel.removePin(verifyingCurrentPin:)`, the same repository path as the
-/// unlock screen, so this screen cannot be used to brute-force the PIN around the lockout.
-struct PinRemovalView: View {
-    /// Verifies `pin` and removes the PIN on success.
-    let verifyAndRemove: (String) -> PinRemovalOutcome
-    let onRemoved: () -> Void
+/// Asks for the current PIN before a PIN-gated Settings action — removing the PIN (LIVE-0927-4) or
+/// turning App Lock off (Android f9a0207 parity). Presented as a sheet from SettingsView.
+/// Render-and-collect only: verification, failed-attempt counting and lockout all happen in
+/// `SettingsViewModel` (`removePin(verifyingCurrentPin:)` / `disableAppLock(verifyingCurrentPin:)`),
+/// the same repository path as the unlock screen, so this screen cannot be used to brute-force the
+/// PIN around the lockout.
+struct CurrentPinPromptView: View {
+    /// Navigation title naming the action being confirmed.
+    let title: String
+    /// Optional line under "Enter Current PIN" explaining why the PIN is asked for.
+    var subtitle: String?
+    /// Verifies `pin` and performs the action on success.
+    let verify: (String) -> CurrentPinOutcome
+    let onAccepted: () -> Void
     let onCancel: () -> Void
 
     @State private var pin: String = ""
@@ -22,6 +28,13 @@ struct PinRemovalView: View {
 
                 Text(String(localized: "Enter Current PIN"))
                     .font(.title2.bold())
+
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
 
                 HStack(spacing: 12) {
                     ForEach(0..<pinLength, id: \.self) { i in
@@ -50,7 +63,7 @@ struct PinRemovalView: View {
                 Spacer()
             }
             .padding()
-            .navigationTitle(String(localized: "Remove PIN"))
+            .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -66,10 +79,10 @@ struct PinRemovalView: View {
         error = nil
         // Verify once per full entry, never per keystroke — a partial PIN would burn attempts.
         guard pin.count == pinLength else { return }
-        let outcome = verifyAndRemove(pin)
+        let outcome = verify(pin)
         pin = ""
-        if outcome == .removed {
-            onRemoved()
+        if outcome == .accepted {
+            onAccepted()
         } else {
             error = outcome.errorMessage()
         }
@@ -77,5 +90,11 @@ struct PinRemovalView: View {
 }
 
 #Preview {
-    PinRemovalView(verifyAndRemove: { _ in .incorrectPin }, onRemoved: {}, onCancel: {})
+    CurrentPinPromptView(
+        title: String(localized: "App Lock"),
+        subtitle: String(localized: "app_lock_disable_pin_subtitle"),
+        verify: { _ in .incorrectPin },
+        onAccepted: {},
+        onCancel: {}
+    )
 }

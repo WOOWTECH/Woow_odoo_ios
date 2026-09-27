@@ -79,6 +79,7 @@
 "Change PIN" = "更改 PIN 码";
 "Set PIN" = "设置 PIN 码";
 "Remove PIN" = "移除 PIN 码";
+"app_lock_disable_pin_subtitle" = "输入当前的 PIN 码以关闭应用程序锁定";
 "Data & Storage" = "数据与存储";
 "Clear Cache" = "清除缓存";
 "About" = "关于";
