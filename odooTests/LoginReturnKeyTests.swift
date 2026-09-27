@@ -35,7 +35,9 @@ final class LoginReturnKeyTests: XCTestCase {
 
         XCTAssertNil(next, "送出後不應再把焦點移到其他欄位")
         XCTAssertTrue(vm.isLoading, "Return 必須與 Login 鍵一樣立即開始登入")
-        await fulfillment(of: [succeeded], timeout: 2)
+        // Generous: in the full suite a WebKit GPU-process launch has blocked the main actor for
+        // >2 s (live0927 full run). isLoading above already proves the synchronous submission.
+        await fulfillment(of: [succeeded], timeout: 10)
     }
 
     func test_returnInPassword_givenEmptyPassword_doesNotSubmit() {
