@@ -2,12 +2,17 @@ import SwiftUI
 
 /// PIN setup/change flow — enter (verify old if changing) → new → confirm.
 /// Presented as a sheet from SettingsView. (G2)
+///
+/// The `.verifyOld` step calls `verifyCurrentPin`, which SettingsView wires to its own
+/// `SettingsViewModel.authorizePinChange(verifyingCurrentPin:)` — the same ViewModel whose `setPin`
+/// the new PIN is saved through, so the one-time authorization lands where it is checked.
 struct PinSetupView: View {
     let isChangingPin: Bool
+    /// Checks the current PIN (and, on `.accepted`, authorizes the change). Only called when
+    /// `isChangingPin`.
+    let verifyCurrentPin: (String) -> CurrentPinOutcome
     let onPinSet: (String) -> Void
     let onCancel: () -> Void
-
-    @StateObject private var viewModel = SettingsViewModel()
 
     enum Step {
         case verifyOld
@@ -22,8 +27,14 @@ struct PinSetupView: View {
 
     private let pinLength = PinHasher.pinLength
 
-    init(isChangingPin: Bool, onPinSet: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
+    init(
+        isChangingPin: Bool,
+        verifyCurrentPin: @escaping (String) -> CurrentPinOutcome,
+        onPinSet: @escaping (String) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
         self.isChangingPin = isChangingPin
+        self.verifyCurrentPin = verifyCurrentPin
         self.onPinSet = onPinSet
         self.onCancel = onCancel
         _step = State(initialValue: isChangingPin ? .verifyOld : .enterNew)
@@ -104,7 +115,7 @@ struct PinSetupView: View {
     private func handlePinComplete() {
         switch step {
         case .verifyOld:
-            if viewModel.verifyPin(pin) {
+            if verifyCurrentPin(pin) == .accepted {
                 pin = ""
                 step = .enterNew
             } else {
@@ -133,6 +144,7 @@ struct PinSetupView: View {
 #Preview("Set New PIN") {
     PinSetupView(
         isChangingPin: false,
+        verifyCurrentPin: { _ in .accepted },
         onPinSet: { _ in },
         onCancel: {}
     )
@@ -141,6 +153,7 @@ struct PinSetupView: View {
 #Preview("Change Existing PIN") {
     PinSetupView(
         isChangingPin: true,
+        verifyCurrentPin: { _ in .accepted },
         onPinSet: { _ in },
         onCancel: {}
     )

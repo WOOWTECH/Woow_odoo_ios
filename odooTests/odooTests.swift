@@ -820,6 +820,7 @@ final class SettingsViewModelTests: XCTestCase {
     }
 
     func test_setPin_givenValidPin_returnsTrue() {
+        SettingsRepository().removePin() // first-time setup: replacing a PIN needs authorizePinChange
         let vm = SettingsViewModel()
         XCTAssertTrue(vm.setPin("123456"))
         XCTAssertEqual(vm.removePin(verifyingCurrentPin: "123456"), .accepted)

@@ -101,11 +101,35 @@ final class SettingsViewModel: ObservableObject {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
     }
 
-    func verifyPin(_ pin: String) -> Bool {
-        settingsRepo.verifyPin(pin)
+    /// Set by a successful `authorizePinChange(verifyingCurrentPin:)`, consumed by the next `setPin`.
+    /// Main-actor state (the type is `@MainActor`).
+    private var pinChangeAuthorized = false
+
+    /// The "Change PIN" confirmation (Android 9f5f007 parity): replacing an existing PIN without
+    /// knowing it would let anyone holding the unlocked phone set their own PIN and then pass the
+    /// "turn App Lock off" check with it. Same check, counter and lockout as the other PIN-gated
+    /// actions; `.accepted` authorizes exactly one following `setPin`, any other outcome revokes it.
+    func authorizePinChange(verifyingCurrentPin pin: String) -> CurrentPinOutcome {
+        let outcome = verifyCurrentPin(pin)
+        pinChangeAuthorized = outcome == .accepted
+        return outcome
     }
 
+    /// The user left PIN setup without saving: a verified-but-unused change must not linger.
+    func cancelPinChange() {
+        pinChangeAuthorized = false
+    }
+
+    /// Stores `pin`. With a PIN already set this is refused (returns `false`) unless
+    /// `authorizePinChange(verifyingCurrentPin:)` just verified the current PIN; first-time setup
+    /// needs no verification. The authorization is consumed by this call whatever its result.
     func setPin(_ pin: String) -> Bool {
+        let authorized = !settingsRepo.getSettings().pinEnabled || pinChangeAuthorized
+        pinChangeAuthorized = false
+        guard authorized else {
+            AppLogger.settings.warning("PIN change refused: the current PIN was not verified")
+            return false
+        }
         let result = settingsRepo.setPin(pin)
         if result { settings = settingsRepo.getSettings() }
         return result

@@ -237,9 +237,11 @@ struct SettingsView: View {
                 viewModel.updateThemeColor(hex)
             }
         }
-        .sheet(isPresented: $showPinSetup) {
+        // Swipe-to-dismiss skips onCancel, so a verified-but-unused change is revoked on every dismissal.
+        .sheet(isPresented: $showPinSetup, onDismiss: { viewModel.cancelPinChange() }) {
             PinSetupView(
                 isChangingPin: viewModel.settings.pinEnabled,
+                verifyCurrentPin: { viewModel.authorizePinChange(verifyingCurrentPin: $0) },
                 onPinSet: { newPin in
                     viewModel.setPin(newPin)
                     showPinSetup = false

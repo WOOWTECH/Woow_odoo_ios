@@ -1210,6 +1210,7 @@ final class SettingsViewModelCacheTests: XCTestCase {
     // A verified removePin must update the published settings.
     func test_removePin_updatesCachedSettings() {
         let repo = SettingsRepository()
+        repo.removePin() // first-time setup: replacing an existing PIN needs authorizePinChange
         let vm = SettingsViewModel(settingsRepo: repo)
         _ = vm.setPin("123400")
         XCTAssertTrue(vm.settings.pinEnabled)
