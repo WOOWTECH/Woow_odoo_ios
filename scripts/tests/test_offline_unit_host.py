@@ -60,6 +60,25 @@ def allow_audited_cookie_consumer_apply(text):
     return text[:start] + test.replace("coordinator.apply(serverUrl:", "auditedCookieApply(serverUrl:") + text[end:]
 
 
+def allow_audited_keyboard_restorer_apply(text):
+    # The keyboard-restorer wiring test needs the coordinator's real child WKWebView. It builds
+    # one with a non-persistent store, no session cookie (no Keychain read), no deep link, and a
+    # base-load closure that does nothing: no request is ever issued.
+    name = "test_coordinator_keyboardDidHide_restoresChildWebViewScrollOffset"
+    start = text.index("    func " + name + "()")
+    end = text.index("\n    }\n", start) + len("\n    }\n")
+    test = text[start:end]
+    for required in ["websiteDataStore: { _ in .nonPersistent() },",
+                     "loadBaseRequest: { _, _ in },",
+                     'openExternalURL: { _ in XCTFail("No Safari") },',
+                     "brand: .woowtech,",
+                     "sessionId: nil, deepLink: nil)"]:
+        assert required in test
+    assert test.count("coordinator.apply(serverUrl:") == 1
+    assert "deepLink:" not in test.replace("deepLink: nil)", "")
+    return text[:start] + test.replace("coordinator.apply(serverUrl:", "auditedKeyboardApply(serverUrl:") + text[end:]
+
+
 AUDITED_SESSION_PROTOCOLS = {
     "HonestLogoutS4Tests.swift": ("LogoutURLProtocol",),
     "LoginServerErrorMessageTests.swift": ("CloudflareOriginDownURLProtocol",),
@@ -296,6 +315,8 @@ class OfflineUnitHostSourceTests(unittest.TestCase):
                              if not line.strip().startswith("//") and "guard case .load(" not in line)
             if path.name == "PushDeviceRegistrarTests.swift":
                 text = allow_audited_cookie_consumer_apply(text)
+            if path.name == "WebViewKeyboardScrollRestorerTests.swift":
+                text = allow_audited_keyboard_restorer_apply(text)
             self.assertNotRegex(text, r"\.load\(|\.loadHTMLString\(|\.reload\(|\.apply\(serverUrl:|createWebViewWith:")
             self.assertNotRegex(text, r"UIApplication\.shared\.open|Data\(contentsOf:|String\(contentsOf:")
 
@@ -312,6 +333,16 @@ class OfflineUnitHostSourceTests(unittest.TestCase):
         self.assertIn("loadBaseRequest(webView, URLRequest(url: url))", web)
         self.assertIn("config.websiteDataStore = websiteDataStore(accountId)", web)
         self.assertIn("OdooWebViewCoordinator.dataStore(forAccountId: $0)", web)
+
+    def test_keyboard_restorer_exception_requires_no_load_no_session_no_link(self):
+        text = source("odooTests/WebViewKeyboardScrollRestorerTests.swift")
+        allow_audited_keyboard_restorer_apply(text)
+        for old, new in [("loadBaseRequest: { _, _ in },", "loadBaseRequest: { webView, request in webView.load(request) },"),
+                         ("{ _ in .nonPersistent() }", "{ _ in .default() }"),
+                         ("sessionId: nil, deepLink: nil)", 'sessionId: "sid", deepLink: nil)'),
+                         ("brand: .woowtech,", "brand: .apporo,")]:
+            with self.assertRaises(AssertionError):
+                allow_audited_keyboard_restorer_apply(text.replace(old, new))
 
     def test_runtime_cases_exist_without_skipping_existing_cases(self):
         tests = source("odooTests/OfflineUnitHostTests.swift")

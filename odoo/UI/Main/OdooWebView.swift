@@ -106,13 +106,17 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     private let websiteDataStore: (String) -> WKWebsiteDataStore
     /// Injection keeps consumer-chain unit tests off the network, including WebKit.
     private let loadBaseRequest: (WKWebView, URLRequest) -> Void
+    /// Undoes WebKit's keyboard-avoidance scroll once the keyboard hides (LIVE-0927-1). Bound to
+    /// whichever child WebView is current, since account switches swap it.
+    private var keyboardScrollRestorer: WebViewKeyboardScrollRestorer?
 
     init(serverUrl: String, onSessionExpired: @escaping () -> Void, isLoading: Binding<Bool>,
          openExternalURL: @escaping (URL) -> Void = { UIApplication.shared.open($0) },
          brand: AppBrand.Code = AppBrand.current.code,
          pushCredentials: PushCredentialStorage = SecureStorage.shared,
          websiteDataStore: @escaping (String) -> WKWebsiteDataStore = { OdooWebViewCoordinator.dataStore(forAccountId: $0) },
-         loadBaseRequest: @escaping (WKWebView, URLRequest) -> Void = { webView, request in webView.load(request) }) {
+         loadBaseRequest: @escaping (WKWebView, URLRequest) -> Void = { webView, request in webView.load(request) },
+         keyboardNotifications: NotificationCenter = .default) {
         self.openExternalURL = openExternalURL
         self.brand = brand
         self.pushCredentials = pushCredentials
@@ -124,6 +128,9 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         self.currentServerHost = URL(string: serverUrl)?.host ?? ""
         self.currentServerPort = URL(string: serverUrl)?.port
         super.init()
+        keyboardScrollRestorer = WebViewKeyboardScrollRestorer(notificationCenter: keyboardNotifications) { [weak self] in
+            self?.webView?.scrollView
+        }
     }
 
     // MARK: - Container wiring

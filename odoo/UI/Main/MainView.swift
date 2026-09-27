@@ -35,6 +35,9 @@ struct MainView: View {
                         onSessionExpired: onSessionExpired,
                         isLoading: $isLoading
                     )
+                    // Default regions include `.keyboard`: WebKit does its own keyboard avoidance,
+                    // and a SwiftUI resize on top would double-adjust and re-layout Odoo on every
+                    // focus. WebKit's scroll is undone on hide by WebViewKeyboardScrollRestorer.
                     .ignoresSafeArea(edges: .bottom)
                 }
 

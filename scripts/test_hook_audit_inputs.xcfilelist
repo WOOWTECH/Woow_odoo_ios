@@ -103,6 +103,7 @@ $(SRCROOT)/odoo/UI/Main
 $(SRCROOT)/odoo/UI/Main/MainView.swift
 $(SRCROOT)/odoo/UI/Main/MainViewModel.swift
 $(SRCROOT)/odoo/UI/Main/OdooWebView.swift
+$(SRCROOT)/odoo/UI/Main/WebViewKeyboardScrollRestorer.swift
 $(SRCROOT)/odoo/UI/Settings
 $(SRCROOT)/odoo/UI/Settings/ColorPickerView.swift
 $(SRCROOT)/odoo/UI/Settings/PinSetupView.swift
