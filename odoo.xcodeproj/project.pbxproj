@@ -279,7 +279,7 @@
 			inputPaths = (
 				"$(SRCROOT)/scripts/audit_release_archive.sh",
 				"$(SRCROOT)/scripts/audit_test_hook_naming.sh",
-				"$(BUILT_PRODUCTS_DIR)/$(PRODUCT_NAME).app/$(PRODUCT_NAME)",
+				"$(TARGET_BUILD_DIR)/$(EXECUTABLE_PATH)",
 			);
 			name = "Audit debug-hook leaks (Release)";
 			outputFileListPaths = (
@@ -288,7 +288,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ \"$BRAND_RELEASE_AUDIT\" != \"YES\" ]; then\n    echo \"Skipping debug-hook audit (configuration: $CONFIGURATION)\"\n    exit 0\nfi\n/bin/bash \"$SRCROOT/scripts/audit_test_hook_naming.sh\" || exit $?\n\"$SRCROOT/scripts/audit_release_archive.sh\" \"$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app\"\n";
+			shellScript = "if [ \"$BRAND_RELEASE_AUDIT\" != \"YES\" ]; then\n    echo \"Skipping debug-hook audit (configuration: $CONFIGURATION)\"\n    exit 0\nfi\n/bin/bash \"$SRCROOT/scripts/audit_test_hook_naming.sh\" || exit $?\n\"$SRCROOT/scripts/audit_release_archive.sh\" \"$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH\"\n";
 		};
 		AB2000000000000000000001 /* Select brand resources */ = {
 			isa = PBXShellScriptBuildPhase;

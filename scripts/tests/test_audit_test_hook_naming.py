@@ -5,6 +5,7 @@ Run: python3 -B -m unittest discover -s scripts/tests -p test_audit_test_hook_na
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -153,10 +154,52 @@ class SourceAuditInputTests(unittest.TestCase):
         phase = next(v for v in objects.values() if v.get("name") == "Audit debug-hook leaks (Release)")
         self.assertEqual(phase["inputFileListPaths"], ["$(SRCROOT)/scripts/test_hook_audit_inputs.xcfilelist"])
         self.assertIn('audit_test_hook_naming.sh" || exit $?', phase["shellScript"])
-        self.assertIn('"$SRCROOT/scripts/audit_release_archive.sh" "$BUILT_PRODUCTS_DIR/$PRODUCT_NAME.app"', phase["shellScript"])
-        self.assertIn("$(BUILT_PRODUCTS_DIR)/$(PRODUCT_NAME).app/$(PRODUCT_NAME)", phase["inputPaths"])
+        self.assertIn('"$SRCROOT/scripts/audit_release_archive.sh" "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH"', phase["shellScript"])
+        self.assertIn("$(TARGET_BUILD_DIR)/$(EXECUTABLE_PATH)", phase["inputPaths"])
+        # Archive: BUILT_PRODUCTS_DIR/odoo.app is only a symlink into
+        # TARGET_BUILD_DIR (InstallationBuildProductsLocation); the sandbox
+        # grants the literal declared path, so reads through it are denied.
+        self.assertNotIn("BUILT_PRODUCTS_DIR", phase["shellScript"] + "\n".join(phase["inputPaths"]))
         settings = [v["buildSettings"] for v in objects.values() if v.get("isa") == "XCBuildConfiguration"]
         self.assertEqual([s["ENABLE_USER_SCRIPT_SANDBOXING"] for s in settings if "ENABLE_USER_SCRIPT_SANDBOXING" in s], ["YES"] * 4)
+
+    def test_declared_binary_input_is_the_audited_real_file_in_archive_layout(self):
+        # Archive layout (ACTION=install): the product lives in TARGET_BUILD_DIR
+        # and BUILT_PRODUCTS_DIR only holds a symlink to it. The declared input
+        # must be the very file the audit reads, reached without a symlink.
+        result = subprocess.run(["/usr/bin/plutil", "-convert", "json", "-o", "-", str(ROOT / "odoo.xcodeproj/project.pbxproj")], capture_output=True, check=True)
+        phase = next(v for v in json.loads(result.stdout)["objects"].values() if v.get("name") == "Audit debug-hook leaks (Release)")
+        temp = tempfile.TemporaryDirectory(prefix="archive-layout-")
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name).resolve()
+        target = root / "ArchiveIntermediates/InstallationBuildProductsLocation/Applications"
+        built = root / "ArchiveIntermediates/BuildProductsPath/ApporoRelease-iphoneos"
+        (target / "odoo.app").mkdir(parents=True)
+        (target / "odoo.app/odoo").write_bytes(b"\xcf\xfa\xed\xfe fake mach-o placeholder\n")
+        built.mkdir(parents=True)
+        (built / "odoo.app").symlink_to("../../InstallationBuildProductsLocation/Applications/odoo.app")
+        settings = {"SRCROOT": str(ROOT), "TARGET_BUILD_DIR": str(target), "BUILT_PRODUCTS_DIR": str(built),
+                    "PRODUCT_NAME": "odoo", "EXECUTABLE_NAME": "odoo", "WRAPPER_NAME": "odoo.app",
+                    "EXECUTABLE_FOLDER_PATH": "odoo.app", "EXECUTABLE_PATH": "odoo.app/odoo"}
+
+        def expand(text, pattern):
+            return re.sub(pattern, lambda m: settings[m.group(1)], text)
+
+        declared = [expand(p, r"\$\((\w+)\)") for p in phase["inputPaths"]
+                    if not p.startswith("$(SRCROOT)/scripts/")]
+        self.assertEqual(len(declared), 1, phase["inputPaths"])
+        self.assertEqual(os.path.realpath(declared[0]), declared[0], "declared binary input must not traverse a symlink")
+        argument = re.search(r'"\$SRCROOT/scripts/audit_release_archive\.sh" "([^"]+)"', phase["shellScript"]).group(1)
+        bindir = root / "bin"
+        bindir.mkdir()
+        for name, body in (("otool", 'echo "Load command 0"\n'), ("nm", "exit 0\n")):
+            (bindir / name).write_text("#!/bin/bash\n" + body)
+            (bindir / name).chmod(0o755)
+        env = dict(os.environ, PATH=f"{bindir}:/usr/bin:/bin")
+        audit = subprocess.run(["/bin/bash", str(ROOT / "scripts/audit_release_archive.sh"), expand(argument, r"\$(\w+)")],
+                               capture_output=True, text=True, env=env, timeout=60)
+        self.assertEqual(audit.returncode, 0, audit.stdout + audit.stderr)
+        self.assertIn(f"→ Auditing binary: {declared[0]}\n", audit.stdout)
 
 
 if __name__ == "__main__":

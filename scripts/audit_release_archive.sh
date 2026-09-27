@@ -158,7 +158,10 @@ echo "→ Binary size: $(stat -f%z "$BINARY" 2>/dev/null || stat -c%s "$BINARY")
 # binaries typically retain the unstripped DWARF or symbol table.
 # We use `nm` symbol count as a coarse signal: Release builds are
 # stripped and have far fewer global symbols than Debug.
-SYM_COUNT="$(nm -gU "$BINARY" 2>/dev/null | wc -l | tr -d ' ' || echo 0)"
+# `|| true` inside the group: under pipefail a failing nm must not make the
+# pipeline fail and append a second "0" ("0\n0" breaks `[ -gt ]`). A real
+# nm failure is caught fail-closed by the coverage check below.
+SYM_COUNT="$( { nm -gU "$BINARY" 2>/dev/null || true; } | wc -l | tr -d ' ')"
 if [ "$SYM_COUNT" -gt 5000 ]; then
     echo "⚠️  WARNING — binary has $SYM_COUNT global symbols, suggesting a Debug or"
     echo "    unstripped build. This audit is intended for Release archives."

@@ -159,6 +159,8 @@ class ReleaseArchiveAuditTests(unittest.TestCase):
         result = self.run_audit(env)
         self.assert_rejected(result)
         self.assertIn("synthetic nm failure", result.stderr)
+        # The Debug-symbol heuristic must not emit "0\\n0" into `[ -gt ]`.
+        self.assertNotIn("integer expression expected", result.stderr)
 
 
 if __name__ == "__main__":
