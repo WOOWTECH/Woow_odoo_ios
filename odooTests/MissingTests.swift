@@ -1205,14 +1205,14 @@ final class SettingsViewModelCacheTests: XCTestCase {
         XCTAssertFalse(repo.isAppLockEnabled(), "toggleAppLock(false) must persist to repository")
     }
 
-    // removePin must update the published settings.
+    // A verified removePin must update the published settings.
     func test_removePin_updatesCachedSettings() {
         let repo = SettingsRepository()
         let vm = SettingsViewModel(settingsRepo: repo)
         _ = vm.setPin("123400")
         XCTAssertTrue(vm.settings.pinEnabled)
 
-        vm.removePin()
+        XCTAssertEqual(vm.removePin(verifyingCurrentPin: "123400"), .removed)
         XCTAssertFalse(vm.settings.pinEnabled, "removePin must update vm.settings.pinEnabled to false")
         XCTAssertNil(vm.settings.pinHash, "removePin must clear vm.settings.pinHash")
     }

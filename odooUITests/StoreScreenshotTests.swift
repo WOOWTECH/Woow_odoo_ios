@@ -71,7 +71,7 @@ final class StoreScreenshotTests: XCTestCase {
             usernamePlaceholder: "使用者名稱或電子郵件",
             passwordPlaceholder: "輸入密碼",
             login: "登入",
-            configurationTitle: "設定",
+            configurationTitle: "帳號與設定",
             addAccount: "新增帳號",
             logoutCurrentAccount: "登出目前帳號",
             logoutAction: "登出"

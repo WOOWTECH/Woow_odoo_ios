@@ -90,9 +90,24 @@ final class SettingsViewModel: ObservableObject {
         return result
     }
 
-    func removePin() {
+    /// Removes the PIN only after `pin` verifies as the CURRENT PIN (LIVE-0927-4: removal used to
+    /// be one unverified tap). Verification goes through `SettingsRepository.verifyPin`, the unlock
+    /// path, so wrong entries count toward the same lockout and a lockout refuses even a correct PIN.
+    /// There is deliberately no unverified removal entry point on the ViewModel.
+    func removePin(verifyingCurrentPin pin: String) -> PinRemovalOutcome {
+        if settingsRepo.isLockedOut() {
+            return .lockedOut(remainingSeconds: settingsRepo.getLockoutRemainingSeconds())
+        }
+        guard settingsRepo.verifyPin(pin) else {
+            // This failure may have been the one that started a lockout.
+            if settingsRepo.isLockedOut() {
+                return .lockedOut(remainingSeconds: settingsRepo.getLockoutRemainingSeconds())
+            }
+            return .incorrectPin
+        }
         settingsRepo.removePin()
         settings = settingsRepo.getSettings()
+        return .removed
     }
 
     func clearCache() {
@@ -106,5 +121,27 @@ final class SettingsViewModel: ObservableObject {
     private func updateCacheSize() {
         let bytes = cacheService.calculateCacheSize()
         cacheSizeText = CacheService.formatSize(bytes)
+    }
+}
+
+// MARK: - PinRemovalOutcome
+
+/// Result of a verified PIN removal attempt.
+enum PinRemovalOutcome: Equatable {
+    case removed
+    case incorrectPin
+    case lockedOut(remainingSeconds: Int)
+
+    /// The message shown under the PIN dots, or `nil` on success. Reuses the unlock screen's
+    /// strings so every language already has them.
+    func errorMessage(bundle: Bundle = .main) -> String? {
+        switch self {
+        case .removed:
+            return nil
+        case .incorrectPin:
+            return String(localized: "incorrect_pin", bundle: bundle)
+        case .lockedOut(let seconds):
+            return String(format: String(localized: "lockout_timer_%lld", bundle: bundle), seconds)
+        }
     }
 }

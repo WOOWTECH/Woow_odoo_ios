@@ -820,7 +820,7 @@ final class SettingsViewModelTests: XCTestCase {
     func test_setPin_givenValidPin_returnsTrue() {
         let vm = SettingsViewModel()
         XCTAssertTrue(vm.setPin("123456"))
-        vm.removePin()
+        XCTAssertEqual(vm.removePin(verifyingCurrentPin: "123456"), .removed)
     }
 
     func test_setPin_givenTooShort_returnsFalse() {

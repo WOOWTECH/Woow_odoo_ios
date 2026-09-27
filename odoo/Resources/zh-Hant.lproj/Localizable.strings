@@ -56,7 +56,7 @@
 
 /* Config */
 "Configuration" = "設定";
-"configuration_title" = "設定";
+"configuration_title" = "帳號與設定";
 "Switch Account" = "切換帳號";
 "Add Account" = "新增帳號";
 "Logout" = "登出";

@@ -13,6 +13,7 @@ struct SettingsView: View {
 
     @State private var showColorPicker = false
     @State private var showPinSetup = false
+    @State private var showPinRemoval = false
     @State private var selectedColor = AppSettings.defaultThemeColor
 
     var body: some View {
@@ -76,7 +77,7 @@ struct SettingsView: View {
 
                     if viewModel.settings.pinEnabled {
                         Button(role: .destructive) {
-                            viewModel.removePin()
+                            showPinRemoval = true
                         } label: {
                             Label("Remove PIN", systemImage: "trash")
                         }
@@ -239,6 +240,13 @@ struct SettingsView: View {
                     showPinSetup = false
                 },
                 onCancel: { showPinSetup = false }
+            )
+        }
+        .sheet(isPresented: $showPinRemoval) {
+            PinRemovalView(
+                verifyAndRemove: { viewModel.removePin(verifyingCurrentPin: $0) },
+                onRemoved: { showPinRemoval = false },
+                onCancel: { showPinRemoval = false }
             )
         }
     }
