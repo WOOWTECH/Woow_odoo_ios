@@ -798,7 +798,7 @@ final class SettingsViewModelTests: XCTestCase {
         vm.updateThemeColor("#FF0000")
         XCTAssertEqual(vm.settings.themeColor, "#FF0000")
         // Restore
-        vm.updateThemeColor("#6183FC")
+        vm.updateThemeColor(AppSettings.defaultThemeColor)
     }
 
     func test_updateThemeMode_allValues() {
