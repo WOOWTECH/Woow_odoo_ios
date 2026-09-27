@@ -19,42 +19,56 @@ struct LoginView: View {
         _viewModel = StateObject(wrappedValue: LoginViewModel(addingAccount: addingAccount))
     }
 
-    @FocusState private var focusedField: Field?
-    enum Field { case serverUrl, database, username, password }
+    @FocusState private var focusedField: LoginViewModel.Field?
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 24) {
-                    // Logo
-                    Image(AppBrand.current.logoAsset)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 72, height: 72)
-                        .accessibilityHidden(true)
-                        .padding(.top, 40)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 24) {
+                        // Logo
+                        Image(AppBrand.current.logoAsset)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 72, height: 72)
+                            .accessibilityHidden(true)
+                            .padding(.top, 40)
 
-                    Text(AppBrand.current.displayName)
-                        .font(.title)
-                        .fontWeight(.bold)
+                        Text(AppBrand.current.displayName)
+                            .font(.title)
+                            .fontWeight(.bold)
 
-                    Text(viewModel.step == .serverInfo ? String(localized: "Enter server details") : String(localized: "Enter credentials"))
-                        .foregroundStyle(.secondary)
+                        Text(viewModel.step == .serverInfo ? String(localized: "Enter server details") : String(localized: "Enter credentials"))
+                            .foregroundStyle(.secondary)
 
-                    // Error banner
-                    if let error = viewModel.error {
-                        ErrorBannerView(message: error)
+                        // Error banner
+                        if let error = viewModel.error {
+                            ErrorBannerView(message: error)
+                        }
+
+                        // Step content
+                        if viewModel.step == .serverInfo {
+                            serverInfoFields
+                        } else {
+                            credentialFields
+                        }
                     }
-
-                    // Step content
-                    if viewModel.step == .serverInfo {
-                        serverInfoFields
-                    } else {
-                        credentialFields
-                    }
+                    .padding(.horizontal, 24)
+                    .frame(maxWidth: 500) // iPad: limit width
                 }
-                .padding(.horizontal, 24)
-                .frame(maxWidth: 500) // iPad: limit width
+                // Return behaves like the step's action button (same validation), or moves on.
+                .onSubmit {
+                    guard let field = focusedField else { return }
+                    focusedField = viewModel.handleReturnKey(in: field, onLoginSuccess: onLoginSuccess)
+                }
+                // Keep the action button above the keyboard. Re-run on keyboardDidShow because the
+                // ScrollView only gains its keyboard inset once the keyboard is on screen.
+                .onChange(of: focusedField) { field in
+                    revealActionButton(for: field, with: proxy)
+                }
+                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
+                    revealActionButton(for: focusedField, with: proxy)
+                }
             }
             .navigationBarHidden(true)
             .disabled(viewModel.isLoading)
@@ -66,6 +80,13 @@ struct LoginView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
             }
+        }
+    }
+
+    private func revealActionButton(for field: LoginViewModel.Field?, with proxy: ScrollViewProxy) {
+        guard let field else { return }
+        withAnimation {
+            proxy.scrollTo(LoginViewModel.actionButton(revealedFor: field), anchor: .bottom)
         }
     }
 
@@ -85,6 +106,7 @@ struct LoginView: View {
                         .autocapitalization(.none)
                         .disableAutocorrection(true)
                         .focused($focusedField, equals: .serverUrl)
+                        .submitLabel(.next)
                 }
                 .padding()
                 .background(Color(.systemGray6))
@@ -99,6 +121,7 @@ struct LoginView: View {
                     .autocapitalization(.none)
                     .disableAutocorrection(true)
                     .focused($focusedField, equals: .database)
+                    .submitLabel(.next)
                     .padding()
                     .background(Color(.systemGray6))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -113,6 +136,7 @@ struct LoginView: View {
             .buttonStyle(.borderedProminent)
             .tint(WoowTheme.fixedBrandColor)
             .clipShape(RoundedRectangle(cornerRadius: 12))
+            .id(LoginViewModel.ActionButton.next)
         }
     }
 
@@ -149,6 +173,7 @@ struct LoginView: View {
                     .textContentType(.username)
                     .autocapitalization(.none)
                     .focused($focusedField, equals: .username)
+                    .submitLabel(.next)
                     .padding()
                     .background(Color(.systemGray6))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -161,6 +186,7 @@ struct LoginView: View {
                 SecureField("Enter password", text: $viewModel.password)
                     .textContentType(.password)
                     .focused($focusedField, equals: .password)
+                    .submitLabel(.go)
                     .padding()
                     .background(Color(.systemGray6))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -177,6 +203,7 @@ struct LoginView: View {
             .buttonStyle(.borderedProminent)
             .tint(WoowTheme.fixedBrandColor)
             .clipShape(RoundedRectangle(cornerRadius: 12))
+            .id(LoginViewModel.ActionButton.login)
 
             Button("Back") {
                 viewModel.goBack()

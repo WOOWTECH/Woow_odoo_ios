@@ -138,6 +138,48 @@ final class LoginViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Keyboard (Return key + keeping the action button visible)
+
+    /// Focusable login fields, in keyboard order.
+    enum Field: Hashable {
+        case serverUrl, database, username, password
+    }
+
+    /// The step's action button, used as the ScrollView anchor that must stay above the keyboard.
+    enum ActionButton: Hashable {
+        case next, login
+    }
+
+    /// Which action button to scroll into view while `field` is focused. On the credentials step
+    /// the software keyboard otherwise covers the Login button (live run 2026-09-27: the first
+    /// Login tap landed on the keyboard).
+    static func actionButton(revealedFor field: Field) -> ActionButton {
+        switch field {
+        case .serverUrl, .database: return .next
+        case .username, .password: return .login
+        }
+    }
+
+    /// Handles Return in `field` and returns the field to focus next (`nil` dismisses the keyboard).
+    ///
+    /// Return in the password field performs exactly the Login button's action — `login(onSuccess:)`
+    /// with its validation, so empty fields never submit. Return in the database field is the Next
+    /// button's `goToNextStep()`.
+    func handleReturnKey(in field: Field, onLoginSuccess: @escaping () -> Void) -> Field? {
+        switch field {
+        case .serverUrl:
+            return .database
+        case .database:
+            goToNextStep()
+            return step == .credentials ? .username : nil
+        case .username:
+            return .password
+        case .password:
+            login(onSuccess: onLoginSuccess)
+            return nil
+        }
+    }
+
     func clearError() {
         error = nil
     }
