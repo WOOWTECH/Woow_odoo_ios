@@ -115,12 +115,13 @@ struct PinSetupView: View {
     private func handlePinComplete() {
         switch step {
         case .verifyOld:
-            if verifyCurrentPin(pin) == .accepted {
-                pin = ""
+            let outcome = verifyCurrentPin(pin)
+            pin = ""
+            switch pinSetupVerifyOldResult(for: outcome) {
+            case .advance:
                 step = .enterNew
-            } else {
-                error = String(localized: "incorrect_pin")
-                pin = ""
+            case .stay(let message):
+                error = message
             }
         case .enterNew:
             newPin = pin
@@ -137,6 +138,23 @@ struct PinSetupView: View {
             }
         }
     }
+}
+
+// MARK: - Verify-old step
+
+/// What PinSetupView's `.verifyOld` step does after the current PIN is checked.
+enum PinSetupVerifyOldResult: Equatable {
+    case advance
+    case stay(error: String)
+}
+
+/// `.accepted` advances to the new PIN; any refusal stays with `CurrentPinOutcome.errorMessage`, so
+/// a lockout shows the unlock screen's countdown (`lockout_timer_%lld`) instead of "Incorrect PIN"
+/// — during a lockout even the correct PIN is refused, and "Incorrect PIN" would tell the user the
+/// right PIN is wrong.
+func pinSetupVerifyOldResult(for outcome: CurrentPinOutcome, bundle: Bundle = .main) -> PinSetupVerifyOldResult {
+    guard let message = outcome.errorMessage(bundle: bundle) else { return .advance }
+    return .stay(error: message)
 }
 
 // MARK: - Preview
