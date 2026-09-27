@@ -10,7 +10,6 @@ struct SettingsView: View {
     @ObservedObject private var pushStatus = PushRegistrationStatusStore.shared
     @State private var pushAccountId: String?
     let accountRepository: AccountRepositoryProtocol = AccountRepository()
-    let onBackClick: () -> Void
 
     @State private var showColorPicker = false
     @State private var showPinSetup = false
@@ -224,14 +223,9 @@ struct SettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: .activeAccountDidChange)) { _ in
             pushAccountId = accountRepository.getActiveAccount()?.id
         }
+        // Settings is only reached by a push inside ConfigView's NavigationStack, so the system
+        // back button is the one back control. A custom leading chevron here showed two.
         .navigationTitle("Settings")
-        .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button(action: onBackClick) {
-                    Image(systemName: "chevron.left")
-                }
-            }
-        }
         .sheet(isPresented: $showColorPicker) {
             ColorPickerView(selectedColor: $selectedColor) { hex in
                 viewModel.updateThemeColor(hex)
@@ -273,7 +267,7 @@ struct SettingsView: View {
 
 #Preview {
     NavigationStack {
-        SettingsView(onBackClick: {})
+        SettingsView()
     }
 }
 

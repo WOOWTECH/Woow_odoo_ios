@@ -110,7 +110,7 @@ struct ConfigView: View {
             }
             .onAppear { viewModel.loadAccounts() }
             .navigationDestination(isPresented: $showSettings) {
-                SettingsView(onBackClick: { showSettings = false })
+                SettingsView()
             }
         }
     }
