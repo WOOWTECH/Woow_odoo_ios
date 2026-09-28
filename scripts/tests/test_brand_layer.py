@@ -256,7 +256,15 @@ class BrandLayerTests(unittest.TestCase):
             # from ios-1.0-b3 (a50c4df).
             original = subprocess.run(["git", "show", "acff782:" + path], cwd=ROOT, check=True, capture_output=True).stdout
             self.assertFalse((ROOT / path).exists(), "No duplicate auto-copied InfoPlist source")
-            self.assertEqual(original, (ROOT / f"BrandResources/woowtech/{lang}.lproj/InfoPlist.strings").read_bytes())
+            # App Review 2026-09 (2.1(a) / 5.1.1(ii)): only the camera, photo library and new microphone
+            # prompts may differ from that baseline; every other byte stays identical.
+            def without_review_prompts(data):
+                keys = (b'"NSCameraUsageDescription"', b'"NSPhotoLibraryUsageDescription"', b'"NSMicrophoneUsageDescription"')
+                return b"".join(line for line in data.splitlines(keepends=True) if not line.startswith(keys))
+            current = (ROOT / f"BrandResources/woowtech/{lang}.lproj/InfoPlist.strings").read_bytes()
+            self.assertEqual(without_review_prompts(original), without_review_prompts(current))
+            if lang == "en":
+                self.assertEqual(original, current)
             woow = plist(f"BrandResources/woowtech/{lang}.lproj/InfoPlist.strings")
             self.assertEqual(woow["CFBundleDisplayName"], "渥屋平台" if lang == "zh-Hant" else "woowtech platform")
             if lang != "en":

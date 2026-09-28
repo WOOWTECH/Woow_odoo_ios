@@ -3,7 +3,8 @@
 "CFBundleName" = "woowtech platform";
 
 /* 系统权限提示；iOS 只从 InfoPlist.strings 读取这些键 */
-"NSCameraUsageDescription" = "woowtech platform 需要使用相机，才能在 Odoo 中上传照片。";
+"NSCameraUsageDescription" = "woowtech platform 会在您于 Odoo 中拍照并附加到记录时使用相机，例如在报价单附上产品照片、在费用报销附上收据，或在维修记录附上设备照片。";
 "NSFaceIDUsageDescription" = "woowtech platform 使用 Face ID 保护您的 Odoo 账号数据。";
 "NSLocationWhenInUseUsageDescription" = "woowtech platform 会在您打卡上下班时记录您的位置，以便您的 Odoo 考勤记录包含打卡时的 GPS 坐标。位置信息仅发送至您自己的 Odoo 服务器，绝不会发送给第三方。";
-"NSPhotoLibraryUsageDescription" = "woowtech platform 需要访问照片图库，才能在 Odoo 中上传图片。";
+"NSMicrophoneUsageDescription" = "woowtech platform 会在您于 Odoo 讨论区录制语音消息或进行语音通话时使用麦克风。录音只会发送到您自己的 Odoo 服务器。";
+"NSPhotoLibraryUsageDescription" = "woowtech platform 会在您从相册选择照片附加到 Odoo 记录或聊天消息时访问照片，例如在费用报销附上收据图片，或在讨论区对话中发送产品图片。";
