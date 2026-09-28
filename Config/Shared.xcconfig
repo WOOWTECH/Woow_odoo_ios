@@ -1,7 +1,8 @@
 // App target only: product/module remains odoo for both brands.
 MARKETING_VERSION = 1.0
 INFOPLIST_KEY_CFBundleDisplayName = $(APP_DISPLAY_NAME)
-INFOPLIST_KEY_NSCameraUsageDescription = $(APP_DISPLAY_NAME) needs camera access to upload photos in Odoo.
+INFOPLIST_KEY_NSCameraUsageDescription = $(APP_DISPLAY_NAME) uses the camera when you take a photo in Odoo to attach to a record, for example a product photo on a quotation, a receipt on an expense report, or a picture of the equipment on a maintenance request.
 INFOPLIST_KEY_NSFaceIDUsageDescription = $(APP_DISPLAY_NAME) uses Face ID to secure access to your Odoo account data.
 INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = $(APP_DISPLAY_NAME) records your location when you clock in or clock out so your Odoo attendance record includes the GPS coordinates of where you checked in. Location is sent only to your own Odoo server and never to third parties.
-INFOPLIST_KEY_NSPhotoLibraryUsageDescription = $(APP_DISPLAY_NAME) needs photo library access to upload images in Odoo.
+INFOPLIST_KEY_NSMicrophoneUsageDescription = $(APP_DISPLAY_NAME) uses the microphone when you record a voice message or join a voice call in Odoo Discuss. Audio is sent only to your own Odoo server.
+INFOPLIST_KEY_NSPhotoLibraryUsageDescription = $(APP_DISPLAY_NAME) accesses your photo library when you choose a photo to attach to an Odoo record or a chat message, for example a receipt image on an expense report or a product picture in a Discuss conversation.
