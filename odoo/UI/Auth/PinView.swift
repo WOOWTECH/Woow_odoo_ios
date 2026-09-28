@@ -113,7 +113,7 @@ struct PinView: View {
         case .success:
             onPinVerified()
         case .wrongPin(let remaining):
-            error = String(format: String(localized: "wrong_pin_%lld"), remaining)
+            error = wrongPinMessage(remainingAttempts: remaining)
             isShaking = true
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(300))

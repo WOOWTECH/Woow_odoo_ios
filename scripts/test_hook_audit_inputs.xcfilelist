@@ -73,10 +73,13 @@ $(SRCROOT)/odoo/PrivacyInfo.xcprivacy
 $(SRCROOT)/odoo/Resources
 $(SRCROOT)/odoo/Resources/en.lproj
 $(SRCROOT)/odoo/Resources/en.lproj/Localizable.strings
+$(SRCROOT)/odoo/Resources/en.lproj/Localizable.stringsdict
 $(SRCROOT)/odoo/Resources/zh-Hans.lproj
 $(SRCROOT)/odoo/Resources/zh-Hans.lproj/Localizable.strings
+$(SRCROOT)/odoo/Resources/zh-Hans.lproj/Localizable.stringsdict
 $(SRCROOT)/odoo/Resources/zh-Hant.lproj
 $(SRCROOT)/odoo/Resources/zh-Hant.lproj/Localizable.strings
+$(SRCROOT)/odoo/Resources/zh-Hant.lproj/Localizable.stringsdict
 $(SRCROOT)/odoo/UI
 $(SRCROOT)/odoo/UI/App
 $(SRCROOT)/odoo/UI/App/AppRootViewModel.swift
@@ -91,6 +94,7 @@ $(SRCROOT)/odoo/UI/Auth/NumberPadView.swift
 $(SRCROOT)/odoo/UI/Auth/PinLockout.swift
 $(SRCROOT)/odoo/UI/Auth/PinLockoutCountdown.swift
 $(SRCROOT)/odoo/UI/Auth/PinView.swift
+$(SRCROOT)/odoo/UI/Auth/WrongPinMessage.swift
 $(SRCROOT)/odoo/UI/Common
 $(SRCROOT)/odoo/UI/Common/ErrorBannerView.swift
 $(SRCROOT)/odoo/UI/Config
