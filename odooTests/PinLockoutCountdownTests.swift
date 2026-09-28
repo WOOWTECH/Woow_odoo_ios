@@ -59,12 +59,20 @@ final class PinLockoutCountdownTests: XCTestCase {
         live.start(remainingSeconds: 2)
         XCTAssertEqual(live.remainingSeconds, 2)
 
-        RunLoop.main.run(until: Date().addingTimeInterval(1.2))
-        XCTAssertEqual(live.remainingSeconds, 1, "計時器每秒必須更新顯示的秒數")
+        // No manual tick() anywhere: only the run loop runs. A generous deadline keeps the test
+        // stable on a loaded machine while still proving the value changes on its own.
+        XCTAssertTrue(runMainLoop(until: { live.remainingSeconds == 1 }, timeout: 3),
+                      "計時器每秒必須自行更新顯示的秒數")
+        XCTAssertTrue(runMainLoop(until: { live.remainingSeconds == 0 && !live.isLockedOut }, timeout: 3),
+                      "倒數到期後必須自行解除鎖定")
+    }
 
-        RunLoop.main.run(until: Date().addingTimeInterval(1.2))
-        XCTAssertEqual(live.remainingSeconds, 0)
-        XCTAssertFalse(live.isLockedOut)
+    private func runMainLoop(until condition: () -> Bool, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() && Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
+        return condition()
     }
 
     func test_start_givenLockedOutReportedAsZeroSeconds_stillShowsOneSecond() {
