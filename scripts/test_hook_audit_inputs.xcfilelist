@@ -26,6 +26,7 @@ $(SRCROOT)/odoo/Assets.xcassets/ApporoAppIcon.appiconset
 $(SRCROOT)/odoo/Assets.xcassets/ApporoAppIcon.appiconset/ApporoAppIcon.png
 $(SRCROOT)/odoo/Assets.xcassets/ApporoAppIcon.appiconset/Contents.json
 $(SRCROOT)/odoo/Assets.xcassets/ApporoLogo.imageset
+$(SRCROOT)/odoo/Assets.xcassets/ApporoLogo.imageset/ApporoLogo-dark.png
 $(SRCROOT)/odoo/Assets.xcassets/ApporoLogo.imageset/ApporoLogo.png
 $(SRCROOT)/odoo/Assets.xcassets/ApporoLogo.imageset/Contents.json
 $(SRCROOT)/odoo/Assets.xcassets/Contents.json

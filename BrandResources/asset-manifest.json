@@ -15,5 +15,21 @@
       "height": 1024,
       "sha256": "20814047ff0c3c51792158d3e0f24c1d24ffb8f2bf4cc4a9274a614476257f73"
     }
+  ],
+  "appearance_variants": [
+    {
+      "path": "odoo/Assets.xcassets/ApporoLogo.imageset/ApporoLogo-dark.png",
+      "appearances": [
+        {
+          "appearance": "luminosity",
+          "value": "dark"
+        }
+      ],
+      "width": 1024,
+      "height": 1024,
+      "operation": "source alpha kept, transparent background; mark pixels recoloured; RGBA PNG; no resizing or cropping",
+      "mark_rgb": "E6E6E6",
+      "sha256": "283f12ac3c8449e4f8a6368e2b3c178f01bec9e53e65a6e1052a191cc641baab"
+    }
   ]
 }

@@ -318,6 +318,32 @@ class BrandLayerTests(unittest.TestCase):
                 self.assertEqual(corner, b"\xff\xff\xff")
             self.assertTrue(any(pixel != 255 for row in rows for pixel in row))
 
+    def test_login_logo_dark_variant_is_transparent_light_mark(self):
+        # Full-run I16: in dark mode the opaque white ApporoLogo was a white square on the login
+        # page. The light appearance keeps the opaque white output above; dark gets its own variant.
+        manifest = json.loads(text("BrandResources/asset-manifest.json"))
+        self.assertEqual(len(manifest["appearance_variants"]), 1)
+        variant = manifest["appearance_variants"][0]
+        self.assertEqual(variant["appearances"], [{"appearance": "luminosity", "value": "dark"}])
+        data = (ROOT / variant["path"]).read_bytes()
+        self.assertEqual(hashlib.sha256(data).hexdigest(), variant["sha256"])
+        width, height, channels, rows = read_png(data)
+        self.assertEqual((width, height, channels), (1024, 1024, 4))
+        for corner in [rows[0][:4], rows[0][-4:], rows[-1][:4], rows[-1][-4:]]:
+            self.assertEqual(corner[3], 0)
+        mark = {bytes(row[i:i + 3]) for row in rows for i in range(0, len(row), 4) if row[i + 3]}
+        self.assertEqual(mark, {bytes.fromhex(variant["mark_rgb"])})
+        rgb = [int(variant["mark_rgb"][i:i + 2], 16) / 255 for i in (0, 2, 4)]
+        linear = [v / 12.92 if v <= .04045 else ((v + .055) / 1.055) ** 2.4 for v in rgb]
+        luminance = sum(a * b for a, b in zip(linear, [.2126, .7152, .0722]))
+        self.assertGreaterEqual((luminance + .05) / .05, 3)  # WCAG 1.4.11 graphics on black
+        contents = json.loads(text("odoo/Assets.xcassets/ApporoLogo.imageset/Contents.json"))
+        light = [image["filename"] for image in contents["images"] if "appearances" not in image]
+        dark = [image["filename"] for image in contents["images"] if image.get("appearances") == variant["appearances"]]
+        self.assertEqual(light, ["ApporoLogo.png"])
+        self.assertEqual(dark, [Path(variant["path"]).name])
+        self.assertEqual(len(contents["images"]), 2)
+
     def test_asset_source_provenance_when_explicitly_supplied(self):
         # Historical manifest source is provenance, never a required machine path.
         source = os.environ.get("APPORO_ASSET_SOURCE")
