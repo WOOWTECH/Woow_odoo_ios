@@ -18,6 +18,8 @@ struct CurrentPinPromptView: View {
 
     @State private var pin: String = ""
     @State private var error: String?
+    /// Lockout countdown; updates every second and clears itself (shared with PinSetupView).
+    @StateObject private var lockout = PinLockoutCountdown()
 
     private let pinLength = PinHasher.pinLength
 
@@ -47,8 +49,8 @@ struct CurrentPinPromptView: View {
                 .accessibilityLabel(Text("Enter Current PIN"))
                 .accessibilityValue(Text(verbatim: "\(pin.count)/\(pinLength)"))
 
-                if let error {
-                    Text(error)
+                if let message = lockout.message() ?? error {
+                    Text(message)
                         .foregroundStyle(.red)
                         .font(.caption)
                 }
@@ -71,6 +73,7 @@ struct CurrentPinPromptView: View {
                 }
             }
         }
+        .onDisappear { lockout.stop() }
     }
 
     private func appendDigit(_ digit: String) {
@@ -81,10 +84,9 @@ struct CurrentPinPromptView: View {
         guard pin.count == pinLength else { return }
         let outcome = verify(pin)
         pin = ""
+        error = lockout.errorMessage(for: outcome)
         if outcome == .accepted {
             onAccepted()
-        } else {
-            error = outcome.errorMessage()
         }
     }
 }

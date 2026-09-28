@@ -24,6 +24,8 @@ struct PinSetupView: View {
     @State private var pin: String = ""
     @State private var newPin: String = ""
     @State private var error: String?
+    /// Lockout countdown for the `.verifyOld` step; updates every second and clears itself.
+    @StateObject private var lockout = PinLockoutCountdown()
 
     private let pinLength = PinHasher.pinLength
 
@@ -57,8 +59,8 @@ struct PinSetupView: View {
                     }
                 }
 
-                if let error {
-                    Text(error)
+                if let message = lockout.message() ?? error {
+                    Text(message)
                         .foregroundStyle(.red)
                         .font(.caption)
                 }
@@ -88,6 +90,7 @@ struct PinSetupView: View {
                 }
             }
         }
+        .onDisappear { lockout.stop() }
     }
 
     private var titleText: String {
@@ -117,11 +120,11 @@ struct PinSetupView: View {
         case .verifyOld:
             let outcome = verifyCurrentPin(pin)
             pin = ""
-            switch pinSetupVerifyOldResult(for: outcome) {
-            case .advance:
+            // Shared with CurrentPinPromptView: a lockout counts down every second (and clears when
+            // it ends) instead of a one-off "Try again in 30s" that never moved.
+            error = lockout.errorMessage(for: outcome)
+            if pinSetupVerifyOldResult(for: outcome) == .advance {
                 step = .enterNew
-            case .stay(let message):
-                error = message
             }
         case .enterNew:
             newPin = pin

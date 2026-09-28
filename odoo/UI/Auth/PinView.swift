@@ -14,8 +14,9 @@ struct PinView: View {
     @State private var pin: String = ""
     @State private var error: String?
     @State private var isShaking = false
-    @State private var isLockedOut = false
-    @State private var lockoutTimer: Timer?
+    /// Lockout countdown, re-read from the repository every second (shared with the Settings PIN
+    /// prompts). Its timer used to flip state only at expiry, so the shown seconds never moved.
+    @StateObject private var lockout = PinLockoutCountdown()
 
     private let pinLength = PinHasher.pinLength
 
@@ -68,9 +69,8 @@ struct PinView: View {
                     .padding(.top, 16)
             }
 
-            if isLockedOut {
-                let remaining = authViewModel.getLockoutRemainingSeconds()
-                Text(String(format: String(localized: "lockout_timer_%lld"), remaining))
+            if let countdown = lockout.message() {
+                Text(countdown)
                     .foregroundStyle(.red)
                     .font(.caption)
                     .padding(.top, 8)
@@ -79,7 +79,7 @@ struct PinView: View {
             Spacer()
 
             // Number pad
-            if !isLockedOut {
+            if !lockout.isLockedOut {
                 NumberPadView(
                     onNumberTap: { onNumberTap($0) },
                     onDelete: {
@@ -95,8 +95,9 @@ struct PinView: View {
         }
         .frame(maxWidth: 500)
         .onAppear {
-            checkLockout()
+            startLockoutCountdown()
         }
+        .onDisappear { lockout.stop() }
     }
 
     // MARK: - Logic
@@ -119,26 +120,16 @@ struct PinView: View {
                 isShaking = false
             }
         case .lockedOut:
-            isLockedOut = true
-            startLockoutTimer()
+            startLockoutCountdown()
         }
     }
 
-    private func checkLockout() {
-        isLockedOut = authViewModel.isLockedOut()
-        if isLockedOut {
-            startLockoutTimer()
-        }
-    }
-
-    private func startLockoutTimer() {
-        lockoutTimer?.invalidate()
-        lockoutTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
-            if !authViewModel.isLockedOut() {
-                isLockedOut = false
-                lockoutTimer?.invalidate()
-            }
-        }
+    /// Keypad hidden and countdown shown while the repository reports a lockout. At least 1 s while
+    /// locked: the whole seconds left round down to 0 in the lockout's last fraction of a second.
+    private func startLockoutCountdown() {
+        lockout.start(source: { [authViewModel] in
+            authViewModel.isLockedOut() ? max(1, authViewModel.getLockoutRemainingSeconds()) : 0
+        })
     }
 }
 

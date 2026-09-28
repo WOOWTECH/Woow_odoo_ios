@@ -89,6 +89,7 @@ $(SRCROOT)/odoo/UI/Auth/BiometricAuthenticator.swift
 $(SRCROOT)/odoo/UI/Auth/BiometricView.swift
 $(SRCROOT)/odoo/UI/Auth/NumberPadView.swift
 $(SRCROOT)/odoo/UI/Auth/PinLockout.swift
+$(SRCROOT)/odoo/UI/Auth/PinLockoutCountdown.swift
 $(SRCROOT)/odoo/UI/Auth/PinView.swift
 $(SRCROOT)/odoo/UI/Common
 $(SRCROOT)/odoo/UI/Common/ErrorBannerView.swift
