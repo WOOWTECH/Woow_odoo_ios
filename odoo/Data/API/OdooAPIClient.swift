@@ -268,6 +268,16 @@ actor OdooAPIClient {
         cookies.forEach { HTTPCookieStorage.shared.deleteCookie($0) }
     }
 
+    /// Deletes only the `session_id` cookies for `serverUrl`'s host whose value is one of `values`
+    /// (F4, 0930): the WOOW brand keeps every account's session in the shared jar, so logging out one
+    /// account must not delete a same-host sibling's session.
+    func clearSessionCookies(for serverUrl: String, values: Set<String>) {
+        guard !values.isEmpty, let url = URL(string: serverUrl),
+              let cookies = HTTPCookieStorage.shared.cookies(for: url) else { return }
+        cookies.filter { $0.name == "session_id" && values.contains($0.value) }
+            .forEach { HTTPCookieStorage.shared.deleteCookie($0) }
+    }
+
     /// Best-effort server-side logout of ONE account's session (demo111 2026-09-29, D1): before
     /// this, removing an account never revoked its Odoo session, which stayed valid until the
     /// server's idle GC.

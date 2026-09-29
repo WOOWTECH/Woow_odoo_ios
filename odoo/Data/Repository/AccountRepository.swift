@@ -459,7 +459,18 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         await unregisterFcmToken(account: account.toDomainModel())
         let keychainSessionId = secureStorage.getSessionId(serverUrl: account.serverUrl, username: account.username)
 
-        await apiClient.clearCookies(for: account.serverUrl)
+        // F4 (0930): the WOOW brand shares one cookie jar across accounts. While another account on
+        // the same host remains, remove only THIS account's session cookie — not the host's cookies,
+        // which would sign the sibling out. The host's last account clears them all, as before.
+        let siblingOnHost = ((try? context.fetch(OdooAccountEntity.fetchAllRequest())) ?? []).contains {
+            $0.id != account.id
+                && $0.toDomainModel().serverHost.caseInsensitiveCompare(removed.serverHost) == .orderedSame
+        }
+        if siblingOnHost {
+            await apiClient.clearSessionCookies(for: account.serverUrl, values: Set([keychainSessionId].compactMap { $0 }))
+        } else {
+            await apiClient.clearCookies(for: account.serverUrl)
+        }
         secureStorage.deletePassword(serverUrl: account.serverUrl, username: account.username)
         // Delete the Keychain session_id copy so the session cannot be reused after logout.
         secureStorage.deleteSessionId(serverUrl: account.serverUrl, username: account.username)

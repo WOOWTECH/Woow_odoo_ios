@@ -344,6 +344,49 @@ final class LogoutRevokesAccountWebDataTests: XCTestCase {
         XCTAssertEqual(cleaner.otherHosts, [[host]], "B (same host) remains")
     }
 
+    // MARK: - F4 (0930): WOOW logout must not clear a same-host sibling's jar session
+
+    private func jarSessionValues() -> [String] {
+        (HTTPCookieStorage.shared.cookies ?? []).filter { $0.domain.contains(host) && $0.name == "session_id" }.map(\.value)
+    }
+
+    func test_woowLogout_keepsSameHostSiblingsJarSession() async throws {
+        // WOOW keeps every account's session in the shared jar: on one host the `session_id` slot
+        // holds whichever account signed in last — here B (seeded after A). A's own session is the
+        // one in its Keychain entry.
+        let repo = makeRepo(brand: .woowtech, cleaner: RecordingWebDataCleaner(), revoker: RevokeRecorder())
+        XCTAssertEqual(jarSessionValues(), ["sess-b"], "precondition: the jar holds B's session")
+        let a = try account(repo, "tester")
+
+        await repo.logout(accountId: a.id)
+
+        XCTAssertEqual(jarSessionValues(), ["sess-b"], "logging out A must not sign same-host sibling B out")
+        await repo.logout(accountId: try account(repo, "mate").id)
+    }
+
+    /// A's own session cookie IS removed when it is the one in the jar.
+    func test_woowLogout_removesItsOwnJarSessionWhileSiblingRemains() async throws {
+        let repo = makeRepo(brand: .woowtech, cleaner: RecordingWebDataCleaner(), revoker: RevokeRecorder())
+        HTTPCookieStorage.shared.setCookie(cookie("sess-a", host: host))
+        let a = try account(repo, "tester")
+
+        await repo.logout(accountId: a.id)
+
+        XCTAssertFalse(jarSessionValues().contains("sess-a"), "A's own session cookie is removed")
+        await repo.logout(accountId: try account(repo, "mate").id)
+    }
+
+    func test_woowLogout_lastAccountOnHost_clearsThatHostsJarCookies() async throws {
+        let repo = makeRepo(brand: .woowtech, cleaner: RecordingWebDataCleaner(), revoker: RevokeRecorder())
+        HTTPCookieStorage.shared.setCookie(plainCookie("frontend_lang", host: host))
+
+        await repo.logout(accountId: try account(repo, "tester").id)
+        await repo.logout(accountId: try account(repo, "mate").id)
+
+        let left = (HTTPCookieStorage.shared.cookies ?? []).filter { $0.domain.contains(host) }
+        XCTAssertEqual(left.map(\.name), [], "the host's last account signs out: its jar cookies go")
+    }
+
     func test_rootLaunch_prunesOrphanStoresKeepingEveryAccount() async throws {
         let cleaner = RecordingWebDataCleaner()
         let repo = makeRepo(brand: .apporo, cleaner: cleaner, revoker: RevokeRecorder())
