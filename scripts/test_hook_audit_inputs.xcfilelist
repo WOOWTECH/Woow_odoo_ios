@@ -47,6 +47,7 @@ $(SRCROOT)/odoo/Data/Location/geolocation_shim.js
 $(SRCROOT)/odoo/Data/Push
 $(SRCROOT)/odoo/Data/Push/DeepLinkManager.swift
 $(SRCROOT)/odoo/Data/Push/DeepLinkValidator.swift
+$(SRCROOT)/odoo/Data/Push/ExternalLinkIntake.swift
 $(SRCROOT)/odoo/Data/Push/NotificationDeepLinkRouter.swift
 $(SRCROOT)/odoo/Data/Push/NotificationService.swift
 $(SRCROOT)/odoo/Data/Push/PushCredential.swift

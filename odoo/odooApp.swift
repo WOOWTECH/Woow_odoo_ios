@@ -34,14 +34,9 @@ struct odooApp: App {
     /// path regex inside `DeepLinkValidator.isValid`.
     private func handleIncomingURL(_ url: URL) {
         guard AppBrand.current.acceptsScheme(url.scheme) else { return }
-        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let urlParam = components.queryItems?.first(where: { $0.name == "url" })?.value else {
-            return
-        }
-        let serverHost = AccountRepository().getActiveAccount()?.serverHost ?? ""
-        if DeepLinkValidator.isValid(url: urlParam, serverHost: serverHost) {
-            DeepLinkManager.shared.setPending(urlParam)
-        }
+        // F3 (0930): validation + account binding live in `ExternalLinkIntake` (unit-tested).
+        ExternalLinkIntake.accept(url, activeAccount: AccountRepository().getActiveAccount(),
+                                  manager: DeepLinkManager.shared)
     }
 }
 

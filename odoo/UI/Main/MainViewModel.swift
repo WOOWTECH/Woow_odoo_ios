@@ -42,8 +42,18 @@ final class MainViewModel: ObservableObject {
         // Reacting to `activeAccountDidChange` reloads the active account for EVERY switch path.
         NotificationCenter.default.publisher(for: .activeAccountDidChange)
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.loadActiveAccount() }
+            .sink { [weak self] _ in self?.activeAccountDidSwitch() }
             .store(in: &cancellables)
+    }
+
+    /// F3 (0930): after a switch, a pending link bound to ANOTHER account can never be applied
+    /// (it would otherwise wait out its TTL and fire if the user switched back) — drop it. A link bound
+    /// to the new active account (push tap: switch first, then bind) or an unbound one is kept.
+    private func activeAccountDidSwitch() {
+        if let active = accountRepository.getActiveAccount() {
+            deepLinkManager.invalidateIfNotTarget(accountId: active.id)
+        }
+        loadActiveAccount()
     }
 
     func loadActiveAccount() {

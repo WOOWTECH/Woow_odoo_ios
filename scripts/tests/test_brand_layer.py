@@ -39,6 +39,25 @@ def config(name):
 
 
 # demo111 live run 2026-09-29 — approved odooApp.swift root deltas (current, baseline).
+# F3 (0930): the external-link handler delegates validation and account binding to the unit-tested
+# `ExternalLinkIntake`; the scheme gate stays in the root. Folded back to the protected baseline.
+EXTERNAL_LINK_INTAKE_ROOT_DELTAS = [
+    ("""        guard AppBrand.current.acceptsScheme(url.scheme) else { return }
+        // F3 (0930): validation + account binding live in `ExternalLinkIntake` (unit-tested).
+        ExternalLinkIntake.accept(url, activeAccount: AccountRepository().getActiveAccount(),
+                                  manager: DeepLinkManager.shared)
+""", """        guard AppBrand.current.acceptsScheme(url.scheme) else { return }
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let urlParam = components.queryItems?.first(where: { $0.name == "url" })?.value else {
+            return
+        }
+        let serverHost = AccountRepository().getActiveAccount()?.serverHost ?? ""
+        if DeepLinkValidator.isValid(url: urlParam, serverHost: serverHost) {
+            DeepLinkManager.shared.setPending(urlParam)
+        }
+"""),
+]
+
 ADD_ACCOUNT_CANCEL_AND_PRUNE_ROOT_DELTAS = [
     ("""                }, onCancel: rootViewModel.canCancelAddAccount ? {
                     // Back to the account that was active; App Lock re-prompts via the
@@ -348,7 +367,7 @@ class BrandLayerTests(unittest.TestCase):
         # Approved root deltas for the demo111 2026-09-29 live-run fixes (D1 orphan-store pruning,
         # D3 add-account Cancel + App Lock coverage). Each current hunk must appear exactly once and
         # is folded back to the protected baseline before the whole-file comparison.
-        for now, baseline in ADD_ACCOUNT_CANCEL_AND_PRUNE_ROOT_DELTAS:
+        for now, baseline in ADD_ACCOUNT_CANCEL_AND_PRUNE_ROOT_DELTAS + EXTERNAL_LINK_INTAKE_ROOT_DELTAS:
             self.assertEqual(current.count(now), 1, now)
             current = current.replace(now, baseline, 1)
         self.assertEqual(current, expected)
