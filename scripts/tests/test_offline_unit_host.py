@@ -359,9 +359,9 @@ class OfflineUnitHostSourceTests(unittest.TestCase):
                 text = allow_audited_keyboard_restorer_apply(text)
             if path.name == "ColdStartDeepLinkOrderTests.swift":
                 text = allow_audited_cold_start_deeplink_apply(text)
-            self.assertNotRegex(text, r"\.load\(|\.loadHTMLString\(|\.reload\(|\.apply\(serverUrl:|createWebViewWith:")
             if path.name == "StaleWebViewInstanceTests.swift":
                 text = allow_audited_stale_instance_apply(text)
+            self.assertNotRegex(text, r"\.load\(|\.loadHTMLString\(|\.reload\(|\.apply\(serverUrl:|createWebViewWith:")
             self.assertNotRegex(text, r"UIApplication\.shared\.open|Data\(contentsOf:|String\(contentsOf:")
 
     def test_cookie_consumer_exception_requires_isolated_store_and_navigation_interception(self):
@@ -378,7 +378,6 @@ class OfflineUnitHostSourceTests(unittest.TestCase):
         self.assertIn("config.websiteDataStore = websiteDataStore(accountId)", web)
         self.assertIn("OdooWebViewCoordinator.dataStore(forAccountId: $0)", web)
 
-    def test_keyboard_restorer_exception_requires_no_load_no_session_no_link(self):
     def test_stale_instance_exception_requires_isolated_store_and_intercepted_loads(self):
         text = source("odooTests/StaleWebViewInstanceTests.swift")
         allow_audited_stale_instance_apply(text)
@@ -389,6 +388,7 @@ class OfflineUnitHostSourceTests(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 allow_audited_stale_instance_apply(text.replace(old, new))
 
+    def test_keyboard_restorer_exception_requires_no_load_no_session_no_link(self):
         text = source("odooTests/WebViewKeyboardScrollRestorerTests.swift")
         allow_audited_keyboard_restorer_apply(text)
         for old, new in [("loadBaseRequest: { _, _ in },", "loadBaseRequest: { webView, request in webView.load(request) },"),
