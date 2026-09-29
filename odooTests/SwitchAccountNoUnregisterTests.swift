@@ -231,7 +231,10 @@ final class SwitchAccountNoUnregisterTests: XCTestCase {
         // Both build-selected brands must really authenticate and switch; no vacuous pass.
         XCTAssertTrue(switched, "switchAccount should succeed with a valid stored password and success-shaped auth")
         XCTAssertEqual(repo.getActiveAccount()?.database, "demo888", "B must be active after a successful switch")
-        XCTAssertEqual(RecordingURLProtocol.recordedPaths, ["/web/session/authenticate"])
+        // D5 (2026-09-29): an Apporo re-login now also revokes the session it replaced, best-effort
+        // and detached, so a `/web/session/destroy` may land at any time — it is not part of the switch.
+        XCTAssertEqual(RecordingURLProtocol.recordedPaths.filter { $0 != "/web/session/destroy" },
+                       ["/web/session/authenticate"])
         XCTAssertFalse(try XCTUnwrap(repo.getAllAccounts().first { $0.database == "demo777" }).isActive)
 
         // Core assertion (AC9): no recorded request carried the unregister_device method.

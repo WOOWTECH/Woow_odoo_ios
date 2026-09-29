@@ -289,6 +289,36 @@ actor OdooAPIClient {
         }
     }
 
+    /// What the server says about one stored session (D5).
+    enum PushSessionCheck: Equatable, Sendable {
+        /// Accepted; the session belongs to `uid` on `db` (nil when the server omits it).
+        case valid(uid: Int, db: String?)
+        /// Rejected (expired / logged out / no user).
+        case invalid
+        /// No usable answer (transport error, non-200, unparsable) — unknown, not rejected.
+        case unknown
+    }
+
+    /// Asks the server whether `sessionId` is still a live session (`/web/session/get_session_info`),
+    /// sending ONLY that session in an explicit Cookie header, never touching the shared jar and not
+    /// following redirects — the same isolation as `authenticatePushSession`. Lets an account switch
+    /// reuse a still-valid session instead of logging in again (demo111 2026-09-29, D5).
+    func pushSessionInfo(serverUrl: String, sessionId: String) async -> PushSessionCheck {
+        guard serverUrl.hasPrefix("https://"), Self.isValidPushSessionId(sessionId) else { return .unknown }
+        let url = "\(Self.trimmedServerUrl(serverUrl))/web/session/get_session_info"
+        do {
+            let (data, response) = try await post(url: url, body: JsonRpcRequest(id: nextRequestId(), params: EmptyRpcParams()),
+                                                  pushSessionId: sessionId)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return .unknown }
+            let decoded = try JSONDecoder().decode(JsonRpcResponse<SessionInfoResult>.self, from: data)
+            if decoded.error != nil { return .invalid }
+            guard let uid = decoded.result?.uid, uid > 0 else { return .invalid }
+            return .valid(uid: uid, db: decoded.result?.db)
+        } catch {
+            return .unknown
+        }
+    }
+
     private static func trimmedServerUrl(_ serverUrl: String) -> String {
         serverUrl.hasSuffix("/") ? String(serverUrl.dropLast()) : serverUrl
     }

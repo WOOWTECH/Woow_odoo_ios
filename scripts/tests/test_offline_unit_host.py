@@ -97,6 +97,7 @@ def allow_audited_cold_start_deeplink_apply(text):
 
 
 AUDITED_SESSION_PROTOCOLS = {
+    "ApporoSwitchSessionReuseTests.swift": ("SwitchURLProtocol",),
     "HonestLogoutS4Tests.swift": ("LogoutURLProtocol",),
     "LoginAccessDeniedMessageTests.swift": ("JsonRpcErrorURLProtocol",),
     "LogoutRevokesAccountWebDataTests.swift": ("DestroyCaptureURLProtocol",),

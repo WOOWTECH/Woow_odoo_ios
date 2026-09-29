@@ -14,6 +14,21 @@ struct JsonRpcRequest<Params: Encodable>: Encodable {
 /// Empty `params` object for parameterless JSON-RPC calls (e.g. `/web/session/destroy`).
 struct EmptyRpcParams: Encodable {}
 
+/// The fields of `/web/session/get_session_info` a session check needs. `uid` is `false`/`null`
+/// for a session without a user, which decodes to nil.
+struct SessionInfoResult: Decodable {
+    let uid: Int?
+    let db: String?
+
+    enum CodingKeys: String, CodingKey { case uid, db }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        uid = try? container.decode(Int.self, forKey: .uid)
+        db = try? container.decode(String.self, forKey: .db)
+    }
+}
+
 /// JSON-RPC 2.0 response envelope.
 struct JsonRpcResponse<Result: Decodable>: Decodable {
     let result: Result?

@@ -340,6 +340,19 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         return saved
     }
 
+    /// D5: whether a switch can keep the target account's current session. It needs a cookie the
+    /// WebView can be handed (bound to the stored session id, not expired) and the server must
+    /// still accept that session for the same user and database. Anything else — rejected, another
+    /// user/database, or no answer — falls back to the previous behaviour (log in again).
+    private func canReuseSession(of credential: PushCredential, for account: OdooAccount) async -> Bool {
+        guard !credential.sessionId.isEmpty,
+              let cookie = credential.sessionCookie?.cookie(), cookie.value == credential.sessionId,
+              cookie.expiresDate.map({ $0 > Date() }) ?? true else { return false }
+        guard case .valid(let uid, let db) = await apiClient.pushSessionInfo(
+            serverUrl: account.fullServerUrl, sessionId: credential.sessionId) else { return false }
+        return (account.userId == nil || account.userId == uid) && (db == nil || db == account.database)
+    }
+
     /// Selection and manual login share an order and transaction owner. Never borrow
     /// host-keyed credentials: they cannot identify the selected database/account.
     @MainActor
@@ -351,12 +364,23 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
 
         let selected: PushCredential
         if !captured.password.isEmpty {
-            let result = await apiClient.authenticatePushSession(serverUrl: account.fullServerUrl,
-                database: account.database, username: account.username, password: captured.password)
-            guard case .success(let auth) = result,
-                  account.userId == nil || account.userId == auth.userId else { return false }
-            selected = PushCredential(account: account, password: captured.password,
-                sessionId: auth.sessionId, sessionCookie: auth.sessionCookie)
+            if await canReuseSession(of: captured, for: account) {
+                // D5: the target's own session is still accepted for this user and database — no
+                // new login, no new res.users.log row, no orphaned session, same push generation.
+                selected = captured
+            } else {
+                let result = await apiClient.authenticatePushSession(serverUrl: account.fullServerUrl,
+                    database: account.database, username: account.username, password: captured.password)
+                guard case .success(let auth) = result,
+                      account.userId == nil || account.userId == auth.userId else { return false }
+                selected = PushCredential(account: account, password: captured.password,
+                    sessionId: auth.sessionId, sessionCookie: auth.sessionCookie)
+                // Best-effort revoke of the session this login replaced (never delays the switch).
+                if !captured.sessionId.isEmpty, captured.sessionId != auth.sessionId {
+                    let revoke = revokeSession, serverUrl = account.fullServerUrl, old = captured.sessionId
+                    Task.detached { await revoke(serverUrl, old) }
+                }
+            }
         } else {
             selected = captured
         }
