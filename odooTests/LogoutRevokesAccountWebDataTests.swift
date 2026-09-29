@@ -27,12 +27,15 @@ import WebKit
 private final class RecordingWebDataCleaner: AccountWebDataCleaning {
     var storeSessionIds: [String: [String]] = [:]
     private(set) var removed: [(accountId: String, host: String, sessionIds: Set<String>)] = []
+    private(set) var otherHosts: [[String]] = []
     private(set) var pruned: [Set<String>] = []
 
     func sessionIds(forAccountId id: String, host: String) async -> [String] { storeSessionIds[id] ?? [] }
 
-    func removeWebData(forAccountId id: String, host: String, sessionIds: Set<String>) async {
+    func removeWebData(forAccountId id: String, host: String, sessionIds: Set<String>,
+                       otherAccountHosts: [String]) async {
         removed.append((id, host, sessionIds))
+        otherHosts.append(otherAccountHosts)
     }
 
     func pruneOrphanStores(keeping accountIds: Set<String>) async { pruned.append(accountIds) }
@@ -231,13 +234,13 @@ final class LogoutRevokesAccountWebDataTests: XCTestCase {
         let ids = await cleaner.sessionIds(forAccountId: a.uuidString, host: host)
         XCTAssertEqual(ids, ["sess-a"])
 
-        await cleaner.removeWebData(forAccountId: a.uuidString, host: host, sessionIds: ["sess-a"])
+        await cleaner.removeWebData(forAccountId: a.uuidString, host: host, sessionIds: ["sess-a"], otherAccountHosts: [host])
 
         let aAfter = await cookies(in: storeA)
         let bAfter = await cookies(in: storeB)
         XCTAssertTrue(aAfter.isEmpty, "A's session cookie must be gone")
         XCTAssertEqual(bAfter.map(\.value), ["sess-b"], "same-host sibling B must be untouched")
-        await cleaner.removeWebData(forAccountId: b.uuidString, host: host, sessionIds: ["sess-b"])
+        await cleaner.removeWebData(forAccountId: b.uuidString, host: host, sessionIds: ["sess-b"], otherAccountHosts: [])
     }
 
     func test_realCleaner_prunesOrphanStoresButKeepsAccountStores() async throws {
@@ -266,11 +269,12 @@ final class LogoutRevokesAccountWebDataTests: XCTestCase {
         let keptAfter = await cookies(in: keptStore)
         XCTAssertTrue(orphanAfter.isEmpty, "an orphan store (no account) must be emptied/removed")
         XCTAssertEqual(keptAfter.map(\.value), ["sess-kept"])
-        await cleaner.removeWebData(forAccountId: kept.uuidString, host: host, sessionIds: [])
+        await cleaner.removeWebData(forAccountId: kept.uuidString, host: host, sessionIds: [], otherAccountHosts: [])
     }
 
-    /// Below iOS 17 / non-UUID ids every account shares `.default()`: only the removed account's
-    /// own session cookie may be deleted there, never a same-host sibling's.
+    /// Below iOS 17 / non-UUID ids every account shares `.default()`. While a same-host sibling
+    /// remains, only the removed account's own session cookie may be deleted there, never the
+    /// sibling's — the documented limitation: other same-origin data stays (it is shared).
     func test_realCleaner_sharedDefaultStore_deletesOnlyGivenSessionCookies() async {
         let store = WKWebsiteDataStore.default()
         // Distinct paths so both cookies really coexist (same name+domain+path would overwrite).
@@ -280,12 +284,64 @@ final class LogoutRevokesAccountWebDataTests: XCTestCase {
         XCTAssertEqual(Set(seeded), ["legacy-a", "legacy-b"], "precondition: both cookies present")
         let cleaner = AccountWebDataCleaner()
 
-        await cleaner.removeWebData(forAccountId: "not-a-uuid", host: host, sessionIds: ["legacy-a"])
+        await cleaner.removeWebData(forAccountId: "not-a-uuid", host: host, sessionIds: ["legacy-a"], otherAccountHosts: [host])
 
         let values = await cookies(in: store).filter { $0.domain.contains(host) }.map(\.value)
         XCTAssertFalse(values.contains("legacy-a"))
         XCTAssertTrue(values.contains("legacy-b"))
-        await cleaner.removeWebData(forAccountId: "not-a-uuid", host: host, sessionIds: ["legacy-b"])
+        await cleaner.removeWebData(forAccountId: "not-a-uuid", host: host, sessionIds: ["legacy-b"], otherAccountHosts: [])
+    }
+
+    // MARK: - pi 0930 P2 (D1): shared default store without a same-host sibling
+
+    private func plainCookie(_ name: String, host: String) -> HTTPCookie {
+        HTTPCookie(properties: [.name: name, .value: "x", .domain: host, .path: "/", .secure: "TRUE",
+                                .expires: Date().addingTimeInterval(7 * 24 * 3600)])!
+    }
+
+    /// The last account on a host: nothing is shared any more, so all of that site's data goes —
+    /// not just the `session_id` cookie (below iOS 17 every account shares `.default()`).
+    func test_realCleaner_sharedDefaultStore_withoutSameHostSibling_removesAllOfThatSitesData() async {
+        let soloHost = "solo-host.example.net"
+        let store = WKWebsiteDataStore.default()
+        await setCookie(cookie("legacy-solo", host: soloHost), in: store)
+        await setCookie(plainCookie("frontend_lang", host: soloHost), in: store)
+        let cleaner = AccountWebDataCleaner()
+
+        await cleaner.removeWebData(forAccountId: "not-a-uuid", host: soloHost, sessionIds: ["legacy-solo"],
+                                    otherAccountHosts: [])
+
+        let left = await cookies(in: store).filter { $0.domain.contains(soloHost) }.map(\.name)
+        XCTAssertEqual(left, [], "no same-host sibling: the removed account's site data must all be gone")
+    }
+
+    /// Another account on a DIFFERENT host of the same site (registrable domain) keeps its data.
+    func test_realCleaner_sharedDefaultStore_keepsSiteDataOfAnotherAccountsSubdomain() async {
+        let removedHost = "a.shared-site.example.org", otherHost = "b.shared-site.example.org"
+        let store = WKWebsiteDataStore.default()
+        await setCookie(cookie("legacy-a", host: removedHost), in: store)
+        await setCookie(cookie("legacy-other", host: otherHost), in: store)
+        let cleaner = AccountWebDataCleaner()
+
+        await cleaner.removeWebData(forAccountId: "not-a-uuid", host: removedHost, sessionIds: ["legacy-a"],
+                                    otherAccountHosts: [otherHost])
+
+        let values = await cookies(in: store).filter { $0.domain.contains("shared-site.example.org") }.map(\.value)
+        XCTAssertFalse(values.contains("legacy-a"))
+        XCTAssertTrue(values.contains("legacy-other"), "another account's host on the same site is untouched")
+        await cleaner.removeWebData(forAccountId: "not-a-uuid", host: otherHost, sessionIds: ["legacy-other"],
+                                    otherAccountHosts: [])
+    }
+
+    /// The repository hands the cleaner the hosts of the accounts that remain.
+    func test_logout_passesRemainingAccountHostsToTheCleaner() async throws {
+        let cleaner = RecordingWebDataCleaner()
+        let repo = makeRepo(brand: .apporo, cleaner: cleaner, revoker: RevokeRecorder())
+        let a = try account(repo, "tester")
+
+        await repo.logout(accountId: a.id)
+
+        XCTAssertEqual(cleaner.otherHosts, [[host]], "B (same host) remains")
     }
 
     func test_rootLaunch_prunesOrphanStoresKeepingEveryAccount() async throws {

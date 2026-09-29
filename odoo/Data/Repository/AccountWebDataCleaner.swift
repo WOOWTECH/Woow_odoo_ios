@@ -12,9 +12,13 @@ protocol AccountWebDataCleaning: AnyObject {
     /// handed a newer session than the one in the Keychain).
     func sessionIds(forAccountId id: String, host: String) async -> [String]
     /// Removes the account's website data. On a per-account store: everything. On the shared
-    /// default store (below iOS 17 / non-UUID ids): only the `session_id` cookies for `host` whose
-    /// value is in `sessionIds` — never a same-host sibling account's cookie.
-    func removeWebData(forAccountId id: String, host: String, sessionIds: Set<String>) async
+    /// default store (below iOS 17 / non-UUID ids): the `session_id` cookies for `host` whose value is
+    /// in `sessionIds`; and, when no remaining account uses the same site, ALL of that site's data
+    /// (pi 0930). While another account on the site remains, the rest of the site's data is shared
+    /// with it and stays — a documented limitation of the shared store, not a full cleanup.
+    /// `otherAccountHosts`: the server hosts of every account that remains after this removal.
+    func removeWebData(forAccountId id: String, host: String, sessionIds: Set<String>,
+                       otherAccountHosts: [String]) async
     /// Removes per-account stores whose identifier matches no account (left by an earlier build,
     /// or still in use by a live WebView when its account was removed).
     func pruneOrphanStores(keeping accountIds: Set<String>) async
@@ -30,7 +34,8 @@ final class AccountWebDataCleaner: AccountWebDataCleaning {
         return cookies.filter { $0.name == "session_id" && Self.matches($0, host: host) }.map(\.value)
     }
 
-    func removeWebData(forAccountId id: String, host: String, sessionIds: Set<String>) async {
+    func removeWebData(forAccountId id: String, host: String, sessionIds: Set<String>,
+                       otherAccountHosts: [String]) async {
         if #available(iOS 17.0, *), let uuid = UUID(uuidString: id) {
             let store = WKWebsiteDataStore(forIdentifier: uuid)
             await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
@@ -44,6 +49,22 @@ final class AccountWebDataCleaner: AccountWebDataCleaning {
         where cookie.name == "session_id" && Self.matches(cookie, host: host) && sessionIds.contains(cookie.value) {
             await withCheckedContinuation { cont in store.httpCookieStore.delete(cookie) { cont.resume() } }
         }
+        // pi 0930 (P2): WebKit groups data by site (registrable domain). A site no remaining account
+        // uses is not shared any more — remove all of its data (storage, caches, other cookies).
+        let types = WKWebsiteDataStore.allWebsiteDataTypes()
+        let unshared = await store.dataRecords(ofTypes: types).filter { record in
+            Self.site(record.displayName, covers: host)
+                && !otherAccountHosts.contains { Self.site(record.displayName, covers: $0) }
+        }
+        if !unshared.isEmpty {
+            await store.removeData(ofTypes: types, for: unshared)
+        }
+    }
+
+    /// Whether `host` belongs to the site WebKit names `displayName` (the site itself or a subdomain).
+    private static func site(_ displayName: String, covers host: String) -> Bool {
+        let d = displayName.lowercased(), h = host.lowercased()
+        return !d.isEmpty && (h == d || h.hasSuffix("." + d))
     }
 
     func pruneOrphanStores(keeping accountIds: Set<String>) async {

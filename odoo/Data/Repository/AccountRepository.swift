@@ -76,7 +76,8 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         let cleaner = webDataCleaner
         let fromStore = await cleaner.sessionIds(forAccountId: accountId, host: host)
         let all = Set((knownSessionIds.compactMap { $0 } + fromStore).filter { !$0.isEmpty })
-        await cleaner.removeWebData(forAccountId: accountId, host: host, sessionIds: all)
+        let otherHosts = await MainActor.run { getAllAccounts().filter { $0.id != accountId }.map(\.serverHost) }
+        await cleaner.removeWebData(forAccountId: accountId, host: host, sessionIds: all, otherAccountHosts: otherHosts)
         await MainActor.run { DeepLinkManager.shared.drop(boundTo: accountId) }
         let revoke = revokeSession
         Task.detached {

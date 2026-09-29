@@ -197,6 +197,7 @@ final class ApporoSwitchSessionReuseTests: XCTestCase {
 @MainActor
 private final class NoopWebDataCleaner: AccountWebDataCleaning {
     func sessionIds(forAccountId id: String, host: String) async -> [String] { [] }
-    func removeWebData(forAccountId id: String, host: String, sessionIds: Set<String>) async {}
+    func removeWebData(forAccountId id: String, host: String, sessionIds: Set<String>,
+                       otherAccountHosts: [String]) async {}
     func pruneOrphanStores(keeping accountIds: Set<String>) async {}
 }
