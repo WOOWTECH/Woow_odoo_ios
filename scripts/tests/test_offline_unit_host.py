@@ -121,6 +121,7 @@ AUDITED_SESSION_PROTOCOLS = {
     "LoginAccessDeniedMessageTests.swift": ("JsonRpcErrorURLProtocol",),
     "LogoutRevokesAccountWebDataTests.swift": ("DestroyCaptureURLProtocol",),
     "LoginServerErrorMessageTests.swift": ("CloudflareOriginDownURLProtocol",),
+    "LoginUnexpectedResponseMessageTests.swift": ("HTMLPageURLProtocol",),
     "LogoutUnregisterURLTests.swift": ("RecordingURLProtocol",),
     "MissingTests.swift": ("StubURLProtocol",),
     "SessionReauthenticatorTests.swift": ("SequencedURLProtocol",),

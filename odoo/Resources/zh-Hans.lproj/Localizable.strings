@@ -31,6 +31,7 @@
 "error_invalid_server_url" = "无效的服务器网址格式";
 "error_server_%@" = "服务器错误：%@";
 "error_server_http_%lld" = "服务器错误（HTTP %lld）";
+"error_unexpected_response" = "服务器返回的内容无法识别，请确认服务器网址后再试一次。";
 
 /* Auth -- Biometric */
 "Biometric Login" = "生物识别登录";

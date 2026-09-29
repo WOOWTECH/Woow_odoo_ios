@@ -33,6 +33,8 @@ enum AuthResult: Sendable, Equatable {
         case serverError
         /// The server answered sign-in with this non-200 HTTP status (e.g. Cloudflare 530).
         case serverHTTPStatus(Int)
+        /// HTTP 200 whose body is not a JSON-RPC answer (captive portal, interstitial, wrong address).
+        case unexpectedResponse
         case unknown
     }
 

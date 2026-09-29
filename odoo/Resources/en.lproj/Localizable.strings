@@ -31,6 +31,7 @@
 "error_invalid_server_url" = "Invalid server URL format";
 "error_server_%@" = "Server error: %@";
 "error_server_http_%lld" = "Server error (HTTP %lld)";
+"error_unexpected_response" = "The server sent an unexpected response. Check the server address and try again.";
 
 /* Auth -- Biometric */
 "Biometric Login" = "Biometric Login";

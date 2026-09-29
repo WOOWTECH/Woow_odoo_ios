@@ -140,6 +140,10 @@ actor OdooAPIClient {
             ))
         } catch is URLError {
             return .error("Unable to connect to server", .networkError)
+        } catch is DecodingError {
+            // F2 (0930): HTTP 200 whose body is not JSON-RPC (captive portal, interstitial, a web page
+            // at the wrong address). The login screen shows a localized message, never decoder text.
+            return .error("Unexpected response", .unexpectedResponse)
         } catch {
             if isolatedPushSession { return .error(String(localized: "error_session_setup"), .serverError) }
             return .error("Error: \(error.localizedDescription)", .unknown)

@@ -197,6 +197,7 @@ final class LoginViewModel: ObservableObject {
         case .serverError: return String(format: String(localized: "error_server_%@", bundle: localizationBundle), message)
         case .serverHTTPStatus(let code):
             return String(format: String(localized: "error_server_http_%lld", bundle: localizationBundle), code)
+        case .unexpectedResponse: return String(localized: "error_unexpected_response", bundle: localizationBundle)
         case .unknown: return message
         }
     }

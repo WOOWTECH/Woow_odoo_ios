@@ -31,6 +31,7 @@
 "error_invalid_server_url" = "無效的伺服器網址格式";
 "error_server_%@" = "伺服器錯誤：%@";
 "error_server_http_%lld" = "伺服器錯誤（HTTP %lld）";
+"error_unexpected_response" = "伺服器回應的內容無法辨識，請確認伺服器網址後再試一次。";
 
 /* Auth -- Biometric */
 "Biometric Login" = "生物辨識登入";
