@@ -944,7 +944,9 @@ final class OdooAPIClientHTTPTests: XCTestCase {
         }
     }
 
-    func test_authenticate_givenMalformedJson_returnsUnknown() async {
+    /// F2 (0930): a 200 whose body is not JSON-RPC used to map to `.unknown`, which the login screen
+    /// rendered as raw decoder text. It is now its own localized `.unexpectedResponse`.
+    func test_authenticate_givenMalformedJson_returnsUnexpectedResponse() async {
         MockURLProtocol.mockHandler = { request in
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
             return (response, "not json".data(using: .utf8)!)
@@ -955,10 +957,10 @@ final class OdooAPIClientHTTPTests: XCTestCase {
             serverUrl: "https://odoo.example.com",
             database: "db", username: "admin", password: "pass"
         )
-        if case .error(_, .unknown) = result {
+        if case .error(_, .unexpectedResponse) = result {
             // Pass
         } else {
-            XCTFail("Expected unknown error, got \(result)")
+            XCTFail("Expected unexpectedResponse error, got \(result)")
         }
     }
 }
