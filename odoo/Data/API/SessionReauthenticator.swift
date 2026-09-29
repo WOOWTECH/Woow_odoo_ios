@@ -171,9 +171,13 @@ actor SessionReauthenticator {
     ///
     /// Safe to call concurrently: a per-host single-flight `Task` collapses simultaneous callers into
     /// one authenticate network call for that host (guardrail 4).
-    func reauthenticateForHost(_ requestHost: String) async -> Bool {
+    ///
+    /// `accountId` (F1, 0930) names the account whose session expired. Two accounts can share one
+    /// server; without it the first stored account on the host would be re-authenticated. When given,
+    /// only that account is considered — if it does not match the host, the re-auth declines.
+    func reauthenticateForHost(_ requestHost: String, accountId: String? = nil) async -> Bool {
         // Guardrail 1: refuse anything that is not an exact stored https host.
-        guard let account = await resolveAccountForHost(requestHost) else {
+        guard let account = await resolveAccountForHost(requestHost, accountId: accountId) else {
             AppLogger.auth.warning("Re-auth: no stored https account matches request host — declining")
             return false
         }
@@ -184,14 +188,16 @@ actor SessionReauthenticator {
             return false
         }
 
-        // Guardrail 4: single-flight per host. Concurrent callers await the same task.
-        if let existing = inFlight[requestHost] {
+        // Guardrail 4: single-flight per host and account (two same-host accounts are two sessions).
+        // Concurrent callers for the same account await the same task.
+        let flightKey = "\(requestHost.lowercased())#\(account.id)"
+        if let existing = inFlight[flightKey] {
             return await existing.value
         }
         let task = Task<Bool, Never> { await performReauth(account) }
-        inFlight[requestHost] = task
+        inFlight[flightKey] = task
         let result = await task.value
-        inFlight[requestHost] = nil
+        inFlight[flightKey] = nil
         return result
     }
 
@@ -209,8 +215,9 @@ actor SessionReauthenticator {
     ///
     /// The account snapshot is taken on the main actor: `AccountRepository` reads the main-queue
     /// Core Data `viewContext`, and this actor's executor is not the main thread.
-    private func resolveAccountForHost(_ requestHost: String) async -> OdooAccount? {
+    private func resolveAccountForHost(_ requestHost: String, accountId: String?) async -> OdooAccount? {
         let accounts = await MainActor.run { accountRepository.getAllAccounts() }
+            .filter { accountId == nil || $0.id == accountId }
         return accounts.first { account in
             // The account's STORED url must itself be https (not merely https after the
             // ensureHTTPS fallback) — an http-stored account is never a re-auth target.

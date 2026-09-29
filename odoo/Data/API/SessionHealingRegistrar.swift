@@ -52,7 +52,7 @@ struct SessionHealingRegistrar {
             )
         } catch OdooAPIError.sessionExpired {
             // ONE retry (guardrail 2): a single re-auth against the account's exact https host.
-            let healed = await reauthenticator.reauthenticateForHost(account.serverHost)
+            let healed = await reauthenticator.reauthenticateForHost(account.serverHost, accountId: account.id)
             guard healed else { throw OdooAPIError.sessionExpired }
 
             // Replay EXACTLY once. A second `.sessionExpired` from this call propagates — never a

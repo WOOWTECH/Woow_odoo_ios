@@ -74,7 +74,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     /// Stable host container; the per-account child WebView is swapped inside it.
     private weak var container: UIView?
     /// The child WebView for the current account, or nil before the first `apply`.
-    private var webView: WKWebView?
+    private(set) var webView: WKWebView?
 
     // Current account state — mutated only in `apply` on the main thread.
     private var currentAccountId: String?
@@ -108,6 +108,8 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     private let loadBaseRequest: (WKWebView, URLRequest) -> Void
     /// Loads a resolved deep-link URL. Injectable so ordering tests can observe it without WebKit I/O.
     private let loadDeepLinkRequest: (WKWebView, URLRequest) -> Void
+    /// Builds each account's child WebView. Injectable so tests can pin a stale instance's URL.
+    private let makeWebView: (WKWebViewConfiguration) -> WKWebView
     /// True once the current account's page has finished loading on its own host. Reset on rebuild.
     private(set) var hasFinishedAccountLoad = false
     /// Undoes WebKit's keyboard-avoidance scroll once the keyboard hides (LIVE-0927-1). Bound to
@@ -121,6 +123,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
          websiteDataStore: @escaping (String) -> WKWebsiteDataStore = { OdooWebViewCoordinator.dataStore(forAccountId: $0) },
          loadBaseRequest: @escaping (WKWebView, URLRequest) -> Void = { webView, request in webView.load(request) },
          loadDeepLinkRequest: @escaping (WKWebView, URLRequest) -> Void = { webView, request in webView.load(request) },
+         makeWebView: @escaping (WKWebViewConfiguration) -> WKWebView = { WKWebView(frame: .zero, configuration: $0) },
          keyboardNotifications: NotificationCenter = .default) {
         self.openExternalURL = openExternalURL
         self.brand = brand
@@ -128,6 +131,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         self.websiteDataStore = websiteDataStore
         self.loadBaseRequest = loadBaseRequest
         self.loadDeepLinkRequest = loadDeepLinkRequest
+        self.makeWebView = makeWebView
         self.onSessionExpired = onSessionExpired
         self._isLoading = isLoading
         self.currentServerUrl = serverUrl
@@ -194,7 +198,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         locationCoordinator.invalidateActiveDocument()
         hasFinishedAccountLoad = false
         let config = makeConfiguration(accountId: accountId)
-        let newWebView = WKWebView(frame: .zero, configuration: config)
+        let newWebView = makeWebView(config)
         newWebView.navigationDelegate = self
         newWebView.uiDelegate = self
         newWebView.allowsBackForwardNavigationGestures = true
@@ -203,8 +207,19 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         testProxy?.webView = newWebView
         #endif
 
-        // Swap the child WebView inside the stable container.
-        webView?.removeFromSuperview()
+        // Swap the child WebView inside the stable container. F1 (0930): the replaced instance is
+        // retired — stopped, and detached from every delegate and page-script handler — so none of
+        // its already-queued callbacks or scripts can reach the new account (see `isCurrentInstance`).
+        if let replaced = webView {
+            replaced.stopLoading()
+            replaced.navigationDelegate = nil
+            replaced.uiDelegate = nil
+            replaced.configuration.userContentController.removeScriptMessageHandler(forName: "requestLocation")
+            #if DEBUG
+            replaced.configuration.userContentController.removeScriptMessageHandler(forName: "__woowTestEval")
+            #endif
+            replaced.removeFromSuperview()
+        }
         webView = newWebView
         if let container {
             newWebView.translatesAutoresizingMaskIntoConstraints = false
@@ -234,8 +249,11 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
             sessionCookie = nil
         }
         if let cookie = sessionCookie {
-            store.httpCookieStore.setCookie(cookie) { [weak self] in
-                self?.loadBase(into: newWebView, serverUrl: serverUrl, database: database)
+            store.httpCookieStore.setCookie(cookie) { [weak self, weak newWebView] in
+                // F1 (0930): a later switch replaced this instance before its cookie landed — never
+                // load a replaced WebView.
+                guard let self, let newWebView, self.webView === newWebView else { return }
+                self.loadBase(into: newWebView, serverUrl: serverUrl, database: database)
             }
         } else {
             loadBase(into: newWebView, serverUrl: serverUrl, database: database)
@@ -409,7 +427,19 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
 
     // MARK: - WKNavigationDelegate
 
+    /// F1 (0930, account isolation): whether a WebKit callback comes from the current account's
+    /// WebView. Each account target owns one instance; a replaced instance is retired on switch, but
+    /// a callback it had already queued can still arrive — judged by host alone, a same-server
+    /// account's late page would open the new account's load gate or run its session-expiry path.
+    /// Every delegate entry checks this first. Before any WebView is built (unit tests that drive the
+    /// delegate directly) there is no account state to protect.
+    func isCurrentInstance(_ webView: WKWebView) -> Bool {
+        guard let current = self.webView else { return true }
+        return webView === current
+    }
+
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        guard isCurrentInstance(webView) else { return }
         isLoading = true
         // A real document load is starting in this WebView (self-heal re-login, deep link,
         // reload). Odoo's OWL SPA routes with pushState, which does NOT fire this, so an
@@ -418,6 +448,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        guard isCurrentInstance(webView) else { return }
         // The URL is committed here (before the page fully finishes). Publish it to the XCUITest
         // probe now so the test can read the landed host even if `didFinish` is delayed by
         // Odoo's long-lived bus/longpolling connection.
@@ -435,6 +466,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard isCurrentInstance(webView) else { return }
         isLoading = false
         injectOWLLayoutFixes(webView: webView)
         #if DEBUG
@@ -469,6 +501,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     /// `didFinish` — stayed true forever, leaving the spinner running with no error and no way
     /// to retry.
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        guard isCurrentInstance(webView) else { return }
         finishLoad(after: error)
     }
 
@@ -480,6 +513,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     /// and does not touch certificate handling — a rejected TLS handshake stays rejected.
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
                  withError error: Error) {
+        guard isCurrentInstance(webView) else { return }
         finishLoad(after: error)
     }
 
@@ -506,6 +540,11 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        // A retired instance never navigates, never hands off to Safari, never signals expiry.
+        guard isCurrentInstance(webView) else {
+            decisionHandler(.cancel)
+            return
+        }
         let decision = decideNavigation(for: navigationAction.request.url)
 
         switch decision {
@@ -526,6 +565,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
 
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        guard isCurrentInstance(webView) else { return nil }
         // Block popup windows (B0.7 equivalent)
         if navigationAction.targetFrame == nil {
             webView.load(navigationAction.request)

@@ -96,6 +96,25 @@ def allow_audited_cold_start_deeplink_apply(text):
     return text.replace("sut.apply(serverUrl:", "auditedColdStartApply(serverUrl:")
 
 
+def allow_audited_stale_instance_apply(text):
+    # F1 (0930) stale-instance tests drive the coordinator's real apply/rebuild path so each
+    # account switch builds a fresh child WebView; the WebView factory only pins `url` (no load),
+    # the data store is non-persistent, and base / deep-link loads are intercepted closures that
+    # only record. No request is issued.
+    for required in ["websiteDataStore: { _ in .nonPersistent() },",
+                     "loadBaseRequest: { [weak self] webView, _ in",
+                     "loadDeepLinkRequest: { [weak self] _, request in",
+                     'openExternalURL: { _ in XCTFail("No Safari") },',
+                     "makeWebView: { config in PinnedURLWebView(frame: .zero, configuration: config) }",
+                     "override var url: URL? { pinnedURL }",
+                     "brand: .woowtech,"]:
+        assert required in text, required
+    assert text.count("OdooWebViewCoordinator(") == 1
+    assert text.count("sut.apply(serverUrl:") == 13
+    assert text.count(".apply(serverUrl:") == 13
+    return text.replace("sut.apply(serverUrl:", "auditedStaleInstanceApply(serverUrl:")
+
+
 AUDITED_SESSION_PROTOCOLS = {
     "ApporoSwitchSessionReuseTests.swift": ("SwitchURLProtocol",),
     "HonestLogoutS4Tests.swift": ("LogoutURLProtocol",),
@@ -340,6 +359,8 @@ class OfflineUnitHostSourceTests(unittest.TestCase):
             if path.name == "ColdStartDeepLinkOrderTests.swift":
                 text = allow_audited_cold_start_deeplink_apply(text)
             self.assertNotRegex(text, r"\.load\(|\.loadHTMLString\(|\.reload\(|\.apply\(serverUrl:|createWebViewWith:")
+            if path.name == "StaleWebViewInstanceTests.swift":
+                text = allow_audited_stale_instance_apply(text)
             self.assertNotRegex(text, r"UIApplication\.shared\.open|Data\(contentsOf:|String\(contentsOf:")
 
     def test_cookie_consumer_exception_requires_isolated_store_and_navigation_interception(self):
@@ -357,6 +378,16 @@ class OfflineUnitHostSourceTests(unittest.TestCase):
         self.assertIn("OdooWebViewCoordinator.dataStore(forAccountId: $0)", web)
 
     def test_keyboard_restorer_exception_requires_no_load_no_session_no_link(self):
+    def test_stale_instance_exception_requires_isolated_store_and_intercepted_loads(self):
+        text = source("odooTests/StaleWebViewInstanceTests.swift")
+        allow_audited_stale_instance_apply(text)
+        for old, new in [("{ _ in .nonPersistent() }", "{ _ in .default() }"),
+                         ("loadBaseRequest: { [weak self] webView, _ in", "loadBaseRequest: { webView, request in webView.load(request)"),
+                         ("override var url: URL? { pinnedURL }", "override var title: String? { nil }"),
+                         ("brand: .woowtech,", "brand: .apporo,")]:
+            with self.assertRaises(AssertionError):
+                allow_audited_stale_instance_apply(text.replace(old, new))
+
         text = source("odooTests/WebViewKeyboardScrollRestorerTests.swift")
         allow_audited_keyboard_restorer_apply(text)
         for old, new in [("loadBaseRequest: { _, _ in },", "loadBaseRequest: { webView, request in webView.load(request) },"),

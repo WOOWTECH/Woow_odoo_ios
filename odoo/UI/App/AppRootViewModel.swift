@@ -158,8 +158,17 @@ final class AppRootViewModel: ObservableObject {
     /// success, `.login` otherwise. Returns the resulting state.
     @discardableResult
     func attemptSelfHealOrLogin() async -> LaunchState {
-        guard let account = accountRepository.getActiveAccount(),
-              await reauthenticator.reauthenticateForHost(account.serverHost) else {
+        guard let account = accountRepository.getActiveAccount() else {
+            canCancelAddAccount = false
+            launchState = .login
+            return .login
+        }
+        // F1 (0930): heal THIS account (not merely one on its host — two accounts can share a server).
+        let healed = await reauthenticator.reauthenticateForHost(account.serverHost, accountId: account.id)
+        // The heal is asynchronous. If the user switched account (or signed out) meanwhile, its
+        // outcome belongs to an account that is no longer on screen: leave the current state alone.
+        guard accountRepository.getActiveAccount()?.id == account.id else { return launchState }
+        guard healed else {
             canCancelAddAccount = false
             launchState = .login
             return .login
