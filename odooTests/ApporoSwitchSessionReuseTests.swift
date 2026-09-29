@@ -28,9 +28,11 @@ final class ApporoSwitchSessionReuseTests: XCTestCase {
     /// Answers `/web/session/get_session_info` per `infoMode` and `/web/session/authenticate` with
     /// a fresh `session_id=sess-new`. Records path + Cookie header of every request.
     private final class SwitchURLProtocol: URLProtocol {
-        enum InfoMode { case valid(uid: Int, db: String), expired }
+        enum InfoMode { case valid(uid: Int, db: String), validWithoutDatabase(uid: Int), expired }
         nonisolated(unsafe) static var infoMode: InfoMode = .valid(uid: 1, db: "demo888")
         nonisolated(unsafe) static var requests: [(path: String, cookie: String?)] = []
+        /// Runs on the loading thread while the switch's re-login is in flight.
+        nonisolated(unsafe) static var onAuthenticate: (() -> Void)?
 
         override class func canInit(with request: URLRequest) -> Bool { true }
         override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -45,10 +47,13 @@ final class ApporoSwitchSessionReuseTests: XCTestCase {
                 switch Self.infoMode {
                 case .valid(let uid, let db):
                     body = #"{"jsonrpc":"2.0","id":"1","result":{"uid":\#(uid),"db":"\#(db)","username":"admin"}}"#
+                case .validWithoutDatabase(let uid):
+                    body = #"{"jsonrpc":"2.0","id":"1","result":{"uid":\#(uid),"username":"admin"}}"#
                 case .expired:
                     body = #"{"jsonrpc":"2.0","id":"1","error":{"code":100,"message":"Odoo Session Expired","data":{"name":"odoo.http.SessionExpiredException","message":"Session expired"}}}"#
                 }
             case "/web/session/authenticate":
+                Self.onAuthenticate?()
                 headers["Set-Cookie"] = "session_id=sess-new; Path=/; Secure; HttpOnly"
                 body = #"{"jsonrpc":"2.0","id":"1","result":{"uid":1,"name":"Administrator","username":"admin","db":"demo888"}}"#
             default:
@@ -74,6 +79,7 @@ final class ApporoSwitchSessionReuseTests: XCTestCase {
         try await super.setUp()
         SwitchURLProtocol.requests = []
         SwitchURLProtocol.infoMode = .valid(uid: 1, db: "demo888")
+        SwitchURLProtocol.onAuthenticate = nil
         persistence = PersistenceController(inMemory: true)
         secureStorage = SecureStorage.shared
         revoker = SwitchRevokeRecorder()
@@ -178,6 +184,38 @@ final class ApporoSwitchSessionReuseTests: XCTestCase {
         _ = await repo.switchAccount(id: accountB.id)
 
         XCTAssertEqual(SwitchURLProtocol.requests.map(\.path).last, "/web/session/authenticate")
+    }
+
+    /// pi 0930 P1: a session the server accepts without naming its database is not proven to belong
+    /// to the target database (two databases on one host can share a uid) — fail closed and log in.
+    func test_switch_givenSessionInfoWithoutDatabase_reauthenticates() async throws {
+        _ = try storeCredential(withCookie: true)
+        SwitchURLProtocol.infoMode = .validWithoutDatabase(uid: 1)
+
+        _ = await repo.switchAccount(id: accountB.id)
+
+        XCTAssertEqual(SwitchURLProtocol.requests.map(\.path).last, "/web/session/authenticate",
+                       "a session without database evidence must not be reused")
+        XCTAssertNotEqual(secureStorage.pushCredential(accountId: accountB.id)?.sessionId, "sess-b")
+    }
+
+    /// pi 0930 P1: a switch superseded by a newer selection while its re-login is in flight commits
+    /// nothing — so it must not revoke the target's stored session either (it stays B's only session).
+    func test_switch_supersededDuringReauth_keepsAndDoesNotRevokeStoredSession() async throws {
+        _ = try storeCredential(withCookie: true)
+        SwitchURLProtocol.infoMode = .expired
+        SwitchURLProtocol.onAuthenticate = {
+            // The user picks another account while B is re-authenticating.
+            DispatchQueue.main.sync { MainActor.assumeIsolated { _ = PushManualLoginOrder.begin() } }
+        }
+
+        let switched = await repo.switchAccount(id: accountB.id)
+
+        XCTAssertFalse(switched, "a superseded switch commits nothing")
+        try await Task.sleep(nanoseconds: 300_000_000)
+        let revoked = await revoker.sessionIds
+        XCTAssertTrue(revoked.isEmpty, "B's stored session must not be revoked by an uncommitted switch: \(revoked)")
+        XCTAssertEqual(secureStorage.pushCredential(accountId: accountB.id)?.sessionId, "sess-b")
     }
 
     /// A credential saved by an older build carries no reusable cookie: behave as before

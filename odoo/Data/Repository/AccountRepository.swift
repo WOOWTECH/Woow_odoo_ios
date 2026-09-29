@@ -351,7 +351,19 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
               cookie.expiresDate.map({ $0 > Date() }) ?? true else { return false }
         guard case .valid(let uid, let db) = await apiClient.pushSessionInfo(
             serverUrl: account.fullServerUrl, sessionId: credential.sessionId) else { return false }
-        return (account.userId == nil || account.userId == uid) && (db == nil || db == account.database)
+        // pi 0930: no database in the answer is no proof the session belongs to this database (two
+        // databases on one host can share a uid) — fail closed to a fresh login.
+        guard let db, db == account.database else { return false }
+        return account.userId == nil || account.userId == uid
+    }
+
+    /// D5 (pi 0930): best-effort revoke of the session a switch replaced — called only AFTER the new
+    /// credential is committed. A switch superseded by a newer selection commits nothing, so the
+    /// target keeps its stored session (possibly its only one) untouched. Never delays the switch.
+    private func revokeReplacedSession(_ old: PushCredential, by new: PushCredential, serverUrl: String) {
+        guard !old.sessionId.isEmpty, old.sessionId != new.sessionId else { return }
+        let revoke = revokeSession, oldId = old.sessionId
+        Task.detached { await revoke(serverUrl, oldId) }
     }
 
     /// Selection and manual login share an order and transaction owner. Never borrow
@@ -376,11 +388,6 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
                       account.userId == nil || account.userId == auth.userId else { return false }
                 selected = PushCredential(account: account, password: captured.password,
                     sessionId: auth.sessionId, sessionCookie: auth.sessionCookie)
-                // Best-effort revoke of the session this login replaced (never delays the switch).
-                if !captured.sessionId.isEmpty, captured.sessionId != auth.sessionId {
-                    let revoke = revokeSession, serverUrl = account.fullServerUrl, old = captured.sessionId
-                    Task.detached { await revoke(serverUrl, old) }
-                }
             }
         } else {
             selected = captured
@@ -399,6 +406,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         target.isActive = true
         guard (try? context.save()) != nil else { return false }
         pushCredentials.savePushCredential(selected)
+        revokeReplacedSession(captured, by: selected, serverUrl: account.fullServerUrl)
         if selected.generation != captured.generation {
             PushRegistrationStatusStore.shared.set(.notRegistered, for: id)
         }
@@ -685,7 +693,8 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
 
 /// A late Apporo login or switch cannot replace a newer explicit selection.
 @MainActor
-private enum PushManualLoginOrder {
+/// Internal (not private) only so tests can supersede an in-flight selection.
+enum PushManualLoginOrder {
     private static var current = UUID()
     static func begin() -> UUID { current = UUID(); return current }
     static func invalidate() { current = UUID() }
