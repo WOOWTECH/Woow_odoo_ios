@@ -106,6 +106,10 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     private let websiteDataStore: (String) -> WKWebsiteDataStore
     /// Injection keeps consumer-chain unit tests off the network, including WebKit.
     private let loadBaseRequest: (WKWebView, URLRequest) -> Void
+    /// Loads a resolved deep-link URL. Injectable so ordering tests can observe it without WebKit I/O.
+    private let loadDeepLinkRequest: (WKWebView, URLRequest) -> Void
+    /// True once the current account's page has finished loading on its own host. Reset on rebuild.
+    private(set) var hasFinishedAccountLoad = false
     /// Undoes WebKit's keyboard-avoidance scroll once the keyboard hides (LIVE-0927-1). Bound to
     /// whichever child WebView is current, since account switches swap it.
     private var keyboardScrollRestorer: WebViewKeyboardScrollRestorer?
@@ -116,12 +120,14 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
          pushCredentials: PushCredentialStorage = SecureStorage.shared,
          websiteDataStore: @escaping (String) -> WKWebsiteDataStore = { OdooWebViewCoordinator.dataStore(forAccountId: $0) },
          loadBaseRequest: @escaping (WKWebView, URLRequest) -> Void = { webView, request in webView.load(request) },
+         loadDeepLinkRequest: @escaping (WKWebView, URLRequest) -> Void = { webView, request in webView.load(request) },
          keyboardNotifications: NotificationCenter = .default) {
         self.openExternalURL = openExternalURL
         self.brand = brand
         self.pushCredentials = pushCredentials
         self.websiteDataStore = websiteDataStore
         self.loadBaseRequest = loadBaseRequest
+        self.loadDeepLinkRequest = loadDeepLinkRequest
         self.onSessionExpired = onSessionExpired
         self._isLoading = isLoading
         self.currentServerUrl = serverUrl
@@ -167,8 +173,16 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
             rebuildWebView(accountId: accountId, serverUrl: serverUrl, database: database, sessionId: sessionId)
         } else if let deepLink, !deepLink.isEmpty, deepLink != lastDeepLink {
             lastDeepLink = deepLink
-            applyDeepLink(deepLink)
-            consumePending(for: accountId)
+            if hasFinishedAccountLoad {
+                applyDeepLink(deepLink)
+                consumePending(for: accountId)
+            } else {
+                // D4 (demo111 2026-09-29): on cold start the WebView is built before the URL is
+                // delivered and its base page is loaded only in the cookie-store completion.
+                // Applying (and consuming) the link now let that later base load replace it, so
+                // the link was lost. Queue it; `accountPageDidFinish` applies it load-gated.
+                pendingDeepLink = deepLink
+            }
         }
     }
 
@@ -178,6 +192,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         // The outgoing document is about to be discarded: answer and drop any in-flight
         // geolocation request so a later fix can never be delivered into the new account's page.
         locationCoordinator.invalidateActiveDocument()
+        hasFinishedAccountLoad = false
         let config = makeConfiguration(accountId: accountId)
         let newWebView = WKWebView(frame: .zero, configuration: config)
         newWebView.navigationDelegate = self
@@ -286,7 +301,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
 
         switch plan {
         case .load(let url):
-            webView.load(URLRequest(url: url))
+            loadDeepLinkRequest(webView, URLRequest(url: url))
         }
     }
 
@@ -431,11 +446,17 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         TestNotificationTapInjector.shared.fireOnceAfterActiveLoad()
         #endif
 
-        // Load-gated deep-link apply: only when the finished page is on the TARGET host.
-        // This closes the async race and guarantees a link never applies to account A.
-        if let pending = pendingDeepLink,
-           let host = webView.url?.host,
-           host.caseInsensitiveCompare(currentServerHost) == .orderedSame {
+        accountPageDidFinish(loadedHost: webView.url?.host)
+    }
+
+    /// Load-gated deep-link apply: only when the finished page is on the TARGET host.
+    /// This closes the async race and guarantees a link never applies to account A.
+    /// Split out of `didFinish` so the gate is unit-testable without a WebKit load.
+    func accountPageDidFinish(loadedHost: String?) {
+        guard let host = loadedHost,
+              host.caseInsensitiveCompare(currentServerHost) == .orderedSame else { return }
+        hasFinishedAccountLoad = true
+        if let pending = pendingDeepLink {
             pendingDeepLink = nil
             applyDeepLink(pending)
             consumePending(for: currentAccountId ?? "")

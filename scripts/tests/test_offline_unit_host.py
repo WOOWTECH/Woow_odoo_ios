@@ -79,6 +79,23 @@ def allow_audited_keyboard_restorer_apply(text):
     return text[:start] + test.replace("coordinator.apply(serverUrl:", "auditedKeyboardApply(serverUrl:") + text[end:]
 
 
+def allow_audited_cold_start_deeplink_apply(text):
+    # D4 (demo111 2026-09-29) ordering test needs the coordinator's real apply/rebuild path so the
+    # session cookie goes through a real (non-persistent) cookie store whose completion issues the
+    # base load. Both the base load and the deep-link load are intercepted closures that only
+    # record; didFinish is driven through `accountPageDidFinish(loadedHost:)`. No request is issued.
+    for required in ["websiteDataStore: { _ in .nonPersistent() },",
+                     'loadBaseRequest: { [weak self] _, _ in self?.events.append("base") },',
+                     "loadDeepLinkRequest: { [weak self] _, request in",
+                     'openExternalURL: { _ in XCTFail("No Safari") },',
+                     "brand: .woowtech,"]:
+        assert required in text, required
+    assert text.count("OdooWebViewCoordinator(") == 1
+    assert text.count("sut.apply(serverUrl:") == 4
+    assert text.count(".apply(serverUrl:") == 4
+    return text.replace("sut.apply(serverUrl:", "auditedColdStartApply(serverUrl:")
+
+
 AUDITED_SESSION_PROTOCOLS = {
     "HonestLogoutS4Tests.swift": ("LogoutURLProtocol",),
     "LoginAccessDeniedMessageTests.swift": ("JsonRpcErrorURLProtocol",),
@@ -318,6 +335,8 @@ class OfflineUnitHostSourceTests(unittest.TestCase):
                 text = allow_audited_cookie_consumer_apply(text)
             if path.name == "WebViewKeyboardScrollRestorerTests.swift":
                 text = allow_audited_keyboard_restorer_apply(text)
+            if path.name == "ColdStartDeepLinkOrderTests.swift":
+                text = allow_audited_cold_start_deeplink_apply(text)
             self.assertNotRegex(text, r"\.load\(|\.loadHTMLString\(|\.reload\(|\.apply\(serverUrl:|createWebViewWith:")
             self.assertNotRegex(text, r"UIApplication\.shared\.open|Data\(contentsOf:|String\(contentsOf:")
 
