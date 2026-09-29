@@ -58,6 +58,11 @@ struct MainView: View {
                 }
             }
             .animation(.easeInOut(duration: 0.3), value: showLocationDeniedBanner)
+            // D6 (demo111 2026-09-29): without this the stack root is `.automatic` = a LARGE title
+            // bar. There is no title text (the brand name is a `.principal` item), so an empty
+            // ~52 pt large-title strip appeared whenever the WebView sat at the top — always on
+            // iPhone SE, after account switches on larger phones — pushing Odoo's page down.
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text(AppBrand.current.displayName)
