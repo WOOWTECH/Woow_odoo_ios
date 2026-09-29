@@ -37,6 +37,29 @@ def config(name):
     return values
 
 
+
+# demo111 live run 2026-09-29 — approved odooApp.swift root deltas (current, baseline).
+ADD_ACCOUNT_CANCEL_AND_PRUNE_ROOT_DELTAS = [
+    ("""                }, onCancel: rootViewModel.canCancelAddAccount ? {
+                    // Back to the account that was active; App Lock re-prompts via the
+                    // launchState → .authenticated observer if a background re-locked meanwhile.
+                    isAddingAccount = false
+                    rootViewModel.cancelAddAccount()
+                } : nil)
+""", """                })
+"""),
+    ("""            // Also covers the add-account form, which sits in front of a signed-in account.
+            guard rootViewModel.shouldRelockOnBackground else { return }
+""", """            guard rootViewModel.launchState == .authenticated else { return }
+"""),
+    ("""                // Not over the add-account form: the gate prompts when Cancel returns to the account.
+                guard rootViewModel.launchState == .authenticated else { break }
+                authViewModel.appDidBecomeActive()
+""", """                authViewModel.appDidBecomeActive()
+"""),
+]
+
+
 class BrandLayerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -316,6 +339,12 @@ class BrandLayerTests(unittest.TestCase):
         self.assertEqual(current.count(offline_root), 1)
         current = current.replace(offline_root, "", 1)
         current = current.replace("                }\n            #endif\n        }", "                }\n        }", 1)
+        # Approved root deltas for the demo111 2026-09-29 live-run fixes (D1 orphan-store pruning,
+        # D3 add-account Cancel + App Lock coverage). Each current hunk must appear exactly once and
+        # is folded back to the protected baseline before the whole-file comparison.
+        for now, baseline in ADD_ACCOUNT_CANCEL_AND_PRUNE_ROOT_DELTAS:
+            self.assertEqual(current.count(now), 1, now)
+            current = current.replace(now, baseline, 1)
         self.assertEqual(current, expected)
 
     def test_assets_are_hashed_opaque_white_mark(self):

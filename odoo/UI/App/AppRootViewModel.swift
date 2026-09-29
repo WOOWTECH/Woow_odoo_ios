@@ -19,6 +19,18 @@ final class AppRootViewModel: ObservableObject {
 
     @Published private(set) var launchState: LaunchState = .loading
 
+    /// True while the login form was opened by "Add Account" in front of a signed-in account, so
+    /// the form offers a way back (demo111 2026-09-29, D3: before this, only killing the app
+    /// returned to the account the user was already signed in to).
+    @Published private(set) var canCancelAddAccount = false
+
+    /// Whether a true background must re-lock App Lock. The add-account form sits in front of a
+    /// signed-in account; without this a background there would not re-lock, and Cancel would
+    /// then reveal the account's content without the gate.
+    var shouldRelockOnBackground: Bool {
+        launchState == .authenticated || (launchState == .login && canCancelAddAccount)
+    }
+
     private let accountRepository: AccountRepositoryProtocol
 
     private let pushTokenRepository: PushTokenRepositoryProtocol
@@ -48,6 +60,7 @@ final class AppRootViewModel: ObservableObject {
     /// reconcile (AC8.b) so a token Firebase delivered BEFORE any account existed — the
     /// iOS token-arrives-before-account race — is registered now that an account is present.
     func checkSession() {
+        canCancelAddAccount = false
         let activeAccount = accountRepository.getActiveAccount()
         if activeAccount != nil {
             launchState = .authenticated
@@ -67,6 +80,7 @@ final class AppRootViewModel: ObservableObject {
     /// already fixed the credential, yet silent self-heal (and with it FCM register/unregister
     /// recovery) stayed dead until the app was restarted.
     func onLoginSuccess() {
+        canCancelAddAccount = false
         launchState = .authenticated
         reconcileTokenRegistration()
         Task { await clearReauthCircuitForActiveAccount() }
@@ -121,7 +135,18 @@ final class AppRootViewModel: ObservableObject {
     /// 呼叫端另外把 `isAddingAccount` 設為 true，使 `LoginView` 從空白的伺服器資訊
     /// 步驟開始，而不是預填現有帳號。
     func beginAddAccount() {
+        canCancelAddAccount = accountRepository.getActiveAccount() != nil
         launchState = .login
+    }
+
+    /// Leaves the add-account form and returns to the account that was active when it opened.
+    /// Changes no account. A no-op on a plain (first-run / forced re-login) login screen, and it
+    /// never shows main content if the active account disappeared meanwhile.
+    func cancelAddAccount() {
+        guard canCancelAddAccount else { return }
+        canCancelAddAccount = false
+        guard accountRepository.getActiveAccount() != nil else { return }
+        launchState = .authenticated
     }
 
     func onSessionExpired() {
@@ -135,6 +160,7 @@ final class AppRootViewModel: ObservableObject {
     func attemptSelfHealOrLogin() async -> LaunchState {
         guard let account = accountRepository.getActiveAccount(),
               await reauthenticator.reauthenticateForHost(account.serverHost) else {
+            canCancelAddAccount = false
             launchState = .login
             return .login
         }

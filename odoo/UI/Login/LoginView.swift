@@ -9,13 +9,17 @@ struct LoginView: View {
     /// with the existing active account's details.
     let addingAccount: Bool
     let onLoginSuccess: () -> Void
+    /// Non-nil only for "Add Account" in front of a signed-in account: shows a Cancel button that
+    /// returns to that account.
+    let onCancel: (() -> Void)?
 
     @StateObject private var viewModel: LoginViewModel
     /// Observes the user's theme color so the logo accent + button tints
 
-    init(addingAccount: Bool = false, onLoginSuccess: @escaping () -> Void) {
+    init(addingAccount: Bool = false, onLoginSuccess: @escaping () -> Void, onCancel: (() -> Void)? = nil) {
         self.addingAccount = addingAccount
         self.onLoginSuccess = onLoginSuccess
+        self.onCancel = onCancel
         _viewModel = StateObject(wrappedValue: LoginViewModel(addingAccount: addingAccount))
     }
 
@@ -71,6 +75,14 @@ struct LoginView: View {
                 }
             }
             .navigationBarHidden(true)
+            .overlay(alignment: .topLeading) {
+                if let onCancel {
+                    Button("Cancel", action: onCancel)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 8)
+                        .accessibilityIdentifier("login.cancelAddAccount")
+                }
+            }
             .disabled(viewModel.isLoading)
             .overlay {
                 if viewModel.isLoading {

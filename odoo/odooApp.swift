@@ -81,7 +81,12 @@ struct AppRootView: View {
                     if !authViewModel.requiresAuth {
                         authViewModel.setAuthenticated(true)
                     }
-                })
+                }, onCancel: rootViewModel.canCancelAddAccount ? {
+                    // Back to the account that was active; App Lock re-prompts via the
+                    // launchState → .authenticated observer if a background re-locked meanwhile.
+                    isAddingAccount = false
+                    rootViewModel.cancelAddAccount()
+                } : nil)
                 // `LoginView` 的 view model 是 @StateObject，而 @StateObject 的初值只在
                 // view 第一次建立時求值一次。同一次 App 執行中若 LoginView 出現過第二次
                 // （例：登入 A → 點新增實例），SwiftUI 會沿用第一次的 LoginViewModel，
@@ -123,7 +128,8 @@ struct AppRootView: View {
             rootViewModel.checkSession()
         }
         .onChange(of: scenePhase) { newPhase in
-            guard rootViewModel.launchState == .authenticated else { return }
+            // Also covers the add-account form, which sits in front of a signed-in account.
+            guard rootViewModel.shouldRelockOnBackground else { return }
             switch newPhase {
             case .inactive:
                 // Do NOT re-lock here: the Face ID sheet itself drives the app .inactive.
@@ -135,6 +141,8 @@ struct AppRootView: View {
                 authViewModel.appDidEnterBackground()
             case .active:
                 // Auto-run the biometric prompt once per lock — seamless single-method unlock.
+                // Not over the add-account form: the gate prompts when Cancel returns to the account.
+                guard rootViewModel.launchState == .authenticated else { break }
                 authViewModel.appDidBecomeActive()
             @unknown default:
                 break
