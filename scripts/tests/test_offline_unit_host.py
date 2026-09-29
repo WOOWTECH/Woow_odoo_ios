@@ -81,6 +81,7 @@ def allow_audited_keyboard_restorer_apply(text):
 
 AUDITED_SESSION_PROTOCOLS = {
     "HonestLogoutS4Tests.swift": ("LogoutURLProtocol",),
+    "LoginAccessDeniedMessageTests.swift": ("JsonRpcErrorURLProtocol",),
     "LoginServerErrorMessageTests.swift": ("CloudflareOriginDownURLProtocol",),
     "LogoutUnregisterURLTests.swift": ("RecordingURLProtocol",),
     "MissingTests.swift": ("StubURLProtocol",),

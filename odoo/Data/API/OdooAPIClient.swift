@@ -96,7 +96,7 @@ actor OdooAPIClient {
             )
 
             if let error = decoded.error, let msg = error.data?.message ?? error.message {
-                return mapOdooError(message: msg)
+                return Self.mapOdooError(message: msg, exceptionName: error.data?.name)
             }
 
             guard let result = decoded.result,
@@ -293,8 +293,18 @@ actor OdooAPIClient {
 
     /// Maps Odoo error messages to typed AuthResult errors.
     /// Ported from Android: OdooJsonRpcClient error handling
-    private func mapOdooError(message: String) -> AuthResult {
+    ///
+    /// Odoo 18 answers a wrong login/password with `odoo.exceptions.AccessDenied` and the message
+    /// "Access Denied" — none of the words below — so it used to fall through to `.serverError` and
+    /// the login screen showed "Server error: Access Denied" (demo111 2026-09-29, D2). It is the
+    /// invalid-credentials case; the re-auth guardrail also depends on this to stop retrying a
+    /// rejected stored password.
+    static func mapOdooError(message: String, exceptionName: String?) -> AuthResult {
         let lower = message.lowercased()
+        if exceptionName == "odoo.exceptions.AccessDenied"
+            || lower.trimmingCharacters(in: .whitespacesAndNewlines) == "access denied" {
+            return .error(message, .invalidCredentials)
+        }
         if lower.contains("database") {
             return .error(message, .databaseNotFound)
         } else if lower.contains("login") || lower.contains("password") || lower.contains("credentials") {
