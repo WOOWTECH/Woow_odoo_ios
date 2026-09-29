@@ -1105,6 +1105,16 @@ private final class PushContractURLProtocol: URLProtocol {
     private static let lock = NSLock()
     private static var recorded: [Call] = []
     private static var replies: [Reply] = []
+    /// D1/D5 (2026-09-29) session housekeeping is answered OUTSIDE the reply queue, so it can never
+    /// consume a reply a test sequenced for authenticate/call_kw: `/web/session/destroy` (logout and
+    /// switch revoke the replaced session, detached) and `/web/session/get_session_info` (a switch
+    /// probes the target's stored session first). Session checks answer `sessionInfoReply`, which
+    /// defaults to expired — the re-authenticate flows these tests were written for.
+    private static var destroyed: [String] = []
+    private static var checks: [String] = []
+    static var sessionInfoReply: Reply = .expired
+    static var destroyedCookies: [String] { lock.lock(); defer { lock.unlock() }; return destroyed }
+    static var sessionCheckCookies: [String] { lock.lock(); defer { lock.unlock() }; return checks }
     private static var held: [(PushContractURLProtocol, Reply)] = []
     static var onHold: (() -> Void)?
     static func releaseHeld() {
@@ -1115,10 +1125,24 @@ private final class PushContractURLProtocol: URLProtocol {
     static func reset(_ replies: [Reply] = []) {
         lock.lock(); defer { lock.unlock() }
         recorded = []; self.replies = replies; held = []; onHold = nil
+        destroyed = []; checks = []; sessionInfoReply = .expired
     }
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
+        // Accounts in this suite live under a path prefix (`…/base`), so match the endpoint suffix.
+        let path = request.url?.path ?? ""
+        switch true {
+        case path.hasSuffix("/web/session/destroy"):
+            Self.lock.lock(); Self.destroyed.append(request.value(forHTTPHeaderField: "Cookie") ?? ""); Self.lock.unlock()
+            return deliver(.result(NSNull()))
+        case path.hasSuffix("/web/session/get_session_info"):
+            Self.lock.lock(); Self.checks.append(request.value(forHTTPHeaderField: "Cookie") ?? "")
+            let reply = Self.sessionInfoReply; Self.lock.unlock()
+            return deliver(reply)
+        default:
+            break
+        }
         do {
             let root = try JSONSerialization.jsonObject(with: Self.body(request)) as? [String: Any]
             let params = root?["params"] as? [String: Any] ?? [:]

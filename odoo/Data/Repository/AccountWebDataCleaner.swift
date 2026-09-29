@@ -1,0 +1,73 @@
+import Foundation
+import WebKit
+
+/// Removes one account's WebKit website data (cookies, storage, caches).
+///
+/// demo111 2026-09-29 (D1): logging out left `WebsiteDataStore/<accountId>/Cookies.binarycookies`
+/// holding the account's `session_id`, surviving an app restart. Account removal now reads the
+/// session ids that store holds (so they can be revoked server-side too), then removes the store.
+@MainActor
+protocol AccountWebDataCleaning: AnyObject {
+    /// `session_id` values the account's WebKit store holds for `host` (the WebView may have been
+    /// handed a newer session than the one in the Keychain).
+    func sessionIds(forAccountId id: String, host: String) async -> [String]
+    /// Removes the account's website data. On a per-account store: everything. On the shared
+    /// default store (below iOS 17 / non-UUID ids): only the `session_id` cookies for `host` whose
+    /// value is in `sessionIds` — never a same-host sibling account's cookie.
+    func removeWebData(forAccountId id: String, host: String, sessionIds: Set<String>) async
+    /// Removes per-account stores whose identifier matches no account (left by an earlier build,
+    /// or still in use by a live WebView when its account was removed).
+    func pruneOrphanStores(keeping accountIds: Set<String>) async
+}
+
+@MainActor
+final class AccountWebDataCleaner: AccountWebDataCleaning {
+
+    nonisolated init() {}
+
+    func sessionIds(forAccountId id: String, host: String) async -> [String] {
+        let cookies = await allCookies(in: OdooWebViewCoordinator.dataStore(forAccountId: id))
+        return cookies.filter { $0.name == "session_id" && Self.matches($0, host: host) }.map(\.value)
+    }
+
+    func removeWebData(forAccountId id: String, host: String, sessionIds: Set<String>) async {
+        if #available(iOS 17.0, *), let uuid = UUID(uuidString: id) {
+            let store = WKWebsiteDataStore(forIdentifier: uuid)
+            await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
+            // Fails while a live WebView still uses the store (the active account being logged out);
+            // its data is already gone, and launch pruning deletes the empty store later.
+            try? await WKWebsiteDataStore.remove(forIdentifier: uuid)
+            return
+        }
+        let store = WKWebsiteDataStore.default()
+        for cookie in await allCookies(in: store)
+        where cookie.name == "session_id" && Self.matches(cookie, host: host) && sessionIds.contains(cookie.value) {
+            await withCheckedContinuation { cont in store.httpCookieStore.delete(cookie) { cont.resume() } }
+        }
+    }
+
+    func pruneOrphanStores(keeping accountIds: Set<String>) async {
+        guard #available(iOS 17.0, *) else { return }
+        // The class-level identifier fetch crashes (SIGSEGV in WTF::RunLoop::dispatch) when it is
+        // the first WebKit call in the process — at launch no WebView exists yet. Instantiating a
+        // store object first initializes WebKit's main run loop.
+        _ = WKWebsiteDataStore.default()
+        let keep = Set(accountIds.compactMap(UUID.init(uuidString:)))
+        for identifier in await WKWebsiteDataStore.allDataStoreIdentifiers where !keep.contains(identifier) {
+            let store = WKWebsiteDataStore(forIdentifier: identifier)
+            await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
+            try? await WKWebsiteDataStore.remove(forIdentifier: identifier)
+        }
+    }
+
+    private func allCookies(in store: WKWebsiteDataStore) async -> [HTTPCookie] {
+        await withCheckedContinuation { cont in store.httpCookieStore.getAllCookies { cont.resume(returning: $0) } }
+    }
+
+    /// Cookie domain `host`, `.host`, or a parent domain the host belongs to.
+    private static func matches(_ cookie: HTTPCookie, host: String) -> Bool {
+        let domain = cookie.domain.hasPrefix(".") ? String(cookie.domain.dropFirst()) : cookie.domain
+        let h = host.lowercased(), d = domain.lowercased()
+        return h == d || h.hasSuffix("." + d)
+    }
+}

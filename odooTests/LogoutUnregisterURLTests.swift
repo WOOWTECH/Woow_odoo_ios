@@ -40,17 +40,25 @@ final class LogoutUnregisterURLTests: XCTestCase {
 
         // Static capture — only one request is expected per test (a single logout unregister call).
         static var recorded: Recorded?
+        /// D1 (2026-09-29): logout also revokes the account's server session, best-effort and
+        /// detached, via `/web/session/destroy`. Captured separately so it can never overwrite the
+        /// unregister request this test is about; holds the Cookie header of each revoke.
+        static var destroyedCookies: [String] = []
 
-        static func reset() { recorded = nil }
+        static func reset() { recorded = nil; destroyedCookies = [] }
 
         override class func canInit(with request: URLRequest) -> Bool { true }
         override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
         override func startLoading() {
-            RecordingURLProtocol.recorded = Recorded(
+            if request.url?.path.hasSuffix("/web/session/destroy") == true {
+                RecordingURLProtocol.destroyedCookies.append(request.value(forHTTPHeaderField: "Cookie") ?? "")
+            } else {
+                RecordingURLProtocol.recorded = Recorded(
                 url: request.url,
                 body: RecordingURLProtocol.extractBody(from: request)
-            )
+                )
+            }
 
             // Canned JSON-RPC success — `callKw` only needs a decodable envelope with no error.
             let json = #"{"jsonrpc":"2.0","id":"r1","result":true}"#
@@ -178,5 +186,12 @@ final class LogoutUnregisterURLTests: XCTestCase {
             "woow.fcm.device",
             "the unregister call must target the woow.fcm.device model"
         )
+
+        // 4. D1: B's own server session is revoked too (best-effort, after the unregister).
+        for _ in 0..<200 where RecordingURLProtocol.destroyedCookies.isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(RecordingURLProtocol.destroyedCookies, ["session_id=sess-b"],
+                       "logout must revoke only the logged-out account's session")
     }
 }

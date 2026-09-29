@@ -32,20 +32,56 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
     private let apiClient: OdooAPIClient
     private let brand: AppBrand.Code
     private let pushCredentials: PushCredentialStorage
+    /// Removes a removed account's WebKit store (D1). Injectable for tests.
+    private let webDataCleaner: AccountWebDataCleaning
+    /// Best-effort server revoke of one session (`serverUrl`, `sessionId`). Injectable for tests.
+    private let revokeSession: @Sendable (String, String) async -> Void
 
     init(
         persistence: PersistenceController = .shared,
         secureStorage: SecureStorage = .shared,
         apiClient: OdooAPIClient = OdooAPIClient(),
         brand: AppBrand.Code = AppBrand.current.code,
-        pushCredentials: PushCredentialStorage = SecureStorage.shared
+        pushCredentials: PushCredentialStorage = SecureStorage.shared,
+        webDataCleaner: AccountWebDataCleaning? = nil,
+        revokeSession: (@Sendable (String, String) async -> Void)? = nil
     ) {
         self.persistence = persistence
         self.secureStorage = secureStorage
         self.apiClient = apiClient
         self.brand = brand
         self.pushCredentials = pushCredentials
+        self.webDataCleaner = webDataCleaner ?? AccountWebDataCleaner()
+        self.revokeSession = revokeSession ?? { [apiClient] url, sid in await apiClient.destroySession(serverUrl: url, sessionId: sid) }
         migratePasswordKeysIfNeeded()
+    }
+
+    /// Removes WebKit data stores that no longer belong to any account — left by an earlier build
+    /// (before D1) or still in use by the live WebView when its account was logged out. Run at
+    /// launch, before any account's WebView is built; an account's own store is never touched.
+    func pruneOrphanWebData() async {
+        let ids = Set(getAllAccounts().map(\.id))
+        await webDataCleaner.pruneOrphanStores(keeping: ids)
+    }
+
+    /// Local + server cleanup of a removed account's web session (D1), after its row, Keychain
+    /// entries and push registration are gone:
+    /// 1. collect every session id it used — Keychain / push credential copies plus whatever its
+    ///    WebKit store holds (the WebView may have rotated to a newer session);
+    /// 2. remove THAT account's WebKit store (a same-host sibling's store and cookies are kept);
+    /// 3. drop a pending deep link bound to it;
+    /// 4. revoke each session on the server, detached — a dead server never delays logout.
+    private func cleanUpWebSession(accountId: String, serverUrl: String, host: String,
+                                   knownSessionIds: [String?]) async {
+        let cleaner = webDataCleaner
+        let fromStore = await cleaner.sessionIds(forAccountId: accountId, host: host)
+        let all = Set((knownSessionIds.compactMap { $0 } + fromStore).filter { !$0.isEmpty })
+        await cleaner.removeWebData(forAccountId: accountId, host: host, sessionIds: all)
+        await MainActor.run { DeepLinkManager.shared.drop(boundTo: accountId) }
+        let revoke = revokeSession
+        Task.detached {
+            for sessionId in all.sorted() { await revoke(serverUrl, sessionId) }
+        }
     }
 
     /// Runs the one-time Keychain key migration from `pwd_{username}` to
@@ -386,7 +422,9 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         let wasActive = account.isActive
 
         // Unregister FCM token from THIS account's server (G9 — best-effort, never blocks logout).
+        let removed = account.toDomainModel()
         await unregisterFcmToken(account: account.toDomainModel())
+        let keychainSessionId = secureStorage.getSessionId(serverUrl: account.serverUrl, username: account.username)
 
         await apiClient.clearCookies(for: account.serverUrl)
         secureStorage.deletePassword(serverUrl: account.serverUrl, username: account.username)
@@ -396,6 +434,8 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         PushRegistrationStatusStore.shared.remove(accountId: account.id)
         context.delete(account)
         try? context.save()
+        await cleanUpWebSession(accountId: removed.id, serverUrl: removed.fullServerUrl,
+                                host: removed.serverHost, knownSessionIds: [keychainSessionId])
 
         let remaining = (try? context.fetch(OdooAccountEntity.fetchAllRequest())) ?? []
         if remaining.isEmpty {
@@ -428,7 +468,9 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
 
         if brand == .apporo { PushManualLoginOrder.invalidate() }
         // Unregister FCM token from Odoo server (G9)
+        let removed = entity.toDomainModel()
         await unregisterFcmToken(account: entity.toDomainModel())
+        let keychainSessionId = secureStorage.getSessionId(serverUrl: entity.serverUrl, username: entity.username)
 
         secureStorage.deletePassword(serverUrl: entity.serverUrl, username: entity.username)
         secureStorage.deleteSessionId(serverUrl: entity.serverUrl, username: entity.username)
@@ -436,6 +478,8 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         PushRegistrationStatusStore.shared.remove(accountId: entity.id)
         context.delete(entity)
         try? context.save()
+        await cleanUpWebSession(accountId: removed.id, serverUrl: removed.fullServerUrl,
+                                host: removed.serverHost, knownSessionIds: [keychainSessionId])
 
         // If no accounts remain, clear the local FCM token
         let remaining = (try? context.fetch(OdooAccountEntity.fetchAllRequest())) ?? []
@@ -447,7 +491,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
     /// Remove local state before suspending for best-effort remote cleanup. This
     /// shares MainActor with manual commit and healer CAS, across all instances.
     private func removeApporoAccount(id: String?, logout: Bool) async {
-        let captured = await MainActor.run { () -> (OdooAccount, PushCredential?, String?)? in
+        let captured = await MainActor.run { () -> (OdooAccount, PushCredential?, String?, String?)? in
             let context = persistence.container.viewContext
             let request = id.map { OdooAccountEntity.fetchByIdRequest(id: $0) } ?? OdooAccountEntity.fetchActiveRequest()
             guard let entity = (try? context.fetch(request))?.first else { return nil }
@@ -455,6 +499,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
             let account = entity.toDomainModel()
             let credential = pushCredentials.pushCredential(accountId: account.id)
             let token = secureStorage.getFcmToken()
+            let keychainSessionId = secureStorage.getSessionId(serverUrl: account.serverUrl, username: account.username)
             pushCredentials.deletePushCredential(accountId: account.id)
             PushRegistrationStatusStore.shared.remove(accountId: account.id)
             secureStorage.deletePassword(serverUrl: account.serverUrl, username: account.username)
@@ -477,15 +522,22 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
                 try? context.save()
                 NotificationCenter.default.post(name: .activeAccountDidChange, object: nil)
             }
-            return (account, credential, token)
+            return (account, credential, token, keychainSessionId)
         }
-        guard let (account, credential, token) = captured, let credential, let token else { return }
-        do {
-            try await PushDeviceRegistrar(brand: brand, api: apiClient, accounts: self,
-                credentials: pushCredentials).unregister(account: account, token: token, capturedCredential: credential)
-        } catch {
-            AppLogger.push.error("FCM unregister failed: \(PushDeviceRegistrar.status(for: error).rawValue, privacy: .public)")
+        // The Keychain session copy is captured inside the transaction (it is deleted there).
+        let keychainSessionId = captured?.3
+        guard let (account, credential, token) = captured.map({ ($0.0, $0.1, $0.2) }) else { return }
+        if let credential, let token {
+            do {
+                try await PushDeviceRegistrar(brand: brand, api: apiClient, accounts: self,
+                    credentials: pushCredentials).unregister(account: account, token: token, capturedCredential: credential)
+            } catch {
+                AppLogger.push.error("FCM unregister failed: \(PushDeviceRegistrar.status(for: error).rawValue, privacy: .public)")
+            }
         }
+        // After the unregister (which still needs the session), revoke and remove the web session.
+        await cleanUpWebSession(accountId: account.id, serverUrl: account.fullServerUrl, host: account.serverHost,
+                                knownSessionIds: [credential?.sessionId, credential?.sessionCookie?.cookie()?.value, keychainSessionId])
     }
 
     /// Unregisters FCM token from Odoo server. Best-effort — errors logged, never blocks.

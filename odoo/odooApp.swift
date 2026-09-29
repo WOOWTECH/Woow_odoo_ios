@@ -126,6 +126,9 @@ struct AppRootView: View {
         }
         .task {
             rootViewModel.checkSession()
+            // D1: delete WebKit stores whose account is gone (earlier builds never removed them;
+            // a store still in use at logout is deleted here on the next launch).
+            await AccountRepository().pruneOrphanWebData()
         }
         .onChange(of: scenePhase) { newPhase in
             // Also covers the add-account form, which sits in front of a signed-in account.

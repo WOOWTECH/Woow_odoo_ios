@@ -125,6 +125,13 @@ final class DeepLinkManager: ObservableObject {
         }
     }
 
+    /// Drops the pending link if it is bound to `accountId` — that account is being removed, so
+    /// the link can never be applied (an unbound or other-account link is kept).
+    func drop(boundTo accountId: String) {
+        guard let link = pending, !accountId.isEmpty, link.accountId == accountId else { return }
+        clear()
+    }
+
     private func clear() {
         pending = nil
         defaults.removeObject(forKey: deepLinkUrlKey)

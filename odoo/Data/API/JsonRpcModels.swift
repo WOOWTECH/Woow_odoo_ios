@@ -11,6 +11,9 @@ struct JsonRpcRequest<Params: Encodable>: Encodable {
     let params: Params
 }
 
+/// Empty `params` object for parameterless JSON-RPC calls (e.g. `/web/session/destroy`).
+struct EmptyRpcParams: Encodable {}
+
 /// JSON-RPC 2.0 response envelope.
 struct JsonRpcResponse<Result: Decodable>: Decodable {
     let result: Result?

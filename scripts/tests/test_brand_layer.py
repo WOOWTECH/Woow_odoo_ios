@@ -48,6 +48,12 @@ ADD_ACCOUNT_CANCEL_AND_PRUNE_ROOT_DELTAS = [
                 } : nil)
 """, """                })
 """),
+    ("""            rootViewModel.checkSession()
+            // D1: delete WebKit stores whose account is gone (earlier builds never removed them;
+            // a store still in use at logout is deleted here on the next launch).
+            await AccountRepository().pruneOrphanWebData()
+""", """            rootViewModel.checkSession()
+"""),
     ("""            // Also covers the add-account form, which sits in front of a signed-in account.
             guard rootViewModel.shouldRelockOnBackground else { return }
 """, """            guard rootViewModel.launchState == .authenticated else { return }

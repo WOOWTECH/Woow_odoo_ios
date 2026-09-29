@@ -55,6 +55,7 @@ $(SRCROOT)/odoo/Data/Push/PushRegistrationStatus.swift
 $(SRCROOT)/odoo/Data/Push/PushTokenRepository.swift
 $(SRCROOT)/odoo/Data/Repository
 $(SRCROOT)/odoo/Data/Repository/AccountRepository.swift
+$(SRCROOT)/odoo/Data/Repository/AccountWebDataCleaner.swift
 $(SRCROOT)/odoo/Data/Repository/CacheService.swift
 $(SRCROOT)/odoo/Data/Repository/SettingsRepository.swift
 $(SRCROOT)/odoo/Data/Storage

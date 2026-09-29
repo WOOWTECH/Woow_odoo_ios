@@ -99,6 +99,7 @@ def allow_audited_cold_start_deeplink_apply(text):
 AUDITED_SESSION_PROTOCOLS = {
     "HonestLogoutS4Tests.swift": ("LogoutURLProtocol",),
     "LoginAccessDeniedMessageTests.swift": ("JsonRpcErrorURLProtocol",),
+    "LogoutRevokesAccountWebDataTests.swift": ("DestroyCaptureURLProtocol",),
     "LoginServerErrorMessageTests.swift": ("CloudflareOriginDownURLProtocol",),
     "LogoutUnregisterURLTests.swift": ("RecordingURLProtocol",),
     "MissingTests.swift": ("StubURLProtocol",),

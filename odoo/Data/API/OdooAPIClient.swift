@@ -264,6 +264,35 @@ actor OdooAPIClient {
         cookies.forEach { HTTPCookieStorage.shared.deleteCookie($0) }
     }
 
+    /// Best-effort server-side logout of ONE account's session (demo111 2026-09-29, D1): before
+    /// this, removing an account never revoked its Odoo session, which stayed valid until the
+    /// server's idle GC.
+    ///
+    /// The request carries only `session_id=<sessionId>` in an explicit Cookie header with
+    /// automatic cookie handling off, so it never reads or writes the shared cookie jar (a
+    /// same-host sibling account's cookie is never sent or replaced) and follows no redirect.
+    /// https only; a value that could inject a header is refused. Errors and timeouts are
+    /// swallowed — local logout never depends on the server answering.
+    func destroySession(serverUrl: String, sessionId: String) async {
+        guard serverUrl.hasPrefix("https://"), Self.isValidPushSessionId(sessionId),
+              let url = URL(string: Self.trimmedServerUrl(serverUrl) + "/web/session/destroy") else { return }
+        var request = URLRequest(url: url, timeoutInterval: 10)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpShouldHandleCookies = false
+        request.setValue("session_id=\(sessionId)", forHTTPHeaderField: "Cookie")
+        request.httpBody = try? JSONEncoder().encode(JsonRpcRequest(id: nextRequestId(), params: EmptyRpcParams()))
+        do {
+            _ = try await session.data(for: request, delegate: PushNoRedirectDelegate())
+        } catch {
+            logger.info("session destroy skipped: \(String(describing: type(of: error)), privacy: .public)")
+        }
+    }
+
+    private static func trimmedServerUrl(_ serverUrl: String) -> String {
+        serverUrl.hasSuffix("/") ? String(serverUrl.dropLast()) : serverUrl
+    }
+
     // MARK: - Private Helpers
 
     private func post<T: Encodable>(url: String, body: T, pushSessionId: String? = nil) async throws -> (Data, URLResponse) {
