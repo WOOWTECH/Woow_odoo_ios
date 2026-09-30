@@ -52,7 +52,6 @@ private final class FakeSessionAuthenticator: SessionAuthenticating, @unchecked 
     private var _authCount = 0
     private var _inFlight = 0
     private var _maxConcurrent = 0
-    private var _clearCookiesCount = 0
 
     /// The result every `authenticate` returns.
     var result: AuthResult = .success(.init(userId: 1, sessionId: "s", username: "admin", displayName: "Admin"))
@@ -61,9 +60,8 @@ private final class FakeSessionAuthenticator: SessionAuthenticating, @unchecked 
 
     var authCount: Int { lock.lock(); defer { lock.unlock() }; return _authCount }
     var maxConcurrent: Int { lock.lock(); defer { lock.unlock() }; return _maxConcurrent }
-    var clearCookiesCount: Int { lock.lock(); defer { lock.unlock() }; return _clearCookiesCount }
 
-    func authenticate(serverUrl: String, database: String, username: String, password: String) async -> AuthResult {
+    func authenticateIsolated(serverUrl: String, database: String, username: String, password: String) async -> AuthResult {
         lock.lock()
         _authCount += 1
         _inFlight += 1
@@ -77,10 +75,6 @@ private final class FakeSessionAuthenticator: SessionAuthenticating, @unchecked 
         _inFlight -= 1
         lock.unlock()
         return result
-    }
-
-    func clearCookies(for serverUrl: String) async {
-        lock.lock(); _clearCookiesCount += 1; lock.unlock()
     }
 }
 
@@ -179,7 +173,17 @@ final class SessionReauthenticatorTests: XCTestCase {
     }
 
     override func setUp() { super.setUp(); SequencedURLProtocol.reset() }
-    override func tearDown() { SequencedURLProtocol.reset(); super.tearDown() }
+    override func tearDown() {
+        SequencedURLProtocol.reset()
+        // A healed session is published to the real shared jar (pi 0930): leave it clean.
+        HTTPCookieStorage.shared.cookies(for: URL(string: "https://\(host)")!)?.forEach { HTTPCookieStorage.shared.deleteCookie($0) }
+        super.tearDown()
+    }
+
+    private var jarSessionIds: [String] {
+        (HTTPCookieStorage.shared.cookies(for: URL(string: "https://\(host)")!) ?? [])
+            .filter { $0.name == "session_id" }.map(\.value)
+    }
 
     // AC7.a — 200 session-expired body -> re-auth once -> retry succeeds
 
@@ -235,6 +239,9 @@ final class SessionReauthenticatorTests: XCTestCase {
 
     func test_invalidStoredCredentials_clearsSession_signalsReLogin_doesNotRetry() async {
         let acc = account()
+        // pi 0930: the reauthenticator (not the transport) clears the stale session from the real jar.
+        HTTPCookieStorage.shared.setCookie(HTTPCookie(properties: [.name: "session_id", .value: "stale",
+            .domain: host, .path: "/", .secure: "TRUE"])!)
         let fakeAuth = FakeSessionAuthenticator()
         fakeAuth.result = .error("bad creds", .invalidCredentials)
         let relogin = RecordingReloginSignal()
@@ -254,7 +261,7 @@ final class SessionReauthenticatorTests: XCTestCase {
 
         XCTAssertEqual(SequencedURLProtocol.requestCount, 1, "no retry: only the original request reached the server")
         XCTAssertEqual(fakeAuth.authCount, 1, "the known-bad password is authenticated once, never hammered")
-        XCTAssertEqual(fakeAuth.clearCookiesCount, 1, "stale session cleared")
+        XCTAssertEqual(jarSessionIds, [], "stale session cleared")
         XCTAssertEqual(relogin.requestedAccountIds, [acc.id], "re-login signalled for the account")
 
         // No loop across triggers: a subsequent expiry for the same host is declined WITHOUT another auth.

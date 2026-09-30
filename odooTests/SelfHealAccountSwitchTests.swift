@@ -40,7 +40,7 @@ private final class GatedAuthenticator: SessionAuthenticating, @unchecked Sendab
 
     var sentUsernames: [String] { lock.lock(); defer { lock.unlock() }; return usernames }
 
-    func authenticate(serverUrl: String, database: String, username: String, password: String) async -> AuthResult {
+    func authenticateIsolated(serverUrl: String, database: String, username: String, password: String) async -> AuthResult {
         lock.lock(); usernames.append(username); let open = released; lock.unlock()
         if !open {
             await withCheckedContinuation { cont in
@@ -50,8 +50,6 @@ private final class GatedAuthenticator: SessionAuthenticating, @unchecked Sendab
         }
         return result
     }
-
-    func clearCookies(for serverUrl: String) async {}
 
     func release() {
         lock.lock(); released = true; let pending = waiters; waiters = []; lock.unlock()
@@ -67,6 +65,12 @@ private struct NoRelogin: ReloginSignaling {
 final class SelfHealAccountSwitchTests: XCTestCase {
 
     private let server = "https://same.example.com"
+
+    override func tearDown() {
+        // A healed session is published to the real shared jar (pi 0930): leave it clean.
+        HTTPCookieStorage.shared.cookies(for: URL(string: server)!)?.forEach { HTTPCookieStorage.shared.deleteCookie($0) }
+        super.tearDown()
+    }
 
     private func account(_ username: String) -> OdooAccount {
         OdooAccount(serverUrl: server, database: "db", username: username, displayName: username)

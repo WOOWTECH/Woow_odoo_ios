@@ -129,6 +129,7 @@ AUDITED_SESSION_PROTOCOLS = {
     "odooTests.swift": ("MockURLProtocol",),
     "OfflineUnitHostTests.swift": ("OfflineHostMockURLProtocol",),
     "PushDeviceRegistrarTests.swift": ("PushContractURLProtocol",),
+    "SelfHealSharedJarIsolationTests.swift": ("HealJarURLProtocol",),  # 0930b (pi P1): offline authenticate replies only
     "ServerUrlInputTests.swift": ("AuthRecordingURLProtocol",),
 }
 

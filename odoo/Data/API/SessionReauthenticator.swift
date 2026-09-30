@@ -61,15 +61,39 @@ enum SessionExpiry {
 
 /// The single re-auth network capability the reauthenticator needs, factored into a protocol so
 /// tests can script `AuthResult`s and refuse-to-connect states WITHOUT touching real DNS. In
-/// production this is satisfied by `OdooAPIClient`, which enforces https-only at the transport level
-/// and shares the `HTTPCookieStorage` the registration calls use (so a refreshed cookie is picked up
-/// by the retried request).
+/// production this is satisfied by `OdooAPIClient`, which enforces https-only at the transport level.
+///
+/// pi 0930 (P1): the re-auth transport neither sends nor stores shared-jar cookies. It returns the
+/// new session in the result; `SessionReauthenticator` alone decides — on the main actor, against
+/// the current accounts — whether that session may be published to the jar the retried request
+/// and the WOOW WebView read, and removes a rejected account's session without touching a
+/// same-host sibling's.
 protocol SessionAuthenticating: Sendable {
-    func authenticate(serverUrl: String, database: String, username: String, password: String) async -> AuthResult
-    func clearCookies(for serverUrl: String) async
+    func authenticateIsolated(serverUrl: String, database: String, username: String, password: String) async -> AuthResult
+    /// Best-effort server revoke of a healed session that will not be used (its account no longer
+    /// owns the host's jar session). Default: nothing.
+    func discardSession(serverUrl: String, sessionId: String) async
 }
 
-extension OdooAPIClient: SessionAuthenticating {}
+extension SessionAuthenticating {
+    func discardSession(serverUrl: String, sessionId: String) async {}
+}
+
+extension OdooAPIClient: SessionAuthenticating {
+    func authenticateIsolated(serverUrl: String, database: String, username: String, password: String) async -> AuthResult {
+        await authenticatePushSession(serverUrl: serverUrl, database: database, username: username, password: password)
+    }
+
+    func discardSession(serverUrl: String, sessionId: String) async {
+        await destroySession(serverUrl: serverUrl, sessionId: sessionId)
+    }
+}
+
+/// The shared `HTTPCookieStorage` the legacy registration requests and the WOOW WebView read. The
+/// reauthenticator touches it only on the main actor, in the same step as the account check.
+struct SharedCookieJar: @unchecked Sendable {
+    let storage: HTTPCookieStorage
+}
 
 /// Surfaces a "this account must be re-logged-in manually" signal when self-heal is impossible
 /// (stored password rejected server-side, or no stored credential). Kept as a seam so tests can
@@ -129,8 +153,9 @@ final class ReloginSignal: ReloginSignaling, @unchecked Sendable {
 /// 2. **ONE retry (cap = 1).** This engine performs exactly one authenticate per attempt; the
 ///    healing layer replays the original request exactly once. No recursion, no loop.
 /// 3. **Bad-credential STOP (no loop).** If re-auth reports invalid credentials (password changed
-///    server-side) it STOPS, clears the stale session cookie, opens the account's circuit so the
-///    known-bad password is never re-sent, and raises a re-login signal.
+///    server-side) it STOPS, clears the account's stale session cookie (never a same-host sibling's),
+///    opens the account's circuit so the known-bad password is never re-sent, and raises a re-login
+///    signal.
 /// 4. **Single-flight.** A per-host in-flight `Task` (this is an `actor`) collapses concurrent
 ///    session-expiry responses for the same host into exactly one authenticate network call.
 /// 5. **NEVER log credentials/cookies.** Nothing here logs a password, cookie, or session token.
@@ -142,6 +167,7 @@ actor SessionReauthenticator {
     private let secureStorage: SecureStorageProtocol
     private let authenticator: SessionAuthenticating
     private let reloginSignal: ReloginSignaling
+    private let cookieJar: SharedCookieJar
 
     /// Per-host single-flight tasks so concurrent expiries on the same host cause exactly one re-auth.
     private var inFlight: [String: Task<Bool, Never>] = [:]
@@ -154,12 +180,14 @@ actor SessionReauthenticator {
         accountRepository: AccountRepositoryProtocol = AccountRepository(),
         secureStorage: SecureStorageProtocol = SecureStorage.shared,
         authenticator: SessionAuthenticating = OdooAPIClient(),
-        reloginSignal: ReloginSignaling = ReloginSignal.shared
+        reloginSignal: ReloginSignaling = ReloginSignal.shared,
+        cookieJar: HTTPCookieStorage = .shared
     ) {
         self.accountRepository = accountRepository
         self.secureStorage = secureStorage
         self.authenticator = authenticator
         self.reloginSignal = reloginSignal
+        self.cookieJar = SharedCookieJar(storage: cookieJar)
     }
 
     /// Attempts to refresh the expired Odoo session for `requestHost`, applying every guardrail.
@@ -246,7 +274,7 @@ actor SessionReauthenticator {
             return false
         }
 
-        let result = await authenticator.authenticate(
+        let result = await authenticator.authenticateIsolated(
             serverUrl: serverUrl,
             database: account.database,
             username: account.username,
@@ -254,11 +282,77 @@ actor SessionReauthenticator {
         )
 
         switch result {
-        case .success:
-            AppLogger.auth.info("Re-auth: session refreshed for account \(account.id, privacy: .public)")
-            return true
+        case .success(let auth):
+            return await commitHealedSession(account, auth: auth)
         case .error(_, let type):
             return await handleReauthError(account, type: type)
+        }
+    }
+
+    /// Publishes a healed session to the shared jar and the account's Keychain session copy — only
+    /// while the account may own its host's jar session (`mayOwnHostSession`). pi 0930 (P1): a heal
+    /// answering after the user switched to a same-host sibling, or after the account was removed,
+    /// writes nothing and reports failure; its fresh session is revoked best-effort. The check and
+    /// the write run in one main-actor step — the executor account switches and logouts run on — so
+    /// no switch can land between them.
+    private func commitHealedSession(_ account: OdooAccount, auth: AuthResult.AuthSuccess) async -> Bool {
+        guard let cookie = auth.sessionCookie?.cookie() ?? Self.sessionCookie(auth.sessionId, for: account) else {
+            AppLogger.auth.warning("Re-auth: no session returned for account \(account.id, privacy: .public)")
+            return false
+        }
+        let repo = accountRepository, storage = secureStorage, jar = cookieJar
+        let committed = await MainActor.run { () -> Bool in
+            guard Self.mayOwnHostSession(account, in: repo) else { return false }
+            jar.storage.setCookie(cookie)
+            storage.saveSessionId(serverUrl: account.fullServerUrl, username: account.username, sessionId: cookie.value)
+            return true
+        }
+        if committed {
+            AppLogger.auth.info("Re-auth: session refreshed for account \(account.id, privacy: .public)")
+        } else {
+            AppLogger.auth.warning("Re-auth: account \(account.id, privacy: .public) no longer owns its host session — result discarded")
+            await authenticator.discardSession(serverUrl: account.fullServerUrl, sessionId: cookie.value)
+        }
+        return committed
+    }
+
+    /// Whether `account` may hold its host's session in the shared jar right now: it is still
+    /// stored, and no OTHER account on the same host is the active one (that account's session is
+    /// the one the jar and the WebView must keep).
+    @MainActor
+    private static func mayOwnHostSession(_ account: OdooAccount, in repo: AccountRepositoryProtocol) -> Bool {
+        guard repo.getAllAccounts().contains(where: { $0.id == account.id }) else { return false }
+        if let active = repo.getActiveAccount(), active.id != account.id,
+           active.serverHost.caseInsensitiveCompare(account.serverHost) == .orderedSame {
+            return false
+        }
+        return true
+    }
+
+    /// A session cookie for `account`'s host when the transport returned only the session id.
+    private static func sessionCookie(_ sessionId: String, for account: OdooAccount) -> HTTPCookie? {
+        guard !sessionId.isEmpty else { return nil }
+        return HTTPCookie(properties: [.name: "session_id", .value: sessionId, .domain: account.serverHost,
+                                       .path: "/", .secure: "TRUE"])
+    }
+
+    /// pi 0930 (P1): removes a rejected account's session from the shared jar. While another stored
+    /// account shares the host, only `session_id` cookies whose value is this account's known
+    /// session are removed — the host's cookies are the sibling's too. The host's last account
+    /// clears them all, as before.
+    @MainActor
+    private static func clearStaleSession(of account: OdooAccount, repo: AccountRepositoryProtocol,
+                                          storage: SecureStorageProtocol, jar: SharedCookieJar) {
+        guard let url = URL(string: account.fullServerUrl), let cookies = jar.storage.cookies(for: url) else { return }
+        let sibling = repo.getAllAccounts().contains {
+            $0.id != account.id && $0.serverHost.caseInsensitiveCompare(account.serverHost) == .orderedSame
+        }
+        if sibling {
+            let known = Set([storage.getSessionId(serverUrl: account.fullServerUrl, username: account.username)]
+                .compactMap { $0 }.filter { !$0.isEmpty })
+            cookies.filter { $0.name == "session_id" && known.contains($0.value) }.forEach { jar.storage.deleteCookie($0) }
+        } else {
+            cookies.forEach { jar.storage.deleteCookie($0) }
         }
     }
 
@@ -268,7 +362,8 @@ actor SessionReauthenticator {
             // Guardrail 3: the stored password is wrong (changed server-side). Stop immediately, clear
             // the stale session, open the circuit, and surface a re-login. Never re-send the bad password.
             AppLogger.auth.warning("Re-auth: stored credentials rejected for account \(account.id, privacy: .public) — clearing session, signalling re-login")
-            await authenticator.clearCookies(for: account.fullServerUrl)
+            let repo = accountRepository, storage = secureStorage, jar = cookieJar
+            await MainActor.run { Self.clearStaleSession(of: account, repo: repo, storage: storage, jar: jar) }
             openCircuit(account)
             return false
         }
