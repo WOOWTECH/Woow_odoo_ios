@@ -243,6 +243,34 @@ final class LogoutRevokesAccountWebDataTests: XCTestCase {
         await cleaner.removeWebData(forAccountId: b.uuidString, host: host, sessionIds: ["sess-b"], otherAccountHosts: [])
     }
 
+    /// pi 0930 (P2): logging out the last account while the app kept running left its store — and
+    /// the page's localStorage — in place until the next launch, because the live WebView still used
+    /// it. The cleaner first retires the account's live WebView, then removes the store.
+    func test_realCleaner_retiresTheAccountsLiveWebView_thenRemovesItsStoreWithoutRelaunch() async throws {
+        guard #available(iOS 17.0, *) else { throw XCTSkip("per-account stores need iOS 17") }
+        final class LiveBox { var webView: WKWebView?; var retired: [String] = [] }
+        let id = UUID(), box = LiveBox()
+        // Only the WebView holds the store (as the coordinator's live WebView does).
+        box.webView = {
+            let config = WKWebViewConfiguration()
+            config.websiteDataStore = WKWebsiteDataStore(forIdentifier: id)
+            return WKWebView(frame: .zero, configuration: config)
+        }()
+        await setCookie(cookie("sess-live", host: host), in: box.webView!.configuration.websiteDataStore)
+        let cleaner = AccountWebDataCleaner(retireLiveWebView: { accountId in
+            box.retired.append(accountId)
+            box.webView = nil          // the coordinator drops the account's WebView
+        })
+
+        await cleaner.removeWebData(forAccountId: id.uuidString, host: host, sessionIds: ["sess-live"],
+                                    otherAccountHosts: [])
+
+        XCTAssertEqual(box.retired, [id.uuidString], "the account's live WebView is retired first")
+        XCTAssertNil(box.webView)
+        let remaining = await WKWebsiteDataStore.allDataStoreIdentifiers
+        XCTAssertFalse(remaining.contains(id), "the logged-out account's store must be gone while the app keeps running")
+    }
+
     func test_realCleaner_prunesOrphanStoresButKeepsAccountStores() async throws {
         guard #available(iOS 17.0, *) else { throw XCTSkip("per-account stores need iOS 17") }
         let orphan = UUID(), kept = UUID()

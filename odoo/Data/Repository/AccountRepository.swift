@@ -57,8 +57,8 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
     }
 
     /// Removes WebKit data stores that no longer belong to any account — left by an earlier build
-    /// (before D1) or still in use by the live WebView when its account was logged out. Run at
-    /// launch, before any account's WebView is built; an account's own store is never touched.
+    /// (before D1), or one whose deletion at logout failed. Run at launch, before any account's
+    /// WebView is built; an account's own store is never touched.
     func pruneOrphanWebData() async {
         let ids = Set(getAllAccounts().map(\.id))
         await webDataCleaner.pruneOrphanStores(keeping: ids)
@@ -68,7 +68,8 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
     /// entries and push registration are gone:
     /// 1. collect every session id it used — Keychain / push credential copies plus whatever its
     ///    WebKit store holds (the WebView may have rotated to a newer session);
-    /// 2. remove THAT account's WebKit store (a same-host sibling's store and cookies are kept);
+    /// 2. retire its live WebView and remove THAT account's WebKit store (a same-host sibling's store
+    ///    and cookies are kept) — while the app keeps running (pi 0930, P2);
     /// 3. drop a pending deep link bound to it;
     /// 4. revoke each session on the server, detached — a dead server never delays logout.
     private func cleanUpWebSession(accountId: String, serverUrl: String, host: String,

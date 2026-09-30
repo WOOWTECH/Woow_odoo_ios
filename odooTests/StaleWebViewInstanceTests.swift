@@ -170,6 +170,44 @@ final class StaleWebViewInstanceTests: XCTestCase {
         XCTAssertEqual(baseLoads, [ObjectIdentifier(newB)],
                        "only the current account's WebView may be loaded: \(events)")
     }
+
+    /// pi 0930 (P2): logging out the last account left its live WebView holding (and writing to)
+    /// the account's data store, so the store's localStorage survived until the next launch. Before
+    /// the store is removed the account's WebView is retired — stopped, detached and dropped.
+    func test_retireNotice_forCurrentAccount_detachesAndDropsItsWebView() async throws {
+        let sut = makeCoordinator()
+        let container = UIView()
+        sut.attach(to: container)
+        let a = UUID().uuidString
+        sut.apply(serverUrl: serverUrl, database: "db", accountId: a, sessionId: nil, deepLink: nil)
+        let live = try current(sut)
+
+        NotificationCenter.default.post(name: .accountWebViewMustRetire, object: nil, userInfo: ["accountId": a])
+
+        XCTAssertNil(sut.webView, "the logged-out account's WebView must be dropped")
+        XCTAssertNil(live.navigationDelegate)
+        XCTAssertNil(live.uiDelegate)
+        XCTAssertNil(live.superview)
+        XCTAssertFalse(sut.hasFinishedAccountLoad)
+
+        // A SwiftUI update still carrying the removed account must not rebuild (and so recreate)
+        // its store.
+        sut.apply(serverUrl: serverUrl, database: "db", accountId: a, sessionId: nil, deepLink: nil)
+        XCTAssertNil(sut.webView, "a retired account's WebView is never rebuilt")
+    }
+
+    /// A retire notice for another account never touches the account on screen.
+    func test_retireNotice_forAnotherAccount_keepsTheCurrentWebView() async throws {
+        let sut = makeCoordinator()
+        sut.apply(serverUrl: serverUrl, database: "db", accountId: UUID().uuidString, sessionId: nil, deepLink: nil)
+        let live = try current(sut)
+
+        NotificationCenter.default.post(name: .accountWebViewMustRetire, object: nil,
+                                        userInfo: ["accountId": UUID().uuidString])
+
+        XCTAssertTrue(sut.webView === live)
+        XCTAssertNotNil(live.navigationDelegate)
+    }
 }
 
 /// Minimal navigation action for a stale-instance policy check.

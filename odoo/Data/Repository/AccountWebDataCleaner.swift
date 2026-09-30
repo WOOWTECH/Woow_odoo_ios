@@ -1,6 +1,13 @@
 import Foundation
 import WebKit
 
+extension Notification.Name {
+    /// Posted synchronously on the main actor right before an account's WebKit data is removed;
+    /// `userInfo["accountId"]` names the account. The WebView coordinator showing that account
+    /// retires its WebView (pi 0930, P2).
+    static let accountWebViewMustRetire = Notification.Name("io.woowtech.odoo.accountWebViewMustRetire")
+}
+
 /// Removes one account's WebKit website data (cookies, storage, caches).
 ///
 /// demo111 2026-09-29 (D1): logging out left `WebsiteDataStore/<accountId>/Cookies.binarycookies`
@@ -27,7 +34,14 @@ protocol AccountWebDataCleaning: AnyObject {
 @MainActor
 final class AccountWebDataCleaner: AccountWebDataCleaning {
 
-    nonisolated init() {}
+    /// Stops and drops the live WebView of an account before its data is removed.
+    private let retireLiveWebView: @MainActor @Sendable (String) -> Void
+
+    nonisolated init(retireLiveWebView: @escaping @MainActor @Sendable (String) -> Void = { accountId in
+        NotificationCenter.default.post(name: .accountWebViewMustRetire, object: nil, userInfo: ["accountId": accountId])
+    }) {
+        self.retireLiveWebView = retireLiveWebView
+    }
 
     func sessionIds(forAccountId id: String, host: String) async -> [String] {
         let cookies = await allCookies(in: OdooWebViewCoordinator.dataStore(forAccountId: id))
@@ -36,12 +50,17 @@ final class AccountWebDataCleaner: AccountWebDataCleaning {
 
     func removeWebData(forAccountId id: String, host: String, sessionIds: Set<String>,
                        otherAccountHosts: [String]) async {
+        // pi 0930 (P2): retire the account's live WebView first. While it lived it kept the store in
+        // use — WebKit refused to delete it — and its page could write localStorage after the data
+        // was removed, so the data survived until the next launch.
+        retireLiveWebView(id)
         if #available(iOS 17.0, *), let uuid = UUID(uuidString: id) {
-            let store = WKWebsiteDataStore(forIdentifier: uuid)
-            await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
-            // Fails while a live WebView still uses the store (the active account being logged out);
-            // its data is already gone, and launch pruning deletes the empty store later.
-            try? await WKWebsiteDataStore.remove(forIdentifier: uuid)
+            do {
+                // Scoped: WebKit also refuses to delete a store while any store object for it lives.
+                let store = WKWebsiteDataStore(forIdentifier: uuid)
+                await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
+            }
+            await Self.deleteStore(uuid)
             return
         }
         let store = WKWebsiteDataStore.default()
@@ -78,6 +97,21 @@ final class AccountWebDataCleaner: AccountWebDataCleaning {
             let store = WKWebsiteDataStore(forIdentifier: identifier)
             await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
             try? await WKWebsiteDataStore.remove(forIdentifier: identifier)
+        }
+    }
+
+    /// Deletes a per-account store. A just-retired WebView can take a moment to release it; if
+    /// something still holds it after the retries (about 2 s), its data is already removed and
+    /// launch pruning deletes the empty store.
+    @available(iOS 17.0, *)
+    private static func deleteStore(_ id: UUID) async {
+        for attempt in 1...20 {
+            do {
+                try await WKWebsiteDataStore.remove(forIdentifier: id)
+                return
+            } catch {
+                if attempt < 20 { try? await Task.sleep(nanoseconds: 100_000_000) }
+            }
         }
     }
 

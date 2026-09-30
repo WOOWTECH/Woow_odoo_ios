@@ -110,8 +110,10 @@ def allow_audited_stale_instance_apply(text):
                      "brand: .woowtech,"]:
         assert required in text, required
     assert text.count("OdooWebViewCoordinator(") == 1
-    assert text.count("sut.apply(serverUrl:") == 13
-    assert text.count(".apply(serverUrl:") == 13
+    # Baseline c1afa58 (F1): 13 applies. Current 0930b (pi P2): +3 for the retire-notice tests,
+    # same isolated store / intercepted loads.
+    assert text.count("sut.apply(serverUrl:") == 16
+    assert text.count(".apply(serverUrl:") == 16
     return text.replace("sut.apply(serverUrl:", "auditedStaleInstanceApply(serverUrl:")
 
 

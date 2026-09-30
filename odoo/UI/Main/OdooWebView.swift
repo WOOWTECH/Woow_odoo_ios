@@ -91,6 +91,10 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     private var pendingDeepLink: String?
     /// The last deep link seen, to detect a NEW warm same-account link.
     private var lastDeepLink: String?
+    /// Accounts whose data was removed while this coordinator lived (pi 0930, P2). Their WebView is
+    /// never rebuilt — a rebuild would recreate the store that was just deleted.
+    private var retiredAccountIds: Set<String> = []
+    private var retireObserver: NSObjectProtocol?
 
     #if DEBUG
     private var testProxy: JSBridgeMessageHandlerProxy?
@@ -141,6 +145,17 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         keyboardScrollRestorer = WebViewKeyboardScrollRestorer(notificationCenter: keyboardNotifications) { [weak self] in
             self?.webView?.scrollView
         }
+        // Posted synchronously on the main actor by the account data cleaner (queue nil = inline).
+        retireObserver = NotificationCenter.default.addObserver(
+            forName: .accountWebViewMustRetire, object: nil, queue: nil
+        ) { [weak self] note in
+            guard let accountId = note.userInfo?["accountId"] as? String else { return }
+            MainActor.assumeIsolated { self?.retireWebView(forAccountId: accountId) }
+        }
+    }
+
+    deinit {
+        if let retireObserver { NotificationCenter.default.removeObserver(retireObserver) }
     }
 
     // MARK: - Container wiring
@@ -162,6 +177,8 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     ///   `location.hash`, so a full load is required for the deep link to take effect (see
     ///   `deepLinkApplyPlan`).
     func apply(serverUrl: String, database: String, accountId: String, sessionId: String?, deepLink: String?) {
+        // pi 0930 (P2): a SwiftUI update can still carry an account whose data was just removed.
+        guard !retiredAccountIds.contains(accountId) else { return }
         let switched = webView == nil
             || accountId != currentAccountId
             || serverUrl != currentServerUrl
@@ -211,14 +228,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         // retired — stopped, and detached from every delegate and page-script handler — so none of
         // its already-queued callbacks or scripts can reach the new account (see `isCurrentInstance`).
         if let replaced = webView {
-            replaced.stopLoading()
-            replaced.navigationDelegate = nil
-            replaced.uiDelegate = nil
-            replaced.configuration.userContentController.removeScriptMessageHandler(forName: "requestLocation")
-            #if DEBUG
-            replaced.configuration.userContentController.removeScriptMessageHandler(forName: "__woowTestEval")
-            #endif
-            replaced.removeFromSuperview()
+            retire(replaced)
         }
         webView = newWebView
         if let container {
@@ -258,6 +268,36 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         } else {
             loadBase(into: newWebView, serverUrl: serverUrl, database: database)
         }
+    }
+
+    /// Stops `instance` and detaches it from every delegate, page-script handler and the container.
+    private func retire(_ instance: WKWebView) {
+        instance.stopLoading()
+        instance.navigationDelegate = nil
+        instance.uiDelegate = nil
+        instance.configuration.userContentController.removeScriptMessageHandler(forName: "requestLocation")
+        #if DEBUG
+        instance.configuration.userContentController.removeScriptMessageHandler(forName: "__woowTestEval")
+        #endif
+        instance.removeFromSuperview()
+    }
+
+    /// pi 0930 (P2): the account's data is about to be removed (logout / remove account). Its live
+    /// WebView is retired and dropped, so nothing keeps its data store in use or writes to it
+    /// afterwards — before this, logging out the last account left the page's localStorage on disk
+    /// until the next launch. A different account on screen is left alone.
+    func retireWebView(forAccountId accountId: String) {
+        guard accountId == currentAccountId else { return }
+        retiredAccountIds.insert(accountId)
+        guard let live = webView else { return }
+        locationCoordinator.invalidateActiveDocument()
+        retire(live)
+        webView = nil
+        hasFinishedAccountLoad = false
+        pendingDeepLink = nil
+        #if DEBUG
+        testProxy?.webView = nil
+        #endif
     }
 
     private func makeConfiguration(accountId: String) -> WKWebViewConfiguration {
