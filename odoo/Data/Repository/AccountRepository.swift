@@ -286,7 +286,9 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         // Broadcast so MainViewModel reloads the WebView onto the newly active account (the fast,
         // synchronous switch used on a notification deep-link tap).
         if saved {
-            if brand == .apporo { MainActor.assumeIsolated { PushManualLoginOrder.invalidate() } }
+            // pi 1001c (P1): a notification tap is a selection for both brands — it supersedes a
+            // pending WOOW switch too (B's late answer must not replace the notification's C).
+            MainActor.assumeIsolated { PushManualLoginOrder.invalidate() }
             NotificationCenter.default.post(name: .activeAccountDidChange, object: nil)
         }
         return saved
