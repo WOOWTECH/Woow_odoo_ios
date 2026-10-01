@@ -98,7 +98,9 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         // Auto-prefix https
         let fullUrl = serverUrl.ensureHTTPS
 
-        let attempt = brand == .apporo ? await PushManualLoginOrder.begin() : nil
+        // pi 1001b (P1): logins and switches share one selection order for both brands — a later
+        // selection supersedes this login, and this login supersedes an in-flight switch.
+        let attempt = await PushManualLoginOrder.begin()
         // demo111 1001 (defect 2): both brands log in WITHOUT the shared jar. The WOOW login used to
         // send the jar's session_id — another same-host account's — and Odoo re-authenticated THAT
         // session as this user and rotated it, logging the other account out on the server.
@@ -108,7 +110,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         if case .success(let auth) = result {
             let context = persistence.container.viewContext
             let rejection = await MainActor.run { () -> AuthResult? in
-                if let attempt, !PushManualLoginOrder.isCurrent(attempt) {
+                if !PushManualLoginOrder.isCurrent(attempt) {
                     return .error(String(localized: "error_login_superseded"), .unknown)
                 }
                 // A short-lived response cookie may expire while waiting to commit. pi 1001b (P1): for
@@ -316,12 +318,12 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
     @MainActor
     func switchAccount(id: String) async -> Bool {
         if brand == .apporo { return await switchApporoAccount(id: id) }
+        // pi 1001b (P1): the same selection order as Apporo — a late result for an older selection
+        // (B answered after the user chose C) must not activate B or publish its cookie.
+        let attempt = PushManualLoginOrder.begin()
         let context = persistence.container.viewContext
-        let allRequest = OdooAccountEntity.fetchAllRequest()
-        guard let all = try? context.fetch(allRequest) else { return false }
-        guard let target = all.first(where: { $0.id == id }) else { return false }
-
-        let account = target.toDomainModel()
+        guard let account = (try? context.fetch(OdooAccountEntity.fetchAllRequest()))?
+            .first(where: { $0.id == id })?.toDomainModel() else { return false }
 
         // Validate session — try to authenticate with stored password. demo111 1001 (defect 2): not
         // over the shared jar — it carries the current (often same-host) account's session_id, and
@@ -329,6 +331,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         // account out on the server. The target gets a session of its own instead.
         let replacedSessionId = secureStorage.getSessionId(serverUrl: account.fullServerUrl, username: account.username)
         var targetSession: HTTPCookie?
+        var freshSessionId: String?
         if let password = secureStorage.getPassword(serverUrl: account.fullServerUrl, username: account.username) {
             let result = await apiClient.authenticatePushSession(
                 serverUrl: account.fullServerUrl,
@@ -346,6 +349,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
                     return false
                 }
                 targetSession = cookie
+                freshSessionId = auth.sessionId
             case .error:
                 AppLogger.auth.info("Session validation failed for \(account.username)")
                 return false
@@ -354,6 +358,16 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
             // No stored password: the target keeps its own stored session.
             targetSession = HTTPCookie(properties: [.name: "session_id", .value: replacedSessionId,
                                                     .domain: account.serverHost, .path: "/", .secure: "TRUE"])
+        }
+
+        // Revalidate after the await: still the newest selection, target still present and unchanged.
+        guard PushManualLoginOrder.isCurrent(attempt),
+              let all = try? context.fetch(OdooAccountEntity.fetchAllRequest()),
+              let target = all.first(where: { $0.id == id }),
+              target.toDomainModel().fullServerUrl == account.fullServerUrl,
+              target.toDomainModel().username == account.username else {
+            if let freshSessionId { revokeUnpublishedSession(freshSessionId, serverUrl: account.fullServerUrl) }
+            return false
         }
 
         // Activate the target account
