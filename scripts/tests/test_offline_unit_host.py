@@ -153,6 +153,7 @@ AUDITED_SESSION_PROTOCOLS = {
     "PushDeviceRegistrarTests.swift": ("PushContractURLProtocol",),
     "SelfHealSharedJarIsolationTests.swift": ("HealJarURLProtocol",),  # 0930b (pi P1): offline authenticate replies only
     "SelfHealWebViewRecoveryTests.swift": ("RecoveryURLProtocol",),  # 1001 (demo111 defect 1): offline authenticate/destroy replies only
+    "WoowSameHostLoginIsolationTests.swift": ("WoowLoginURLProtocol",),  # 1001 (demo111 defect 2): offline authenticate/destroy replies only
     "ServerUrlInputTests.swift": ("AuthRecordingURLProtocol",),
 }
 

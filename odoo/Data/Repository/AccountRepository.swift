@@ -99,14 +99,11 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         let fullUrl = serverUrl.ensureHTTPS
 
         let attempt = brand == .apporo ? await PushManualLoginOrder.begin() : nil
-        let result: AuthResult
-        if brand == .apporo {
-            result = await apiClient.authenticatePushSession(
-                serverUrl: fullUrl, database: database, username: username, password: password)
-        } else {
-            result = await apiClient.authenticate(
-                serverUrl: fullUrl, database: database, username: username, password: password)
-        }
+        // demo111 1001 (defect 2): both brands log in WITHOUT the shared jar. The WOOW login used to
+        // send the jar's session_id — another same-host account's — and Odoo re-authenticated THAT
+        // session as this user and rotated it, logging the other account out on the server.
+        let result = await apiClient.authenticatePushSession(
+            serverUrl: fullUrl, database: database, username: username, password: password)
 
         if case .success(let auth) = result {
             let context = persistence.container.viewContext
@@ -166,6 +163,11 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
                     if let cookie {
                         HTTPCookieStorage.shared.setCookie(cookie)
                     }
+                }
+                // WOOW (1001, defect 2): the jar holds the ACTIVE account's session for the legacy
+                // requests and the WebView; publish the new account's response session to it.
+                if brand != .apporo, let cookie {
+                    HTTPCookieStorage.shared.setCookie(cookie)
                 }
                 return nil
             }
@@ -316,27 +318,46 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
 
         let account = target.toDomainModel()
 
-        // Validate session — try to authenticate with stored password
+        // Validate session — try to authenticate with stored password. demo111 1001 (defect 2): not
+        // over the shared jar — it carries the current (often same-host) account's session_id, and
+        // Odoo would re-authenticate and rotate THAT session as the target user, logging the current
+        // account out on the server. The target gets a session of its own instead.
+        let replacedSessionId = secureStorage.getSessionId(serverUrl: account.fullServerUrl, username: account.username)
+        var targetSession: HTTPCookie?
         if let password = secureStorage.getPassword(serverUrl: account.fullServerUrl, username: account.username) {
-            let result = await apiClient.authenticate(
+            let result = await apiClient.authenticatePushSession(
                 serverUrl: account.fullServerUrl,
                 database: account.database,
                 username: account.username,
                 password: password
             )
             switch result {
-            case .success:
-                break // Session valid, proceed
+            case .success(let auth):
+                targetSession = auth.sessionCookie?.cookie()
             case .error:
                 AppLogger.auth.info("Session validation failed for \(account.username)")
                 return false
             }
+        } else if let replacedSessionId, !replacedSessionId.isEmpty {
+            // No stored password: the target keeps its own stored session.
+            targetSession = HTTPCookie(properties: [.name: "session_id", .value: replacedSessionId,
+                                                    .domain: account.serverHost, .path: "/", .secure: "TRUE"])
         }
 
         // Activate the target account
         all.forEach { $0.isActive = false }
         target.isActive = true
         let saved = (try? context.save()) != nil
+        if saved, let targetSession {
+            // The jar holds the active account's session (legacy requests, WebView) — the target's.
+            secureStorage.saveSessionId(serverUrl: account.fullServerUrl, username: account.username,
+                                        sessionId: targetSession.value)
+            HTTPCookieStorage.shared.setCookie(targetSession)
+            if let old = replacedSessionId, !old.isEmpty, old != targetSession.value {
+                let revoke = revokeSession, serverUrl = account.fullServerUrl
+                Task.detached { await revoke(serverUrl, old) }
+            }
+        }
         // Broadcast so MainViewModel reloads the WebView onto the newly active account.
         if saved { NotificationCenter.default.post(name: .activeAccountDidChange, object: nil) }
         return saved
