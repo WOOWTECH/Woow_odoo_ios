@@ -82,7 +82,11 @@ def assert_cookie_policy(auth, account, credential, web):
         assert required in auth
     manual = account.split("let rejection = await MainActor.run", 1)[1].split("if let rejection {", 1)[0]
     assert "let cookie = auth.sessionCookie?.cookie()" in manual
-    assert "brand == .apporo && cookie == nil" in manual
+    # pi 1001b (P1): the "no usable response cookie → reject" rule now covers BOTH brands (it used to
+    # be `brand == .apporo && cookie == nil`); the response SID must be the cookie's value.
+    assert "guard let cookie = auth.sessionCookie?.cookie(), !auth.sessionId.isEmpty," in manual
+    assert "cookie.value == auth.sessionId else {" in manual
+    assert manual.index("guard let cookie = auth.sessionCookie?.cookie()") < manual.index("$0.isActive = false")
     assert "HTTPCookieStorage.shared.setCookie(cookie)" in manual
     assert "HTTPCookie(properties:" not in manual
     assert "sessionCookie: auth.sessionCookie" in manual
