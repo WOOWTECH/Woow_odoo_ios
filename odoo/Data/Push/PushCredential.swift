@@ -73,14 +73,28 @@ actor PushSessionHealer {
             let result = await api.authenticatePushSession(
                 serverUrl: credential.serverURL, database: credential.database,
                 username: credential.username, password: credential.password)
+            // pi 1001b (P2): a successful re-login whose session is not adopted (CAS lost to a newer
+            // login/switch, account removed, or another user) leaves that fresh session valid and
+            // untracked on the server. Revoke ONLY that unpublished session, best effort, detached.
+            let unpublished: String? = { if case .success(let auth) = result { return auth.sessionId }; return nil }()
+            let revokeUnpublished: @Sendable () -> Void = {
+                guard let sid = unpublished, !sid.isEmpty else { return }
+                Task.detached { await api.destroySession(serverUrl: credential.serverURL, sessionId: sid) }
+            }
             let outcome = await MainActor.run { () -> PushHealOutcome in
                 // CAS and account revalidation share the manual/remove transaction owner.
                 guard accounts.getAllAccounts().contains(where: { credential.matches($0) }),
-                      storage.pushCredential(accountId: account.id) == credential else { return .superseded }
+                      storage.pushCredential(accountId: account.id) == credential else {
+                    if storage.pushCredential(accountId: account.id)?.sessionId != unpublished { revokeUnpublished() }
+                    return .superseded
+                }
                 switch result {
                 case .success(let auth):
                     guard !auth.sessionId.isEmpty,
-                          account.userId == nil || account.userId == auth.userId else { return .credentialRejected }
+                          account.userId == nil || account.userId == auth.userId else {
+                        revokeUnpublished()
+                        return .credentialRejected
+                    }
                     let refreshed = PushCredential(account: account, password: credential.password,
                         sessionId: auth.sessionId, generation: credential.generation, sessionCookie: auth.sessionCookie)
                     storage.savePushCredential(refreshed)

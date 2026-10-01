@@ -546,6 +546,40 @@ final class PushDeviceRegistrarTests: XCTestCase {
         }
     }
 
+    /// pi 1001b P2: a push heal that loses the CAS (a newer manual login won while it was in flight)
+    /// must best-effort revoke the session it just created and never published — and only that one.
+    func test_apporo_healHeld_loserRevokesOnlyItsOwnUnpublishedSession() async throws {
+        let persistence = PersistenceController(inMemory: true)
+        OdooAccountEntity(context: persistence.container.viewContext).update(from: a)
+        try persistence.container.viewContext.save()
+        let repository = AccountRepository(persistence: persistence, apiClient: api,
+            brand: .apporo, pushCredentials: credentials)
+        let old = try XCTUnwrap(credentials.pushCredential(accountId: a.id))
+        let held = expectation(description: "Old heal stopped before CAS")
+        PushContractURLProtocol.reset([.heldAuth("old-healed"), .auth("manual-winner")])
+        PushContractURLProtocol.onHold = { held.fulfill() }
+        let work = Task { await healer.heal(account: a, credential: old, api: api,
+                                            storage: credentials, accounts: repository) }
+        await fulfillment(of: [held], timeout: 2)
+        let login = await repository.authenticate(serverUrl: a.serverUrl, database: a.database,
+                                                  username: a.username, password: "new-fixture")
+        XCTAssertTrue(login.isSuccess)
+        PushContractURLProtocol.releaseHeld()
+        let outcome = await work.value
+        XCTAssertEqual(outcome, .superseded)
+        var destroyed: [String] = []
+        for _ in 0..<150 {
+            destroyed = PushContractURLProtocol.destroyedCookies
+            if destroyed.contains("session_id=old-healed") { break }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertTrue(destroyed.contains("session_id=old-healed"),
+                      "the losing heal revokes the session it created but never published")
+        XCTAssertFalse(destroyed.contains("session_id=manual-winner"), "the winner's session is never revoked")
+        XCTAssertEqual(credentials.pushCredential(accountId: a.id)?.sessionId, "manual-winner")
+        credentials.savePushCredential(PushCredential(account: a, password: "fixture-password-a", sessionId: "sid-a"))
+    }
+
     func test_apporo_healHeld_removeWinsWithoutResurrection() async throws {
         for logout in [false, true] {
             let persistence = PersistenceController(inMemory: true)
