@@ -101,6 +101,9 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         // pi 1001b (P1): logins and switches share one selection order for both brands — a later
         // selection supersedes this login, and this login supersedes an in-flight switch.
         let attempt = await PushManualLoginOrder.begin()
+        // pi 1001b (P2): a re-login to the same account replaces its stored session; revoke it after
+        // the commit (WOOW below) instead of leaving it valid and untracked on the server.
+        let replacedSessionId = secureStorage.getSessionId(serverUrl: fullUrl, username: username)
         // demo111 1001 (defect 2): both brands log in WITHOUT the shared jar. The WOOW login used to
         // send the jar's session_id — another same-host account's — and Odoo re-authenticated THAT
         // session as this user and rotated it, logging the other account out on the server.
@@ -191,9 +194,26 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
             if !auth.sessionId.isEmpty {
                 secureStorage.saveSessionId(serverUrl: fullUrl, username: username, sessionId: auth.sessionId)
             }
+            if let old = replacedSessionId, !old.isEmpty, old != auth.sessionId {
+                let heldElsewhere = await isSessionHeldByAnotherAccount(old, serverUrl: fullUrl, username: username)
+                if !heldElsewhere {
+                    let revoke = revokeSession
+                    Task.detached { await revoke(fullUrl, old) }
+                }
+            }
         }
 
         return result
+    }
+
+    /// Whether another saved account (any other server/username) still stores `sessionId`; such a
+    /// session is never revoked on this account's behalf.
+    @MainActor
+    private func isSessionHeldByAnotherAccount(_ sessionId: String, serverUrl: String, username: String) -> Bool {
+        getAllAccounts().contains { other in
+            !(other.fullServerUrl == serverUrl && other.username == username) &&
+                secureStorage.getSessionId(serverUrl: other.fullServerUrl, username: other.username) == sessionId
+        }
     }
 
     func getActiveAccount() -> OdooAccount? {
@@ -379,7 +399,8 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
             secureStorage.saveSessionId(serverUrl: account.fullServerUrl, username: account.username,
                                         sessionId: targetSession.value)
             HTTPCookieStorage.shared.setCookie(targetSession)
-            if let old = replacedSessionId, !old.isEmpty, old != targetSession.value {
+            if let old = replacedSessionId, !old.isEmpty, old != targetSession.value,
+               !isSessionHeldByAnotherAccount(old, serverUrl: account.fullServerUrl, username: account.username) {
                 let revoke = revokeSession, serverUrl = account.fullServerUrl
                 Task.detached { await revoke(serverUrl, old) }
             }
