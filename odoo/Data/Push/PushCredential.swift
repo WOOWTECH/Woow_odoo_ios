@@ -92,7 +92,9 @@ actor PushSessionHealer {
                 case .success(let auth):
                     guard !auth.sessionId.isEmpty,
                           account.userId == nil || account.userId == auth.userId else {
-                        revokeUnpublished()
+                        // pi 1001c (P2): only a session nobody stores is "unpublished" — never revoke
+                        // the one currently stored for this account.
+                        if storage.pushCredential(accountId: account.id)?.sessionId != unpublished { revokeUnpublished() }
                         return .credentialRejected
                     }
                     let refreshed = PushCredential(account: account, password: credential.password,
