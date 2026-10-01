@@ -150,6 +150,34 @@ final class ApporoSwitchSessionReuseTests: XCTestCase {
         XCTAssertTrue(revoked.isEmpty, "nothing to revoke when the session is reused")
     }
 
+    /// demo111 0930b defect 1: B's session expired, the self-heal logged B in again — and the next
+    /// switch to B then logged in ONCE MORE, because B's push credential still held the dead
+    /// session. After a heal, switching to B must reuse the healed session (no new login).
+    func test_switch_afterSelfHealOfTarget_reusesHealedSessionWithoutReauthenticating() async throws {
+        let stored = try storeCredential(withCookie: true)
+        secureStorage.savePassword(serverUrl: accountB.fullServerUrl, username: accountB.username, password: "password-b")
+        defer { secureStorage.deletePassword(serverUrl: accountB.fullServerUrl, username: accountB.username) }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [SwitchURLProtocol.self]
+        let reauth = SessionReauthenticator(accountRepository: repo, secureStorage: secureStorage,
+                                            authenticator: OdooAPIClient(session: URLSession(configuration: config)),
+                                            reloginSignal: ReloginSignal(), cookieJar: HTTPCookieStorage(),
+                                            pushCredentials: secureStorage)
+        let healed = await reauth.reauthenticateForHost(accountB.serverHost, accountId: accountB.id)
+        XCTAssertTrue(healed, "precondition: the heal logged B in (sess-new)")
+        SwitchURLProtocol.requests = []
+
+        let switched = await repo.switchAccount(id: accountB.id)
+
+        XCTAssertTrue(switched)
+        XCTAssertEqual(SwitchURLProtocol.requests.map(\.path), ["/web/session/get_session_info"],
+                       "the healed session must be reused, not replaced by another login")
+        XCTAssertEqual(SwitchURLProtocol.requests.first?.cookie, "session_id=sess-new")
+        let after = try XCTUnwrap(secureStorage.pushCredential(accountId: accountB.id))
+        XCTAssertEqual(after.sessionId, "sess-new")
+        XCTAssertEqual(after.generation, stored.generation)
+    }
+
     func test_switch_givenExpiredSession_reauthenticatesAndRevokesTheOldOne() async throws {
         let stored = try storeCredential(withCookie: true)
         SwitchURLProtocol.infoMode = .expired

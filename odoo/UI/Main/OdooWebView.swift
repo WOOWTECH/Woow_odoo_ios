@@ -95,6 +95,10 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     /// never rebuilt — a rebuild would recreate the store that was just deleted.
     private var retiredAccountIds: Set<String> = []
     private var retireObserver: NSObjectProtocol?
+    /// demo111 1001 (defect 1): true once the current account's navigation was cancelled for an
+    /// expired session. A heal for that account then reloads the page instead of leaving it blank.
+    private var awaitingHealedSession = false
+    private var healObserver: NSObjectProtocol?
 
     #if DEBUG
     private var testProxy: JSBridgeMessageHandlerProxy?
@@ -152,10 +156,19 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
             guard let accountId = note.userInfo?["accountId"] as? String else { return }
             MainActor.assumeIsolated { self?.retireWebView(forAccountId: accountId) }
         }
+        // Posted synchronously on the main actor by the self-heal commit (queue nil = inline).
+        healObserver = NotificationCenter.default.addObserver(
+            forName: .accountSessionHealed, object: nil, queue: nil
+        ) { [weak self] note in
+            guard let accountId = note.userInfo?["accountId"] as? String,
+                  let cookie = note.userInfo?["cookie"] as? HTTPCookie else { return }
+            MainActor.assumeIsolated { self?.adoptHealedSession(cookie, forAccountId: accountId) }
+        }
     }
 
     deinit {
         if let retireObserver { NotificationCenter.default.removeObserver(retireObserver) }
+        if let healObserver { NotificationCenter.default.removeObserver(healObserver) }
     }
 
     // MARK: - Container wiring
@@ -214,6 +227,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         // geolocation request so a later fix can never be delivered into the new account's page.
         locationCoordinator.invalidateActiveDocument()
         hasFinishedAccountLoad = false
+        awaitingHealedSession = false
         let config = makeConfiguration(accountId: accountId)
         let newWebView = makeWebView(config)
         newWebView.navigationDelegate = self
@@ -294,10 +308,27 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         retire(live)
         webView = nil
         hasFinishedAccountLoad = false
+        awaitingHealedSession = false
         pendingDeepLink = nil
         #if DEBUG
         testProxy?.webView = nil
         #endif
+    }
+
+    /// demo111 1001 (defect 1): a self-heal committed a new session for `accountId`. The live
+    /// WebView of that account gets it in its own data store; when its page had been cancelled for
+    /// the expiry, the account's base page is loaded again (a pending deep link then applies
+    /// load-gated as usual). A heal for any other account — or a WebView replaced meanwhile — is
+    /// left alone.
+    func adoptHealedSession(_ cookie: HTTPCookie, forAccountId accountId: String) {
+        guard accountId == currentAccountId, !retiredAccountIds.contains(accountId), let live = webView else { return }
+        let reload = awaitingHealedSession
+        awaitingHealedSession = false
+        live.configuration.websiteDataStore.httpCookieStore.setCookie(cookie) { [weak self, weak live] in
+            guard let self, let live, self.webView === live, reload else { return }
+            self.hasFinishedAccountLoad = false
+            self.loadBase(into: live, serverUrl: self.currentServerUrl, database: self.currentDatabase)
+        }
     }
 
     private func makeConfiguration(accountId: String) -> WKWebViewConfiguration {
@@ -591,6 +622,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         case .allow:
             decisionHandler(.allow)
         case .sessionExpired:
+            awaitingHealedSession = true
             onSessionExpired()
             decisionHandler(.cancel)
         case .openInSafari(let url):

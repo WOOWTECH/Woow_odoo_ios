@@ -117,8 +117,28 @@ def allow_audited_stale_instance_apply(text):
     return text.replace("sut.apply(serverUrl:", "auditedStaleInstanceApply(serverUrl:")
 
 
+def allow_audited_heal_reload_apply(text):
+    # 1001 (demo111 defect 1): the heal-reload tests drive the coordinator's real apply/rebuild path
+    # so the healed cookie lands in a real (non-persistent) per-account store. Base loads are an
+    # intercepted closure that only counts; there is no session cookie at apply and no deep link.
+    # No request is issued.
+    for required in ["let store = WKWebsiteDataStore.nonPersistent()",
+                     "loadBaseRequest: { [weak self] _, _ in self?.baseLoads += 1 },",
+                     "loadDeepLinkRequest: { _, _ in }",
+                     'openExternalURL: { _ in XCTFail("No Safari") },',
+                     "brand: .woowtech,"]:
+        assert required in text, required
+    assert text.count("OdooWebViewCoordinator(") == 1
+    assert text.count("sut.apply(serverUrl:") == 3
+    assert text.count(".apply(serverUrl:") == 3
+    assert text.count("sessionId: nil, deepLink: nil)") == 3
+    return text.replace("sut.apply(serverUrl:", "auditedHealReloadApply(serverUrl:")
+
+
 AUDITED_SESSION_PROTOCOLS = {
-    "ApporoSwitchSessionReuseTests.swift": ("SwitchURLProtocol",),
+    # Baseline 0930b: ("SwitchURLProtocol",). Current 1001 (demo111 defect 1): a second, equally
+    # offline SwitchURLProtocol session for the heal-then-switch reuse test.
+    "ApporoSwitchSessionReuseTests.swift": ("SwitchURLProtocol", "SwitchURLProtocol"),
     "HonestLogoutS4Tests.swift": ("LogoutURLProtocol",),
     "LoginAccessDeniedMessageTests.swift": ("JsonRpcErrorURLProtocol",),
     "LogoutRevokesAccountWebDataTests.swift": ("DestroyCaptureURLProtocol",),
@@ -132,6 +152,7 @@ AUDITED_SESSION_PROTOCOLS = {
     "OfflineUnitHostTests.swift": ("OfflineHostMockURLProtocol",),
     "PushDeviceRegistrarTests.swift": ("PushContractURLProtocol",),
     "SelfHealSharedJarIsolationTests.swift": ("HealJarURLProtocol",),  # 0930b (pi P1): offline authenticate replies only
+    "SelfHealWebViewRecoveryTests.swift": ("RecoveryURLProtocol",),  # 1001 (demo111 defect 1): offline authenticate/destroy replies only
     "ServerUrlInputTests.swift": ("AuthRecordingURLProtocol",),
 }
 
@@ -364,6 +385,8 @@ class OfflineUnitHostSourceTests(unittest.TestCase):
                 text = allow_audited_cold_start_deeplink_apply(text)
             if path.name == "StaleWebViewInstanceTests.swift":
                 text = allow_audited_stale_instance_apply(text)
+            if path.name == "SelfHealWebViewRecoveryTests.swift":
+                text = allow_audited_heal_reload_apply(text)
             self.assertNotRegex(text, r"\.load\(|\.loadHTMLString\(|\.reload\(|\.apply\(serverUrl:|createWebViewWith:")
             self.assertNotRegex(text, r"UIApplication\.shared\.open|Data\(contentsOf:|String\(contentsOf:")
 
@@ -390,6 +413,17 @@ class OfflineUnitHostSourceTests(unittest.TestCase):
                          ("brand: .woowtech,", "brand: .apporo,")]:
             with self.assertRaises(AssertionError):
                 allow_audited_stale_instance_apply(text.replace(old, new))
+
+    def test_heal_reload_exception_requires_isolated_store_intercepted_loads_no_session_no_link(self):
+        text = source("odooTests/SelfHealWebViewRecoveryTests.swift")
+        allow_audited_heal_reload_apply(text)
+        for old, new in [("let store = WKWebsiteDataStore.nonPersistent()", "let store = WKWebsiteDataStore.default()"),
+                         ("loadBaseRequest: { [weak self] _, _ in self?.baseLoads += 1 },",
+                          "loadBaseRequest: { webView, request in webView.load(request) },"),
+                         ("sessionId: nil, deepLink: nil)", 'sessionId: "sid", deepLink: nil)'),
+                         ("brand: .woowtech,", "brand: .apporo,")]:
+            with self.assertRaises(AssertionError):
+                allow_audited_heal_reload_apply(text.replace(old, new))
 
     def test_keyboard_restorer_exception_requires_no_load_no_session_no_link(self):
         text = source("odooTests/WebViewKeyboardScrollRestorerTests.swift")

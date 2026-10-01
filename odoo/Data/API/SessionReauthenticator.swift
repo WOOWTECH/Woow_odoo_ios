@@ -134,6 +134,13 @@ final class ReloginSignal: ReloginSignaling, @unchecked Sendable {
     }
 }
 
+extension Notification.Name {
+    /// Posted on the main actor when a self-heal committed a new session for an account.
+    /// `userInfo["accountId"]`: the account; `userInfo["cookie"]`: its new `session_id` `HTTPCookie`.
+    /// In-process only — never logged.
+    static let accountSessionHealed = Notification.Name("io.woowtech.odoo.accountSessionHealed")
+}
+
 // MARK: - SessionReauthenticator
 
 /// Guardrail'd re-authentication engine that transparently self-heals an expired Odoo **session
@@ -168,6 +175,7 @@ actor SessionReauthenticator {
     private let authenticator: SessionAuthenticating
     private let reloginSignal: ReloginSignaling
     private let cookieJar: SharedCookieJar
+    private let pushCredentials: PushCredentialStorage
 
     /// Per-host single-flight tasks so concurrent expiries on the same host cause exactly one re-auth.
     private var inFlight: [String: Task<Bool, Never>] = [:]
@@ -181,13 +189,15 @@ actor SessionReauthenticator {
         secureStorage: SecureStorageProtocol = SecureStorage.shared,
         authenticator: SessionAuthenticating = OdooAPIClient(),
         reloginSignal: ReloginSignaling = ReloginSignal.shared,
-        cookieJar: HTTPCookieStorage = .shared
+        cookieJar: HTTPCookieStorage = .shared,
+        pushCredentials: PushCredentialStorage = SecureStorage.shared
     ) {
         self.accountRepository = accountRepository
         self.secureStorage = secureStorage
         self.authenticator = authenticator
         self.reloginSignal = reloginSignal
         self.cookieJar = SharedCookieJar(storage: cookieJar)
+        self.pushCredentials = pushCredentials
     }
 
     /// Attempts to refresh the expired Odoo session for `requestHost`, applying every guardrail.
@@ -274,6 +284,14 @@ actor SessionReauthenticator {
             return false
         }
 
+        // The sessions this heal replaces (Keychain copy, push credential) — revoked once the heal
+        // is committed (demo111 1001, defect 1: they used to be orphaned).
+        let storage = secureStorage, push = pushCredentials
+        let replaced = await MainActor.run { () -> ReplacedSession in
+            ReplacedSession(keychainSessionId: storage.getSessionId(serverUrl: account.fullServerUrl, username: account.username),
+                            credential: push.pushCredential(accountId: account.id))
+        }
+
         let result = await authenticator.authenticateIsolated(
             serverUrl: serverUrl,
             database: account.database,
@@ -283,9 +301,19 @@ actor SessionReauthenticator {
 
         switch result {
         case .success(let auth):
-            return await commitHealedSession(account, auth: auth)
+            return await commitHealedSession(account, auth: auth, replaced: replaced)
         case .error(_, let type):
             return await handleReauthError(account, type: type)
+        }
+    }
+
+    /// What a heal replaces: the account's Keychain session copy and its push credential as they
+    /// were before the re-auth started.
+    private struct ReplacedSession: Sendable {
+        let keychainSessionId: String?
+        let credential: PushCredential?
+        var sessionIds: Set<String> {
+            Set([keychainSessionId, credential?.sessionId].compactMap { $0 }.filter { !$0.isEmpty })
         }
     }
 
@@ -295,25 +323,63 @@ actor SessionReauthenticator {
     /// writes nothing and reports failure; its fresh session is revoked best-effort. The check and
     /// the write run in one main-actor step — the executor account switches and logouts run on — so
     /// no switch can land between them.
-    private func commitHealedSession(_ account: OdooAccount, auth: AuthResult.AuthSuccess) async -> Bool {
+    ///
+    /// demo111 1001 (defect 1): the healed session used to stop there — the page stayed blank and
+    /// the next switch logged in again. In the same step it now also replaces the account's push
+    /// credential session (unless a switch or login already replaced that credential) and tells the
+    /// account's WebView (`accountSessionHealed`). Once committed, the sessions it replaced are
+    /// revoked best-effort — never one another account still holds.
+    private func commitHealedSession(_ account: OdooAccount, auth: AuthResult.AuthSuccess,
+                                     replaced: ReplacedSession) async -> Bool {
         guard let cookie = auth.sessionCookie?.cookie() ?? Self.sessionCookie(auth.sessionId, for: account) else {
             AppLogger.auth.warning("Re-auth: no session returned for account \(account.id, privacy: .public)")
             return false
         }
-        let repo = accountRepository, storage = secureStorage, jar = cookieJar
-        let committed = await MainActor.run { () -> Bool in
-            guard Self.mayOwnHostSession(account, in: repo) else { return false }
+        let repo = accountRepository, storage = secureStorage, jar = cookieJar, push = pushCredentials
+        let revocable = await MainActor.run { () -> Set<String>? in
+            guard Self.mayOwnHostSession(account, in: repo) else { return nil }
             jar.storage.setCookie(cookie)
             storage.saveSessionId(serverUrl: account.fullServerUrl, username: account.username, sessionId: cookie.value)
-            return true
+            if let current = push.pushCredential(accountId: account.id), current == replaced.credential,
+               current.matches(account),
+               let sessionCookie = auth.sessionCookie ?? Self.pushSessionCookie(cookie, for: account) {
+                push.savePushCredential(PushCredential(account: account, password: current.password,
+                    sessionId: cookie.value, generation: current.generation, sessionCookie: sessionCookie))
+            }
+            NotificationCenter.default.post(name: .accountSessionHealed, object: nil,
+                                            userInfo: ["accountId": account.id, "cookie": cookie])
+            return replaced.sessionIds.subtracting([cookie.value])
+                .subtracting(Self.sessionIdsHeld(byOtherThan: account, repo: repo, storage: storage, push: push))
         }
-        if committed {
-            AppLogger.auth.info("Re-auth: session refreshed for account \(account.id, privacy: .public)")
-        } else {
+        guard let revocable else {
             AppLogger.auth.warning("Re-auth: account \(account.id, privacy: .public) no longer owns its host session — result discarded")
             await authenticator.discardSession(serverUrl: account.fullServerUrl, sessionId: cookie.value)
+            return false
         }
-        return committed
+        AppLogger.auth.info("Re-auth: session refreshed for account \(account.id, privacy: .public)")
+        for sessionId in revocable.sorted() {
+            await authenticator.discardSession(serverUrl: account.fullServerUrl, sessionId: sessionId)
+        }
+        return true
+    }
+
+    /// Session ids other stored accounts hold (Keychain copies and push credentials) — never revoked
+    /// on this account's behalf.
+    @MainActor
+    private static func sessionIdsHeld(byOtherThan account: OdooAccount, repo: AccountRepositoryProtocol,
+                                       storage: SecureStorageProtocol, push: PushCredentialStorage) -> Set<String> {
+        var held = Set<String>()
+        for other in repo.getAllAccounts() where other.id != account.id {
+            if let sid = storage.getSessionId(serverUrl: other.fullServerUrl, username: other.username) { held.insert(sid) }
+            if let sid = push.pushCredential(accountId: other.id)?.sessionId { held.insert(sid) }
+        }
+        return held
+    }
+
+    /// The push-credential form of a healed cookie when the transport returned only the session id.
+    private static func pushSessionCookie(_ cookie: HTTPCookie, for account: OdooAccount) -> PushSessionCookie? {
+        guard let url = URL(string: "\(account.fullServerUrl)/web/session/authenticate") else { return nil }
+        return PushSessionCookie(cookie: cookie, responseURL: url)
     }
 
     /// Whether `account` may hold its host's session in the shared jar right now: it is still
