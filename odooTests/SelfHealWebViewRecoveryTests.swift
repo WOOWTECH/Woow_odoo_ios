@@ -220,6 +220,42 @@ final class SelfHealWebViewRecoveryTests: XCTestCase {
         XCTAssertEqual(RecoveryURLProtocol.destroyed, ["sid-a-old"])
     }
 
+    /// demo111 1001 live run: on a cold start the push registrar's own heal refreshed B's push
+    /// credential (same login generation) while the WebView's heal was in flight. The WebView must
+    /// then use THAT session — the one a later switch reuses — and the heal's own extra session is
+    /// revoked, not left valid and unused.
+    func test_heal_apporo_credentialRefreshedConcurrently_adoptsItsSession_revokesOwn() async throws {
+        let b = account("mate")
+        let repo = HealRepo(); repo.accounts = [b]; repo.activeId = b.id
+        let credentials = MemoryPushCredentials()
+        let old = PushCredential(account: b, password: "pw-mate", sessionId: "sid-old", sessionCookie: try pushCookie("sid-old"))
+        await MainActor.run { credentials.savePushCredential(old) }
+        RecoveryURLProtocol.reset(replySessionId: "sid-webheal", hold: true)
+        let observer = HealedObserver()
+        let keychain = keychain([b], sessions: ["mate": "sid-old"])
+        let reauth = SessionReauthenticator(accountRepository: repo, secureStorage: keychain,
+                                            authenticator: apiClient(), reloginSignal: QuietRelogin(),
+                                            pushCredentials: credentials)
+
+        let heal = Task { await reauth.reauthenticateForHost(host, accountId: b.id) }
+        await waitUntil(RecoveryURLProtocol.authenticates == 1)
+        let pushHealed = PushCredential(account: b, password: "pw-mate", sessionId: "sid-pushheal",
+                                        generation: old.generation, sessionCookie: try pushCookie("sid-pushheal"))
+        await MainActor.run { credentials.savePushCredential(pushHealed) }   // the push registrar healed meanwhile
+        RecoveryURLProtocol.release()
+        let healed = await heal.value
+
+        XCTAssertTrue(healed, "the account has a working session")
+        let saved = await MainActor.run { credentials.pushCredential(accountId: b.id) }
+        XCTAssertEqual(saved, pushHealed, "the concurrently refreshed credential is kept")
+        XCTAssertEqual(observer.posts.map(\.cookie), ["sid-pushheal"],
+                       "the WebView gets the credential's session, the one a switch reuses")
+        XCTAssertEqual(keychain.getSessionId(serverUrl: b.fullServerUrl, username: b.username), "sid-pushheal")
+        await waitUntil(RecoveryURLProtocol.destroyed.count == 2)
+        XCTAssertEqual(Set(RecoveryURLProtocol.destroyed), ["sid-old", "sid-webheal"],
+                       "the dead session and the heal's own unused session are revoked; the credential's is kept")
+    }
+
     /// A heal answering after the user switched to a same-host sibling changes nothing: no WebView
     /// notification, the push credential keeps its session.
     func test_heal_lateAfterSwitchToSameHostSibling_notifiesNothing_keepsCredential() async throws {

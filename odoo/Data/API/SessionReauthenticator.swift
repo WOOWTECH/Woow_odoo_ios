@@ -327,8 +327,9 @@ actor SessionReauthenticator {
     /// demo111 1001 (defect 1): the healed session used to stop there — the page stayed blank and
     /// the next switch logged in again. In the same step it now also replaces the account's push
     /// credential session (unless a switch or login already replaced that credential) and tells the
-    /// account's WebView (`accountSessionHealed`). Once committed, the sessions it replaced are
-    /// revoked best-effort — never one another account still holds.
+    /// account's WebView (`accountSessionHealed`). When the credential was already refreshed
+    /// meanwhile, the WebView gets the credential's session instead and this heal's is revoked. Once
+    /// committed, the sessions it replaced are revoked best-effort — never one another account holds.
     private func commitHealedSession(_ account: OdooAccount, auth: AuthResult.AuthSuccess,
                                      replaced: ReplacedSession) async -> Bool {
         guard let cookie = auth.sessionCookie?.cookie() ?? Self.sessionCookie(auth.sessionId, for: account) else {
@@ -338,17 +339,26 @@ actor SessionReauthenticator {
         let repo = accountRepository, storage = secureStorage, jar = cookieJar, push = pushCredentials
         let revocable = await MainActor.run { () -> Set<String>? in
             guard Self.mayOwnHostSession(account, in: repo) else { return nil }
-            jar.storage.setCookie(cookie)
-            storage.saveSessionId(serverUrl: account.fullServerUrl, username: account.username, sessionId: cookie.value)
-            if let current = push.pushCredential(accountId: account.id), current == replaced.credential,
-               current.matches(account),
-               let sessionCookie = auth.sessionCookie ?? Self.pushSessionCookie(cookie, for: account) {
-                push.savePushCredential(PushCredential(account: account, password: current.password,
-                    sessionId: cookie.value, generation: current.generation, sessionCookie: sessionCookie))
+            // The session the account's WebView and jar get. Normally this heal's; but when the push
+            // credential was refreshed meanwhile (the push registrar's own heal on a cold start, or a
+            // switch), that newer session is the one a switch reuses — use it and drop this heal's
+            // (demo111 1001 live run: otherwise the WebView ran on a second, never-revoked session).
+            var webCookie = cookie
+            if let current = push.pushCredential(accountId: account.id), current.matches(account) {
+                if current == replaced.credential,
+                   let sessionCookie = auth.sessionCookie ?? Self.pushSessionCookie(cookie, for: account) {
+                    push.savePushCredential(PushCredential(account: account, password: current.password,
+                        sessionId: cookie.value, generation: current.generation, sessionCookie: sessionCookie))
+                } else if current != replaced.credential, !current.sessionId.isEmpty,
+                          let concurrent = current.sessionCookie?.cookie(), concurrent.value == current.sessionId {
+                    webCookie = concurrent
+                }
             }
+            jar.storage.setCookie(webCookie)
+            storage.saveSessionId(serverUrl: account.fullServerUrl, username: account.username, sessionId: webCookie.value)
             NotificationCenter.default.post(name: .accountSessionHealed, object: nil,
-                                            userInfo: ["accountId": account.id, "cookie": cookie])
-            return replaced.sessionIds.subtracting([cookie.value])
+                                            userInfo: ["accountId": account.id, "cookie": webCookie])
+            return replaced.sessionIds.union([cookie.value]).subtracting([webCookie.value])
                 .subtracting(Self.sessionIdsHeld(byOtherThan: account, repo: repo, storage: storage, push: push))
         }
         guard let revocable else {
