@@ -111,9 +111,12 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
                 if let attempt, !PushManualLoginOrder.isCurrent(attempt) {
                     return .error(String(localized: "error_login_superseded"), .unknown)
                 }
-                // A short-lived response cookie may expire while waiting to commit.
-                let cookie = auth.sessionCookie?.cookie()
-                if brand == .apporo && cookie == nil {
+                // A short-lived response cookie may expire while waiting to commit. pi 1001b (P1): for
+                // both brands — a WOOW success without a usable cookie used to activate this account
+                // while the jar kept the previous same-host account's session, which the new account's
+                // WebView then borrowed. No usable cookie from THIS response: nothing changes.
+                guard let cookie = auth.sessionCookie?.cookie(), !auth.sessionId.isEmpty,
+                      cookie.value == auth.sessionId else {
                     return .error(String(localized: "error_session_setup"), .serverError)
                 }
                 // Deactivate all existing accounts
@@ -160,18 +163,20 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
                     secureStorage.saveSessionId(serverUrl: fullUrl, username: username, sessionId: auth.sessionId)
                     // Only the winning manual login publishes to the legacy WebView jar.
                     // Push healing uses the isolated response SID without publishing it.
-                    if let cookie {
-                        HTTPCookieStorage.shared.setCookie(cookie)
-                    }
+                    HTTPCookieStorage.shared.setCookie(cookie)
                 }
                 // WOOW (1001, defect 2): the jar holds the ACTIVE account's session for the legacy
                 // requests and the WebView; publish the new account's response session to it.
-                if brand != .apporo, let cookie {
+                if brand != .apporo {
                     HTTPCookieStorage.shared.setCookie(cookie)
                 }
                 return nil
             }
-            if let rejection { return rejection }
+            if let rejection {
+                // The session this login created was never published — revoke it (best effort).
+                revokeUnpublishedSession(auth.sessionId, serverUrl: fullUrl)
+                return rejection
+            }
             if brand == .apporo { return result }
 
             // Save password in Keychain, scoped to this server + username
@@ -333,7 +338,14 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
             )
             switch result {
             case .success(let auth):
-                targetSession = auth.sessionCookie?.cookie()
+                // pi 1001b (P1): a success whose response cookie is no longer usable must not activate
+                // the target — the jar would keep the current same-host account's session for it.
+                guard let cookie = auth.sessionCookie?.cookie(), !auth.sessionId.isEmpty,
+                      cookie.value == auth.sessionId else {
+                    revokeUnpublishedSession(auth.sessionId, serverUrl: account.fullServerUrl)
+                    return false
+                }
+                targetSession = cookie
             case .error:
                 AppLogger.auth.info("Session validation failed for \(account.username)")
                 return false
@@ -361,6 +373,14 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         // Broadcast so MainViewModel reloads the WebView onto the newly active account.
         if saved { NotificationCenter.default.post(name: .activeAccountDidChange, object: nil) }
         return saved
+    }
+
+    /// Best-effort revoke of a session a login/switch created but never published (superseded, or
+    /// its response cookie was no longer usable). Never delays the caller.
+    private func revokeUnpublishedSession(_ sessionId: String, serverUrl: String) {
+        guard !sessionId.isEmpty else { return }
+        let revoke = revokeSession
+        Task.detached { await revoke(serverUrl, sessionId) }
     }
 
     /// D5: whether a switch can keep the target account's current session. It needs a cookie the
