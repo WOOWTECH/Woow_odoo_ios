@@ -288,7 +288,7 @@ actor SessionReauthenticator {
         // is committed (demo111 1001, defect 1: they used to be orphaned).
         let storage = secureStorage, push = pushCredentials
         let replaced = await MainActor.run { () -> ReplacedSession in
-            ReplacedSession(keychainSessionId: storage.getSessionId(serverUrl: account.fullServerUrl, username: account.username),
+            ReplacedSession(keychainSessionId: storage.getSessionId(accountId: account.id),
                             credential: push.pushCredential(accountId: account.id))
         }
 
@@ -355,7 +355,7 @@ actor SessionReauthenticator {
                 }
             }
             jar.storage.setCookie(webCookie)
-            storage.saveSessionId(serverUrl: account.fullServerUrl, username: account.username, sessionId: webCookie.value)
+            storage.saveSessionId(accountId: account.id, sessionId: webCookie.value)
             NotificationCenter.default.post(name: .accountSessionHealed, object: nil,
                                             userInfo: ["accountId": account.id, "cookie": webCookie])
             return replaced.sessionIds.union([cookie.value]).subtracting([webCookie.value])
@@ -380,7 +380,7 @@ actor SessionReauthenticator {
                                        storage: SecureStorageProtocol, push: PushCredentialStorage) -> Set<String> {
         var held = Set<String>()
         for other in repo.getAllAccounts() where other.id != account.id {
-            if let sid = storage.getSessionId(serverUrl: other.fullServerUrl, username: other.username) { held.insert(sid) }
+            if let sid = storage.getSessionId(accountId: other.id) { held.insert(sid) }
             if let sid = push.pushCredential(accountId: other.id)?.sessionId { held.insert(sid) }
         }
         return held
@@ -424,7 +424,7 @@ actor SessionReauthenticator {
             $0.id != account.id && $0.serverHost.caseInsensitiveCompare(account.serverHost) == .orderedSame
         }
         if sibling {
-            let known = Set([storage.getSessionId(serverUrl: account.fullServerUrl, username: account.username)]
+            let known = Set([storage.getSessionId(accountId: account.id)]
                 .compactMap { $0 }.filter { !$0.isEmpty })
             cookies.filter { $0.name == "session_id" && known.contains($0.value) }.forEach { jar.storage.deleteCookie($0) }
         } else {

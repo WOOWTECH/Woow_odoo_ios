@@ -112,7 +112,7 @@ final class WoowSameHostLoginIsolationTests: XCTestCase {
 
     override func tearDown() async throws {
         for account in repo.getAllAccounts() {
-            keychain.deleteSessionId(serverUrl: account.fullServerUrl, username: account.username)
+            keychain.deleteSessionId(accountId: account.id)
             keychain.deletePassword(serverUrl: account.fullServerUrl, username: account.username)
         }
         jar.cookies(for: URL(string: server)!)?.forEach { jar.deleteCookie($0) }
@@ -123,6 +123,10 @@ final class WoowSameHostLoginIsolationTests: XCTestCase {
     private func putJarSession(_ value: String) {
         jar.setCookie(HTTPCookie(properties: [.name: "session_id", .value: value, .domain: host,
                                               .path: "/", .secure: "TRUE"])!)
+    }
+
+    private func storedSession(_ username: String) -> String? {
+        repo.getAllAccounts().first { $0.username == username }.flatMap { keychain.getSessionId(accountId: $0.id) }
     }
 
     private var jarSessionIds: [String] {
@@ -144,9 +148,9 @@ final class WoowSameHostLoginIsolationTests: XCTestCase {
                      "logging in B must not carry A's session_id")
         XCTAssertEqual(WoowLoginURLProtocol.authRequests.first?.handlesCookies, false,
                        "the login request must not pick up or store shared-jar cookies automatically")
-        XCTAssertEqual(keychain.getSessionId(serverUrl: server, username: "tester"), "sid-a",
+        XCTAssertEqual(storedSession("tester"), "sid-a",
                        "A keeps its own session")
-        XCTAssertEqual(keychain.getSessionId(serverUrl: server, username: "mate"), "sid-b")
+        XCTAssertEqual(storedSession("mate"), "sid-b")
         XCTAssertEqual(jarSessionIds, ["sid-b"], "the new active account's session is published to the jar")
         XCTAssertEqual(repo.getActiveAccount()?.username, "mate")
     }
@@ -169,8 +173,8 @@ final class WoowSameHostLoginIsolationTests: XCTestCase {
         XCTAssertEqual(WoowLoginURLProtocol.authRequests.count, 1)
         XCTAssertNil(WoowLoginURLProtocol.authRequests.first?.cookie ?? nil, "switching to A must not carry B's session_id")
         XCTAssertEqual(WoowLoginURLProtocol.authRequests.first?.handlesCookies, false)
-        XCTAssertEqual(keychain.getSessionId(serverUrl: server, username: "mate"), "sid-b", "B keeps its own session")
-        XCTAssertEqual(keychain.getSessionId(serverUrl: server, username: "tester"), "sid-a-new")
+        XCTAssertEqual(storedSession("mate"), "sid-b", "B keeps its own session")
+        XCTAssertEqual(storedSession("tester"), "sid-a-new")
         XCTAssertEqual(jarSessionIds, ["sid-a-new"])
         XCTAssertEqual(repo.getActiveAccount()?.id, a.id)
         var revoked: [String] = []

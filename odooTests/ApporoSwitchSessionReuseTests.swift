@@ -102,7 +102,7 @@ final class ApporoSwitchSessionReuseTests: XCTestCase {
     override func tearDown() async throws {
         for account in repo.getAllAccounts() {
             secureStorage.deletePushCredential(accountId: account.id)
-            secureStorage.deleteSessionId(serverUrl: account.fullServerUrl, username: account.username)
+            secureStorage.deleteSessionId(accountId: account.id)
         }
         repo = nil
         try await super.tearDown()

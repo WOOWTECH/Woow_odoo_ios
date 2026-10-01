@@ -41,14 +41,18 @@ final class SessionIsolationBoundaryTests: XCTestCase {
         XCTAssertEqual(store.store.count, 2, "應產生兩把相異的 key")
     }
 
-    /// 既定支援範圍：session 同理。
-    func test_secureStorageKey_givenDifferentHosts_isolatesSessions() {
+    /// 既定支援範圍：session 同理。pi 1001c：session 以帳號 id 定址，同 host、同 username、
+    /// 不同資料庫的兩個帳號也各自獨立（舊的 host＋username 鍵會撞在一起）。
+    func test_secureStorageKey_givenDifferentAccounts_isolatesSessions() {
         let store = MockSecureStorage()
-        store.saveSessionId(serverUrl: hostA, username: "admin", sessionId: "sess-A")
-        store.saveSessionId(serverUrl: hostB, username: "admin", sessionId: "sess-B")
+        store.saveSessionId(accountId: "acct-db1", sessionId: "sess-1")
+        store.saveSessionId(accountId: "acct-db2", sessionId: "sess-2")
 
-        XCTAssertEqual(store.getSessionId(serverUrl: hostA, username: "admin"), "sess-A")
-        XCTAssertEqual(store.getSessionId(serverUrl: hostB, username: "admin"), "sess-B")
+        XCTAssertEqual(store.getSessionId(accountId: "acct-db1"), "sess-1")
+        XCTAssertEqual(store.getSessionId(accountId: "acct-db2"), "sess-2")
+        store.deleteSessionId(accountId: "acct-db1")
+        XCTAssertNil(store.getSessionId(accountId: "acct-db1"))
+        XCTAssertEqual(store.getSessionId(accountId: "acct-db2"), "sess-2")
     }
 
     /// 風險探測（characterisation）：**同 host 不同 port 會共用同一把 key**。

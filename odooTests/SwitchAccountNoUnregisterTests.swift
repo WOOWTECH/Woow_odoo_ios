@@ -174,7 +174,7 @@ final class SwitchAccountNoUnregisterTests: XCTestCase {
     override func tearDown() async throws {
         for account in repo.getAllAccounts() {
             secureStorage.deletePushCredential(accountId: account.id)
-            secureStorage.deleteSessionId(serverUrl: account.fullServerUrl, username: account.username)
+            secureStorage.deleteSessionId(accountId: account.id)
             if let url = URL(string: account.fullServerUrl) {
                 for cookie in HTTPCookieStorage.shared.cookies(for: url) ?? [] {
                     HTTPCookieStorage.shared.deleteCookie(cookie)
@@ -183,7 +183,6 @@ final class SwitchAccountNoUnregisterTests: XCTestCase {
         }
         secureStorage.deleteFcmToken()
         secureStorage.deletePassword(serverUrl: serverB, username: usernameB)
-        secureStorage.deleteSessionId(serverUrl: serverB, username: usernameB)
         repo = nil
         persistence = nil
         secureStorage = nil

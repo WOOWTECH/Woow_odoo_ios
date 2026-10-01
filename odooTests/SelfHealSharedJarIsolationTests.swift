@@ -163,7 +163,7 @@ final class SelfHealSharedJarIsolationTests: XCTestCase {
         for a in accounts {
             storage.savePassword(serverUrl: a.fullServerUrl, username: a.username, password: "pw-\(a.username)")
             if let sid = sessions[a.username] {
-                storage.saveSessionId(serverUrl: a.fullServerUrl, username: a.username, sessionId: sid)
+                storage.saveSessionId(accountId: a.id, sessionId: sid)
             }
         }
         return storage
@@ -236,7 +236,7 @@ final class SelfHealSharedJarIsolationTests: XCTestCase {
 
         XCTAssertTrue(healed)
         XCTAssertEqual(jarSessionIds, ["sid-a-new"])
-        XCTAssertEqual(store.getSessionId(serverUrl: a.fullServerUrl, username: a.username), "sid-a-new")
+        XCTAssertEqual(store.getSessionId(accountId: a.id), "sid-a-new")
     }
 
     /// A's heal answers only after the user switched to same-host B: B's jar session stays, and the
@@ -259,7 +259,7 @@ final class SelfHealSharedJarIsolationTests: XCTestCase {
 
         XCTAssertFalse(healed, "a heal whose account no longer owns the host's session must not report success")
         XCTAssertEqual(jarSessionIds, ["sid-b"], "A's late heal must not overwrite B's session in the shared jar")
-        XCTAssertEqual(store.getSessionId(serverUrl: a.fullServerUrl, username: a.username), "sid-a-old")
+        XCTAssertEqual(store.getSessionId(accountId: a.id), "sid-a-old")
         XCTAssertEqual(HealJarURLProtocol.destroyedSessions, ["sid-a-new"], "the unused healed session is revoked")
     }
 

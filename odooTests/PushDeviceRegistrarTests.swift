@@ -43,7 +43,7 @@ final class PushDeviceRegistrarTests: XCTestCase {
         SecureStorage.shared.deleteFcmToken()
         for account in [a, b] {
             SecureStorage.shared.deletePassword(serverUrl: account.fullServerUrl, username: account.username)
-            SecureStorage.shared.deleteSessionId(serverUrl: account.fullServerUrl, username: account.username)
+            SecureStorage.shared.deleteSessionId(accountId: account.id)
         }
         clearFixtureCookies()
         PushRegistrationStatusStore.shared.remove(accountId: a.id)
@@ -203,7 +203,7 @@ final class PushDeviceRegistrarTests: XCTestCase {
     func test_apporo_missingScopedCredential_refusesLegacyFallback() async {
         credentials.deletePushCredential(accountId: a.id)
         SecureStorage.shared.savePassword(serverUrl: a.fullServerUrl, username: a.username, password: "legacy-fixture")
-        SecureStorage.shared.saveSessionId(serverUrl: a.fullServerUrl, username: a.username, sessionId: "legacy-sid")
+        SecureStorage.shared.saveSessionId(accountId: a.id, sessionId: "legacy-sid")
         await expectFailure { _ = try await self.register() }
         XCTAssertEqual(PushContractURLProtocol.calls.count, 0)
         XCTAssertEqual(PushRegistrationStatusStore.shared.status(for: a.id), .signInRequired)
@@ -385,7 +385,7 @@ final class PushDeviceRegistrarTests: XCTestCase {
         HTTPCookieStorage.shared.setCookie(cookie)
         let before = credentials.pushCredential(accountId: b.id)
         let beforeA = credentials.pushCredential(accountId: a.id)
-        let oldSession = SecureStorage.shared.getSessionId(serverUrl: a.serverUrl, username: a.username)
+        let oldSession = SecureStorage.shared.getSessionId(accountId: a.id)
         for reply in [PushContractURLProtocol.Reply.result(["uid": 7, "name": "Fixture"]), .auth("bad sid")] {
             PushContractURLProtocol.reset([reply])
             let result = await repository.authenticate(serverUrl: a.serverUrl, database: a.database,
@@ -397,7 +397,7 @@ final class PushDeviceRegistrarTests: XCTestCase {
             XCTAssertEqual(repository.getAllAccounts().map(\.id), [b.id])
             XCTAssertEqual(credentials.pushCredential(accountId: b.id), before)
             XCTAssertEqual(credentials.pushCredential(accountId: a.id), beforeA)
-            XCTAssertEqual(SecureStorage.shared.getSessionId(serverUrl: a.serverUrl, username: a.username), oldSession)
+            XCTAssertEqual(SecureStorage.shared.getSessionId(accountId: a.id), oldSession)
             XCTAssertEqual(api.getSessionId(for: a.fullServerUrl), "previous-account")
             XCTAssertEqual(PushContractURLProtocol.calls.count, 1)
         }
@@ -578,6 +578,24 @@ final class PushDeviceRegistrarTests: XCTestCase {
         XCTAssertFalse(destroyed.contains("session_id=manual-winner"), "the winner's session is never revoked")
         XCTAssertEqual(credentials.pushCredential(accountId: a.id)?.sessionId, "manual-winner")
         credentials.savePushCredential(PushCredential(account: a, password: "fixture-password-a", sessionId: "sid-a"))
+    }
+
+    /// pi 1001c P2: a heal answered for another user (uid mismatch → `.credentialRejected`) must not
+    /// revoke a session id that is the one currently stored — that session is held, not unpublished.
+    func test_apporo_healUidMismatch_neverRevokesTheCurrentlyStoredSession() async throws {
+        let c = OdooAccount(id: "push-c", serverUrl: "https://push.invalid:8443/base", database: "db-c",
+                            username: "same", displayName: "Fixture C", userId: 99)
+        let rows = PushAccounts([c])
+        let stored = PushCredential(account: c, password: "fixture-password-c", sessionId: "sid-same")
+        credentials.savePushCredential(stored)
+        PushContractURLProtocol.reset([.auth("sid-same")])   // uid 7 ≠ 99
+        let outcome = await healer.heal(account: c, credential: stored, api: api,
+                                        storage: credentials, accounts: rows)
+        XCTAssertEqual(outcome, .credentialRejected)
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertFalse(PushContractURLProtocol.destroyedCookies.contains("session_id=sid-same"),
+                       "the currently stored session is never revoked as 'unpublished'")
+        credentials.deletePushCredential(accountId: c.id)
     }
 
     func test_apporo_healHeld_removeWinsWithoutResurrection() async throws {

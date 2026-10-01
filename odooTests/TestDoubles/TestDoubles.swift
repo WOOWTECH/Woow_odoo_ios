@@ -94,21 +94,14 @@ final class MockSecureStorage: SecureStorageProtocol, @unchecked Sendable {
         // No-op in mock — migration only applies to real Keychain
     }
 
-    // H3: Session cookie storage
-    func saveSessionId(serverUrl: String, username: String, sessionId: String) {
-        let host = URL(string: serverUrl)?.host ?? serverUrl
-        store["session_\(host)_\(username)"] = sessionId
-    }
+    // H3: Session cookie storage — keyed by saved account id (pi 1001c), like SecureStorage.
+    func saveSessionId(accountId: String, sessionId: String) { store["session_acct_\(accountId)"] = sessionId }
 
-    func getSessionId(serverUrl: String, username: String) -> String? {
-        let host = URL(string: serverUrl)?.host ?? serverUrl
-        return store["session_\(host)_\(username)"]
-    }
+    func getSessionId(accountId: String) -> String? { store["session_acct_\(accountId)"] }
 
-    func deleteSessionId(serverUrl: String, username: String) {
-        let host = URL(string: serverUrl)?.host ?? serverUrl
-        store.removeValue(forKey: "session_\(host)_\(username)")
-    }
+    func deleteSessionId(accountId: String) { store.removeValue(forKey: "session_acct_\(accountId)") }
+
+    func migrateSessionKeys(accounts: [OdooAccount]) {}
 }
 
 // MARK: - MockPushTokenRepository

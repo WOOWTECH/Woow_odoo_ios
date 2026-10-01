@@ -23,13 +23,15 @@ import XCTest
 private final class WoowHardeningURLProtocol: URLProtocol {
     struct Script { var sid: String; var maxAge: Int? = nil; var hold = false }
     private static let lock = NSLock()
-    private static var scripts: [String: Script] = [:]
+    private static var scripts: [String: [Script]] = [:]
     private static var _authLogins: [String] = []
     private static var _destroyed: [String] = []
     private static var heldDeliveries: [() -> Void] = []
 
-    static func reset(_ scripts: [String: Script]) {
-        lock.lock(); self.scripts = scripts; _authLogins = []; _destroyed = []; heldDeliveries = []; lock.unlock()
+    static func reset(_ scripts: [String: Script]) { reset(sequences: scripts.mapValues { [$0] }) }
+    /// One script per authenticate request for that login, in order; the last one repeats.
+    static func reset(sequences: [String: [Script]]) {
+        lock.lock(); self.scripts = sequences; _authLogins = []; _destroyed = []; heldDeliveries = []; lock.unlock()
     }
     static var authLogins: [String] { lock.lock(); defer { lock.unlock() }; return _authLogins }
     static var destroyed: [String] { lock.lock(); defer { lock.unlock() }; return _destroyed }
@@ -53,7 +55,9 @@ private final class WoowHardeningURLProtocol: URLProtocol {
         let login = params?["login"] as? String ?? "", db = params?["db"] as? String ?? ""
         Self.lock.lock()
         Self._authLogins.append(login)
-        let script = Self.scripts[login] ?? Script(sid: "sid-\(login)")
+        var queue = Self.scripts[login] ?? []
+        let script = queue.first ?? Script(sid: "sid-\(login)")
+        if queue.count > 1 { queue.removeFirst(); Self.scripts[login] = queue }
         Self.lock.unlock()
         var cookie = "session_id=\(script.sid); Path=/; Secure; HttpOnly"
         if let maxAge = script.maxAge { cookie += "; Max-Age=\(maxAge)" }
@@ -132,7 +136,7 @@ final class WoowLoginSwitchHardeningTests: XCTestCase {
     override func tearDown() async throws {
         WoowHardeningURLProtocol.releaseHeld()
         for account in repo.getAllAccounts() {
-            keychain.deleteSessionId(serverUrl: account.fullServerUrl, username: account.username)
+            keychain.deleteSessionId(accountId: account.id)
             keychain.deletePassword(serverUrl: account.fullServerUrl, username: account.username)
         }
         jar.cookies(for: URL(string: server)!)?.forEach { jar.deleteCookie($0) }
@@ -143,6 +147,11 @@ final class WoowLoginSwitchHardeningTests: XCTestCase {
     private func putJarSession(_ value: String) {
         jar.setCookie(HTTPCookie(properties: [.name: "session_id", .value: value, .domain: host,
                                               .path: "/", .secure: "TRUE"])!)
+    }
+
+    /// The Keychain session copy of the saved account with this username.
+    private func storedSession(_ username: String) -> String? {
+        repo.getAllAccounts().first { $0.username == username }.flatMap { keychain.getSessionId(accountId: $0.id) }
     }
 
     private var jarSessionIds: [String] {
@@ -190,7 +199,7 @@ final class WoowLoginSwitchHardeningTests: XCTestCase {
         XCTAssertFalse(result.isSuccess, "a login whose session can no longer be published must fail")
         XCTAssertEqual(repo.getActiveAccount()?.username, "tester", "the previous account stays active")
         XCTAssertEqual(jarSessionIds, ["sid-a"], "the jar keeps the previous account's session")
-        XCTAssertNil(keychain.getSessionId(serverUrl: server, username: "mate"))
+        XCTAssertNil(repo.getAllAccounts().first { $0.username == "mate" }, "B was never added")
         let ids = await revoked(waitingFor: 1)
         XCTAssertEqual(ids, ["sid-b"], "the created-but-unpublished session is revoked")
     }
@@ -213,8 +222,7 @@ final class WoowLoginSwitchHardeningTests: XCTestCase {
         XCTAssertFalse(switched)
         XCTAssertEqual(repo.getActiveAccount()?.username, "tester", "the previous account stays active")
         XCTAssertEqual(jarSessionIds, ["sid-a"], "B never borrows A's session through the jar")
-        XCTAssertEqual(keychain.getSessionId(serverUrl: server, username: "mate"), "sid-b-old",
-                       "B's stored session is untouched")
+        XCTAssertEqual(storedSession("mate"), "sid-b-old", "B's stored session is untouched")
         let ids = await revoked(waitingFor: 1)
         XCTAssertEqual(ids, ["sid-b-new"], "only the unpublished new session is revoked")
     }
@@ -245,8 +253,7 @@ final class WoowLoginSwitchHardeningTests: XCTestCase {
         XCTAssertFalse(lateB, "B's late answer must not win over the newer selection")
         XCTAssertEqual(repo.getActiveAccount()?.id, c.id, "C stays active")
         XCTAssertEqual(jarSessionIds, ["sid-c-new"], "C's session stays in the jar")
-        XCTAssertEqual(keychain.getSessionId(serverUrl: server, username: "mate"), "sid-b-old",
-                       "B's stored session is untouched")
+        XCTAssertEqual(storedSession("mate"), "sid-b-old", "B's stored session is untouched")
         let ids = Set(await revoked(waitingFor: 2))
         XCTAssertTrue(ids.contains("sid-b-new"), "B's unpublished session is revoked")
         XCTAssertTrue(ids.contains("sid-c-old"), "C's replaced session is revoked")
@@ -259,13 +266,13 @@ final class WoowLoginSwitchHardeningTests: XCTestCase {
     func test_relogin_sameAccount_revokesReplacedSession() async throws {
         repo.replaceAccountsForTesting([SeededAccount(serverURL: server, database: "db", username: "tester",
                                                       sessionCookie: "sid-a-old", isActive: true)])
-        XCTAssertEqual(keychain.getSessionId(serverUrl: server, username: "tester"), "sid-a-old", "precondition")
+        XCTAssertEqual(storedSession("tester"), "sid-a-old", "precondition")
         WoowHardeningURLProtocol.reset(["tester": .init(sid: "sid-a-new")])
 
         let result = await repo.authenticate(serverUrl: server, database: "db", username: "tester", password: "pw-a")
 
         XCTAssertTrue(result.isSuccess)
-        XCTAssertEqual(keychain.getSessionId(serverUrl: server, username: "tester"), "sid-a-new")
+        XCTAssertEqual(storedSession("tester"), "sid-a-new")
         XCTAssertEqual(jarSessionIds, ["sid-a-new"])
         let ids = await revoked(waitingFor: 1)
         XCTAssertEqual(ids, ["sid-a-old"], "the replaced session is revoked after the commit")
@@ -285,4 +292,137 @@ final class WoowLoginSwitchHardeningTests: XCTestCase {
         let ids = await revoker.sessionIds
         XCTAssertFalse(ids.contains("sid-shared"), "a session another account holds is never revoked")
     }
+
+    // MARK: - pi 1001c
+
+    private func revoked(containing sessionId: String) async -> [String] {
+        var ids: [String] = []
+        for _ in 0..<200 {
+            ids = await revoker.sessionIds
+            if ids.contains(sessionId) { break }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return ids
+    }
+
+    /// P1: login 1 has committed the account and the jar but not yet its Keychain copy; login 2 to
+    /// the same account commits fully; then login 1 resumes. The Keychain copy must still be the live
+    /// (jar) session — observed through logout, which revokes the Keychain copy.
+    func test_twoSameAccountLogins_keychainCopyFollowsTheLiveSession() async throws {
+        repo.replaceAccountsForTesting([SeededAccount(serverURL: server, database: "db", username: "tester",
+                                                      sessionCookie: "sid-a0", isActive: true)])
+        WoowHardeningURLProtocol.reset(sequences: ["tester": [.init(sid: "sid-a1"), .init(sid: "sid-a2")]])
+        let committed = expectation(description: "login 1 committed")
+        let gate = DispatchSemaphore(value: 0)
+        let calls = CallCounter()
+        repo.afterLoginCommitForTesting = {
+            guard calls.next() == 1 else { return }
+            committed.fulfill()
+            if !Thread.isMainThread { _ = gate.wait(timeout: .now() + 10) }
+        }
+
+        let login1 = Task { await repo.authenticate(serverUrl: server, database: "db", username: "tester", password: "pw") }
+        await fulfillment(of: [committed], timeout: 10)
+        let login2 = await repo.authenticate(serverUrl: server, database: "db", username: "tester", password: "pw")
+        XCTAssertTrue(login2.isSuccess)
+        gate.signal()
+        _ = await login1.value
+        repo.afterLoginCommitForTesting = nil
+
+        XCTAssertEqual(jarSessionIds, ["sid-a2"], "the later login's session is the live one")
+        let account = try XCTUnwrap(repo.getActiveAccount())
+        await repo.logout(accountId: account.id)
+        let ids = await revoked(containing: "sid-a2")
+        XCTAssertTrue(ids.contains("sid-a2"),
+                      "logout revokes the live session — the Keychain copy must not be the earlier login's")
+    }
+
+    /// P1: a notification tap activating C is a newer selection than a pending switch to B.
+    func test_switchHeld_notificationActivatesOther_lateSwitchChangesNothing() async throws {
+        repo.replaceAccountsForTesting([
+            SeededAccount(serverURL: server, database: "db", username: "tester", sessionCookie: "sid-a", isActive: true),
+            SeededAccount(serverURL: server, database: "db", username: "mate", sessionCookie: "sid-b-old", isActive: false),
+            SeededAccount(serverURL: server, database: "db", username: "third", sessionCookie: "sid-c", isActive: false),
+        ])
+        let b = try XCTUnwrap(repo.getAllAccounts().first { $0.username == "mate" })
+        let c = try XCTUnwrap(repo.getAllAccounts().first { $0.username == "third" })
+        keychain.savePassword(serverUrl: server, username: "mate", password: "pw-b")
+        WoowHardeningURLProtocol.reset(["mate": .init(sid: "sid-b-new", hold: true)])
+
+        let toB = Task { await repo.switchAccount(id: b.id) }
+        await waitForAuthRequests(1)
+        XCTAssertTrue(repo.activateAccount(id: c.id), "the notification selects C")
+        WoowHardeningURLProtocol.releaseHeld()
+        let lateB = await toB.value
+
+        XCTAssertFalse(lateB, "B's late answer must not override the notification's selection")
+        XCTAssertEqual(repo.getActiveAccount()?.id, c.id)
+        XCTAssertFalse(jarSessionIds.contains("sid-b-new"), "B's new session is never published")
+        let ids = await revoked(containing: "sid-b-new")
+        XCTAssertTrue(ids.contains("sid-b-new"), "B's unpublished session is revoked")
+    }
+
+    /// P1: logging B out while B's re-login is in flight — the late login must not bring B back.
+    func test_loginHeld_logoutSameAccount_lateLoginDoesNotResurrect() async throws {
+        try await assertLateLoginDoesNotResurrect { repo, id in await repo.logout(accountId: id) }
+    }
+
+    /// P1: the same for removing B.
+    func test_loginHeld_removeSameAccount_lateLoginDoesNotResurrect() async throws {
+        try await assertLateLoginDoesNotResurrect { repo, id in await repo.removeAccount(id: id) }
+    }
+
+    private func assertLateLoginDoesNotResurrect(
+        _ remove: (AccountRepository, String) async -> Void
+    ) async throws {
+        repo.replaceAccountsForTesting([
+            SeededAccount(serverURL: server, database: "db", username: "tester", sessionCookie: "sid-a", isActive: true),
+            SeededAccount(serverURL: server, database: "db", username: "mate", sessionCookie: "sid-b-old", isActive: false),
+        ])
+        let b = try XCTUnwrap(repo.getAllAccounts().first { $0.username == "mate" })
+        WoowHardeningURLProtocol.reset(["mate": .init(sid: "sid-b-new", hold: true)])
+
+        let login = Task { await repo.authenticate(serverUrl: server, database: "db", username: "mate", password: "pw-b") }
+        await waitForAuthRequests(1)
+        await remove(repo, b.id)
+        WoowHardeningURLProtocol.releaseHeld()
+        let result = await login.value
+
+        XCTAssertFalse(result.isSuccess, "a login superseded by removing its account must not commit")
+        XCTAssertFalse(repo.getAllAccounts().contains { $0.username == "mate" }, "the removed account stays removed")
+        XCTAssertEqual(repo.getActiveAccount()?.username, "tester")
+        XCTAssertFalse(jarSessionIds.contains("sid-b-new"))
+        let ids = await revoked(containing: "sid-b-new")
+        XCTAssertTrue(ids.contains("sid-b-new"), "the unpublished session is revoked")
+    }
+
+    /// P1: two databases on one host with the same username are two accounts. Re-logging into one
+    /// must neither revoke nor overwrite the other's stored session.
+    func test_sameHostSameUsernameOtherDatabase_sessionsStaySeparate() async throws {
+        repo.replaceAccountsForTesting([
+            SeededAccount(serverURL: server, database: "db1", username: "tester", sessionCookie: "sid-1", isActive: true),
+            SeededAccount(serverURL: server, database: "db2", username: "tester", sessionCookie: "sid-2", isActive: false),
+        ])
+        let other = try XCTUnwrap(repo.getAllAccounts().first { $0.database == "db2" })
+        WoowHardeningURLProtocol.reset(["tester": .init(sid: "sid-1n")])
+
+        let result = await repo.authenticate(serverUrl: server, database: "db1", username: "tester", password: "pw-1")
+        XCTAssertTrue(result.isSuccess)
+        let afterLogin = await revoked(containing: "sid-1")
+        XCTAssertTrue(afterLogin.contains("sid-1"), "db1's own replaced session is revoked")
+        XCTAssertFalse(afterLogin.contains("sid-2"), "db2's session belongs to another account")
+
+        await repo.logout(accountId: other.id)
+        let afterLogout = await revoked(containing: "sid-2")
+        XCTAssertTrue(afterLogout.contains("sid-2"), "logging db2 out revokes db2's own session")
+        XCTAssertFalse(afterLogout.contains("sid-1n"), "db1's live session is never revoked by db2's logout")
+        XCTAssertEqual(repo.getActiveAccount()?.database, "db1")
+    }
+}
+
+/// Thread-safe call counter for the login-commit test seam.
+private final class CallCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    func next() -> Int { lock.lock(); defer { lock.unlock() }; count += 1; return count }
 }

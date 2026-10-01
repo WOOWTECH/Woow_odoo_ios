@@ -133,8 +133,7 @@ final class HonestLogoutS4Tests: XCTestCase {
         // Clean up the shared Keychain singleton so tests stay independent.
         secureStorage.deletePassword(serverUrl: serverA, username: "admin")
         secureStorage.deletePassword(serverUrl: serverB, username: "admin")
-        secureStorage.deleteSessionId(serverUrl: serverA, username: "admin")
-        secureStorage.deleteSessionId(serverUrl: serverB, username: "admin")
+        for account in repo?.getAllAccounts() ?? [] { secureStorage.deleteSessionId(accountId: account.id) }
         secureStorage.deleteFcmToken()
         LogoutURLProtocol.reset()
         repo = nil
@@ -153,6 +152,7 @@ final class HonestLogoutS4Tests: XCTestCase {
         XCTAssertEqual(repo.getActiveAccount()?.database, "demo888", "precondition: B active")
         XCTAssertNotNil(secureStorage.getPassword(serverUrl: serverB, username: "admin"),
                         "precondition: B's password is stored")
+        let bId = repo.getActiveAccount()?.id ?? ""
 
         await repo.logout(accountId: nil) // logs out the active account (B)
 
@@ -171,7 +171,7 @@ final class HonestLogoutS4Tests: XCTestCase {
         // (b2) B's stored credentials are cleared.
         XCTAssertNil(secureStorage.getPassword(serverUrl: serverB, username: "admin"),
                      "honest logout must clear B's stored password")
-        XCTAssertNil(secureStorage.getSessionId(serverUrl: serverB, username: "admin"),
+        XCTAssertNil(secureStorage.getSessionId(accountId: bId),
                      "honest logout must clear B's stored session id")
     }
 
@@ -191,7 +191,7 @@ final class HonestLogoutS4Tests: XCTestCase {
         // A's credentials are intact.
         XCTAssertEqual(secureStorage.getPassword(serverUrl: serverA, username: "admin"), passwordA,
                        "the sibling A's stored password must be untouched")
-        XCTAssertEqual(secureStorage.getSessionId(serverUrl: serverA, username: "admin"), sessionA,
+        XCTAssertEqual(secureStorage.getSessionId(accountId: active?.id ?? ""), sessionA,
                        "the sibling A's stored session id must be untouched")
 
         // A's push registration is left alone — unregister was scoped to B only.

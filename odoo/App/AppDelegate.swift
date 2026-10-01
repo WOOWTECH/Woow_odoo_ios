@@ -217,7 +217,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 let serverUrl = entity.serverUrl ?? ""
                 let username = entity.username ?? ""
                 SecureStorage.shared.deletePassword(serverUrl: serverUrl, username: username)
-                SecureStorage.shared.deleteSessionId(serverUrl: serverUrl, username: username)
+                SecureStorage.shared.deleteSessionId(accountId: entity.id)
                 context.delete(entity)
             }
             try? context.save()

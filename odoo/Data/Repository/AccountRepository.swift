@@ -36,6 +36,11 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
     private let webDataCleaner: AccountWebDataCleaning
     /// Best-effort server revoke of one session (`serverUrl`, `sessionId`). Injectable for tests.
     private let revokeSession: @Sendable (String, String) async -> Void
+#if DEBUG
+    /// Test seam (pi 1001c): runs once a manual login's commit has returned, so a test can order a
+    /// second login against it.
+    nonisolated(unsafe) var afterLoginCommitForTesting: (@Sendable () -> Void)?
+#endif
 
     init(
         persistence: PersistenceController = .shared,
@@ -92,6 +97,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
     private func migratePasswordKeysIfNeeded() {
         let accounts = getAllAccounts()
         secureStorage.migratePasswordKeys(accounts: accounts)
+        secureStorage.migrateSessionKeys(accounts: accounts)
     }
 
     func authenticate(serverUrl: String, database: String, username: String, password: String) async -> AuthResult {
@@ -103,7 +109,10 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         let attempt = await PushManualLoginOrder.begin()
         // pi 1001b (P2): a re-login to the same account replaces its stored session; revoke it after
         // the commit (WOOW below) instead of leaving it valid and untracked on the server.
-        let replacedSessionId = secureStorage.getSessionId(serverUrl: fullUrl, username: username)
+        let replacedSessionId = await MainActor.run { () -> String? in
+            getAllAccounts().first { $0.fullServerUrl == fullUrl && $0.database == database && $0.username == username }
+                .flatMap { secureStorage.getSessionId(accountId: $0.id) }
+        }
         // demo111 1001 (defect 2): both brands log in WITHOUT the shared jar. The WOOW login used to
         // send the jar's session_id — another same-host account's — and Odoo re-authenticated THAT
         // session as this user and rotated it, logging the other account out on the server.
@@ -165,7 +174,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
                     PushRegistrationStatusStore.shared.set(.notRegistered, for: saved.id)
                     // Keep legacy UI credentials in the same winning-login transaction.
                     secureStorage.savePassword(serverUrl: fullUrl, username: username, password: password)
-                    secureStorage.saveSessionId(serverUrl: fullUrl, username: username, sessionId: auth.sessionId)
+                    secureStorage.saveSessionId(accountId: saved.id, sessionId: auth.sessionId)
                     // Only the winning manual login publishes to the legacy WebView jar.
                     // Push healing uses the isolated response SID without publishing it.
                     HTTPCookieStorage.shared.setCookie(cookie)
@@ -182,6 +191,9 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
                 revokeUnpublishedSession(auth.sessionId, serverUrl: fullUrl)
                 return rejection
             }
+#if DEBUG
+            afterLoginCommitForTesting?()
+#endif
             if brand == .apporo { return result }
 
             // Save password in Keychain, scoped to this server + username
@@ -191,11 +203,14 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
             // HTTPCookieStorage still holds the cookie for URLSession network requests,
             // but the Keychain copy is protected against backup extraction and jailbroken
             // device file access (kSecAttrAccessibleWhenUnlockedThisDeviceOnly).
-            if !auth.sessionId.isEmpty {
-                secureStorage.saveSessionId(serverUrl: fullUrl, username: username, sessionId: auth.sessionId)
+            let savedId = await MainActor.run {
+                getAllAccounts().first { $0.fullServerUrl == fullUrl && $0.database == database && $0.username == username }?.id
             }
-            if let old = replacedSessionId, !old.isEmpty, old != auth.sessionId {
-                let heldElsewhere = await isSessionHeldByAnotherAccount(old, serverUrl: fullUrl, username: username)
+            if !auth.sessionId.isEmpty, let savedId {
+                secureStorage.saveSessionId(accountId: savedId, sessionId: auth.sessionId)
+            }
+            if let old = replacedSessionId, !old.isEmpty, old != auth.sessionId, let savedId {
+                let heldElsewhere = await isSessionHeldByAnotherAccount(old, accountId: savedId)
                 if !heldElsewhere {
                     let revoke = revokeSession
                     Task.detached { await revoke(fullUrl, old) }
@@ -206,13 +221,15 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         return result
     }
 
-    /// Whether another saved account (any other server/username) still stores `sessionId`; such a
-    /// session is never revoked on this account's behalf.
+    /// Whether another saved account still holds `sessionId` — its Keychain copy or its push
+    /// credential. pi 1001c: accounts are told apart by id (server + database + username), not by
+    /// server + username; such a session is never revoked on this account's behalf.
     @MainActor
-    private func isSessionHeldByAnotherAccount(_ sessionId: String, serverUrl: String, username: String) -> Bool {
+    private func isSessionHeldByAnotherAccount(_ sessionId: String, accountId: String) -> Bool {
         getAllAccounts().contains { other in
-            !(other.fullServerUrl == serverUrl && other.username == username) &&
-                secureStorage.getSessionId(serverUrl: other.fullServerUrl, username: other.username) == sessionId
+            other.id != accountId &&
+                (secureStorage.getSessionId(accountId: other.id) == sessionId ||
+                 pushCredentials.pushCredential(accountId: other.id)?.sessionId == sessionId)
         }
     }
 
@@ -349,7 +366,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         // over the shared jar — it carries the current (often same-host) account's session_id, and
         // Odoo would re-authenticate and rotate THAT session as the target user, logging the current
         // account out on the server. The target gets a session of its own instead.
-        let replacedSessionId = secureStorage.getSessionId(serverUrl: account.fullServerUrl, username: account.username)
+        let replacedSessionId = secureStorage.getSessionId(accountId: account.id)
         var targetSession: HTTPCookie?
         var freshSessionId: String?
         if let password = secureStorage.getPassword(serverUrl: account.fullServerUrl, username: account.username) {
@@ -396,11 +413,10 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         let saved = (try? context.save()) != nil
         if saved, let targetSession {
             // The jar holds the active account's session (legacy requests, WebView) — the target's.
-            secureStorage.saveSessionId(serverUrl: account.fullServerUrl, username: account.username,
-                                        sessionId: targetSession.value)
+            secureStorage.saveSessionId(accountId: account.id, sessionId: targetSession.value)
             HTTPCookieStorage.shared.setCookie(targetSession)
             if let old = replacedSessionId, !old.isEmpty, old != targetSession.value,
-               !isSessionHeldByAnotherAccount(old, serverUrl: account.fullServerUrl, username: account.username) {
+               !isSessionHeldByAnotherAccount(old, accountId: account.id) {
                 let revoke = revokeSession, serverUrl = account.fullServerUrl
                 Task.detached { await revoke(serverUrl, old) }
             }
@@ -487,8 +503,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         if selected.generation != captured.generation {
             PushRegistrationStatusStore.shared.set(.notRegistered, for: id)
         }
-        secureStorage.saveSessionId(serverUrl: account.fullServerUrl,
-            username: account.username, sessionId: selected.sessionId)
+        secureStorage.saveSessionId(accountId: account.id, sessionId: selected.sessionId)
         HTTPCookieStorage.shared.setCookie(cookie)
         NotificationCenter.default.post(name: .activeAccountDidChange, object: nil)
         return true
@@ -534,7 +549,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         // Unregister FCM token from THIS account's server (G9 — best-effort, never blocks logout).
         let removed = account.toDomainModel()
         await unregisterFcmToken(account: account.toDomainModel())
-        let keychainSessionId = secureStorage.getSessionId(serverUrl: account.serverUrl, username: account.username)
+        let keychainSessionId = secureStorage.getSessionId(accountId: removed.id)
 
         // F4 (0930): the WOOW brand shares one cookie jar across accounts. While another account on
         // the same host remains, remove only THIS account's session cookie — not the host's cookies,
@@ -550,7 +565,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         }
         secureStorage.deletePassword(serverUrl: account.serverUrl, username: account.username)
         // Delete the Keychain session_id copy so the session cannot be reused after logout.
-        secureStorage.deleteSessionId(serverUrl: account.serverUrl, username: account.username)
+        secureStorage.deleteSessionId(accountId: removed.id)
         pushCredentials.deletePushCredential(accountId: account.id)
         PushRegistrationStatusStore.shared.remove(accountId: account.id)
         context.delete(account)
@@ -591,10 +606,10 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         // Unregister FCM token from Odoo server (G9)
         let removed = entity.toDomainModel()
         await unregisterFcmToken(account: entity.toDomainModel())
-        let keychainSessionId = secureStorage.getSessionId(serverUrl: entity.serverUrl, username: entity.username)
+        let keychainSessionId = secureStorage.getSessionId(accountId: removed.id)
 
         secureStorage.deletePassword(serverUrl: entity.serverUrl, username: entity.username)
-        secureStorage.deleteSessionId(serverUrl: entity.serverUrl, username: entity.username)
+        secureStorage.deleteSessionId(accountId: removed.id)
         pushCredentials.deletePushCredential(accountId: entity.id)
         PushRegistrationStatusStore.shared.remove(accountId: entity.id)
         context.delete(entity)
@@ -620,11 +635,11 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
             let account = entity.toDomainModel()
             let credential = pushCredentials.pushCredential(accountId: account.id)
             let token = secureStorage.getFcmToken()
-            let keychainSessionId = secureStorage.getSessionId(serverUrl: account.serverUrl, username: account.username)
+            let keychainSessionId = secureStorage.getSessionId(accountId: account.id)
             pushCredentials.deletePushCredential(accountId: account.id)
             PushRegistrationStatusStore.shared.remove(accountId: account.id)
             secureStorage.deletePassword(serverUrl: account.serverUrl, username: account.username)
-            secureStorage.deleteSessionId(serverUrl: account.serverUrl, username: account.username)
+            secureStorage.deleteSessionId(accountId: account.id)
             if logout, let cookie = credential?.sessionCookie?.cookie() {
                 // Never clear another account's same-host jar cookie.
                 for existing in HTTPCookieStorage.shared.cookies ?? [] where
@@ -719,7 +734,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
                 let url = entity.serverUrl ?? ""
                 let user = entity.username ?? ""
                 secureStorage.deletePassword(serverUrl: url, username: user)
-                secureStorage.deleteSessionId(serverUrl: url, username: user)
+                secureStorage.deleteSessionId(accountId: entity.id)
                 context.delete(entity)
             }
         }
@@ -768,11 +783,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         }
 
         // Also save to Keychain so session reads via SecureStorage work.
-        secureStorage.saveSessionId(
-            serverUrl: seeded.serverURL.ensureHTTPS,
-            username: seeded.username,
-            sessionId: seeded.sessionCookie
-        )
+        secureStorage.saveSessionId(accountId: entity.id, sessionId: seeded.sessionCookie)
 
         print("[TestHook] replaceAccountsForTesting: installed \(seeded.username)@\(host) active=\(isActive) tenant=\(seeded.tenantId ?? "nil")")
     }

@@ -8,9 +8,12 @@ protocol SecureStorageProtocol: Sendable {
     func deletePassword(serverUrl: String, username: String)
     func migratePasswordKeys(accounts: [OdooAccount])
 
-    func saveSessionId(serverUrl: String, username: String, sessionId: String)
-    func getSessionId(serverUrl: String, username: String) -> String?
-    func deleteSessionId(serverUrl: String, username: String)
+    /// Session ids are keyed by the saved account's id (pi 1001c): host+username collided for two
+    /// databases on one host with the same username.
+    func saveSessionId(accountId: String, sessionId: String)
+    func getSessionId(accountId: String) -> String?
+    func deleteSessionId(accountId: String)
+    func migrateSessionKeys(accounts: [OdooAccount])
 }
 
 /// Keychain-backed secure storage for passwords, PIN hash, FCM token, and settings.
@@ -68,33 +71,53 @@ final class SecureStorage: SecureStorageProtocol, PushCredentialStorage, Sendabl
         }
     }
 
-    // MARK: - Session Cookie Storage (per account, scoped to server host)
+    // MARK: - Session Cookie Storage (per saved account)
 
-    /// Builds a Keychain key scoped to both the server host and username for the session_id cookie.
-    /// Uses the same host-only scoping strategy as password keys to ensure key uniqueness across
-    /// multi-tenant deployments where the same username can exist on multiple Odoo servers.
-    private func sessionKey(serverUrl: String, username: String) -> String {
+    /// pi 1001c: the session_id copy is keyed by the saved account's id. The former key
+    /// (`session_{host}_{username}`) collided when one host served two databases with the same
+    /// username, so one account's session was read, replaced or revoked as the other's.
+    private func sessionKey(accountId: String) -> String { "session_acct_\(accountId)" }
+
+    /// The former host+username key, read only by ``migrateSessionKeys(accounts:)``.
+    private func legacySessionKey(serverUrl: String, username: String) -> String {
         let host = URL(string: serverUrl)?.host ?? serverUrl
         return "session_\(host)_\(username)"
     }
 
-    /// Saves the Odoo session_id cookie value to Keychain for a specific account.
+    /// Saves the Odoo session_id cookie value to Keychain for one saved account.
     /// Storing the session in Keychain (hardware-backed, excluded from backups) instead of
     /// relying solely on HTTPCookieStorage (plaintext on disk) prevents session hijacking via
     /// backup extraction, MDM forensics tools, and jailbroken device file access.
-    func saveSessionId(serverUrl: String, username: String, sessionId: String) {
-        save(key: sessionKey(serverUrl: serverUrl, username: username), value: sessionId)
+    func saveSessionId(accountId: String, sessionId: String) {
+        guard !accountId.isEmpty else { return }
+        save(key: sessionKey(accountId: accountId), value: sessionId)
     }
 
-    /// Retrieves the stored session_id for an account from Keychain.
-    func getSessionId(serverUrl: String, username: String) -> String? {
-        get(key: sessionKey(serverUrl: serverUrl, username: username))
+    /// Retrieves the stored session_id for one saved account from Keychain.
+    func getSessionId(accountId: String) -> String? {
+        guard !accountId.isEmpty else { return nil }
+        return get(key: sessionKey(accountId: accountId))
     }
 
-    /// Deletes the session_id for an account from Keychain. Call on logout to ensure
-    /// the session cannot be reused after the user explicitly signs out.
-    func deleteSessionId(serverUrl: String, username: String) {
-        delete(key: sessionKey(serverUrl: serverUrl, username: username))
+    /// Deletes one saved account's session_id. Call on logout so the session cannot be reused.
+    func deleteSessionId(accountId: String) {
+        guard !accountId.isEmpty else { return }
+        delete(key: sessionKey(accountId: accountId))
+    }
+
+    /// Moves each legacy host+username session copy to its account's key. A legacy key shared by
+    /// two or more saved accounts (same host and username, different databases) cannot say whose
+    /// session it was: it is dropped, not guessed — that account signs in again or self-heals.
+    /// Idempotent: legacy keys are deleted once processed.
+    func migrateSessionKeys(accounts: [OdooAccount]) {
+        let groups = Dictionary(grouping: accounts) { legacySessionKey(serverUrl: $0.fullServerUrl, username: $0.username) }
+        for (legacyKey, owners) in groups {
+            guard let legacy = get(key: legacyKey) else { continue }
+            if owners.count == 1, let owner = owners.first, getSessionId(accountId: owner.id) == nil {
+                saveSessionId(accountId: owner.id, sessionId: legacy)
+            }
+            delete(key: legacyKey)
+        }
     }
 
     // MARK: - Account-ID scoped Apporo push credentials

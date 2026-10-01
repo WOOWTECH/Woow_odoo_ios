@@ -367,7 +367,7 @@ final class AccountRepositoryTests: XCTestCase {
         secureStorage.deletePushCredential(accountId: account.id)
         defer {
             secureStorage.deletePushCredential(accountId: account.id)
-            secureStorage.deleteSessionId(serverUrl: account.fullServerUrl, username: account.username)
+            secureStorage.deleteSessionId(accountId: account.id)
             if let url = URL(string: account.fullServerUrl) {
                 for cookie in HTTPCookieStorage.shared.cookies(for: url) ?? [] {
                     HTTPCookieStorage.shared.deleteCookie(cookie)

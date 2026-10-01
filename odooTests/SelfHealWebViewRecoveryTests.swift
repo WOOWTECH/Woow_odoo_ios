@@ -154,7 +154,7 @@ final class SelfHealWebViewRecoveryTests: XCTestCase {
         let storage = MockSecureStorage()
         for a in accounts {
             storage.savePassword(serverUrl: a.fullServerUrl, username: a.username, password: "pw-\(a.username)")
-            if let sid = sessions[a.username] { storage.saveSessionId(serverUrl: a.fullServerUrl, username: a.username, sessionId: sid) }
+            if let sid = sessions[a.username] { storage.saveSessionId(accountId: a.id, sessionId: sid) }
         }
         return storage
     }
@@ -250,7 +250,7 @@ final class SelfHealWebViewRecoveryTests: XCTestCase {
         XCTAssertEqual(saved, pushHealed, "the concurrently refreshed credential is kept")
         XCTAssertEqual(observer.posts.map(\.cookie), ["sid-pushheal"],
                        "the WebView gets the credential's session, the one a switch reuses")
-        XCTAssertEqual(keychain.getSessionId(serverUrl: b.fullServerUrl, username: b.username), "sid-pushheal")
+        XCTAssertEqual(keychain.getSessionId(accountId: b.id), "sid-pushheal")
         await waitUntil(RecoveryURLProtocol.destroyed.count == 2)
         XCTAssertEqual(Set(RecoveryURLProtocol.destroyed), ["sid-old", "sid-webheal"],
                        "the dead session and the heal's own unused session are revoked; the credential's is kept")
