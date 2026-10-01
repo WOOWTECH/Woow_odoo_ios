@@ -119,7 +119,11 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
             // session copy, and the replaced-session decision. Nothing is written after the fence, so a
             // later login to the same account can never be overwritten by an earlier one resuming.
             let outcome = await MainActor.run { () -> (rejection: AuthResult?, replaced: String?) in
-                if !PushManualLoginOrder.isCurrent(attempt) {
+                // pi 1001c (P1): an account being logged out or removed is not brought back by a login
+                // that raced the removal (its order is invalidated before the removal's first await;
+                // a login started during the removal is refused here).
+                if !PushManualLoginOrder.isCurrent(attempt) ||
+                    AccountRemovalFence.isRemoving(serverUrl: fullUrl, database: database, username: username) {
                     return (.error(String(localized: "error_login_superseded"), .unknown), nil)
                 }
                 // A short-lived response cookie may expire while waiting to commit. pi 1001b (P1): for
@@ -534,7 +538,11 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         }
 
         guard let account else { return }
-        if brand == .apporo { PushManualLoginOrder.invalidate() }
+        // pi 1001c (P1): before any await — an in-flight login or switch can no longer commit, and a
+        // login started while this logout runs cannot re-add the account.
+        PushManualLoginOrder.invalidate()
+        let fenceKey = AccountRemovalFence.begin(account.toDomainModel())
+        defer { AccountRemovalFence.end(fenceKey) }
         let wasActive = account.isActive
 
         // Unregister FCM token from THIS account's server (G9 — best-effort, never blocks logout).
@@ -593,7 +601,10 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         let context = persistence.container.viewContext
         guard let entity = (try? context.fetch(OdooAccountEntity.fetchByIdRequest(id: id)))?.first else { return }
 
-        if brand == .apporo { PushManualLoginOrder.invalidate() }
+        // pi 1001c (P1): see ``logout(accountId:)`` — fenced before any await.
+        PushManualLoginOrder.invalidate()
+        let fenceKey = AccountRemovalFence.begin(entity.toDomainModel())
+        defer { AccountRemovalFence.end(fenceKey) }
         // Unregister FCM token from Odoo server (G9)
         let removed = entity.toDomainModel()
         await unregisterFcmToken(account: entity.toDomainModel())
@@ -779,6 +790,28 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         print("[TestHook] replaceAccountsForTesting: installed \(seeded.username)@\(host) active=\(isActive) tenant=\(seeded.tenantId ?? "nil")")
     }
 #endif
+}
+
+/// pi 1001c: identities whose logout/removal is in progress. A login committing for one of them
+/// is refused, so a removed account is never resurrected by a login that raced the removal.
+@MainActor
+enum AccountRemovalFence {
+    private static var removing: [String: Int] = [:]
+    private static func key(_ serverUrl: String, _ database: String, _ username: String) -> String {
+        "\(serverUrl.ensureHTTPS)|\(database)|\(username)"
+    }
+    static func begin(_ account: OdooAccount) -> String {
+        let k = key(account.serverUrl, account.database, account.username)
+        removing[k, default: 0] += 1
+        return k
+    }
+    static func end(_ key: String) {
+        guard let count = removing[key] else { return }
+        if count <= 1 { removing.removeValue(forKey: key) } else { removing[key] = count - 1 }
+    }
+    static func isRemoving(serverUrl: String, database: String, username: String) -> Bool {
+        removing[key(serverUrl, database, username)] != nil
+    }
 }
 
 /// A late Apporo login or switch cannot replace a newer explicit selection.
