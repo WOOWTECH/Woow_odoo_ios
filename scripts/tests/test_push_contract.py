@@ -80,7 +80,7 @@ def assert_cookie_policy(auth, account, credential, web):
     for required in ["propertiesData", "cookie.properties", "cookie.expiresDate", "matchesDomain, matchesPath",
                      "encoded.removeValue(forKey: HTTPCookiePropertyKey.maximumAge.rawValue)"]:
         assert required in auth
-    manual = account.split("let rejection = await MainActor.run", 1)[1].split("if let rejection {", 1)[0]
+    manual = account.split("let outcome = await MainActor.run", 1)[1].split("if let rejection = outcome.rejection {", 1)[0]
     assert "let cookie = auth.sessionCookie?.cookie()" in manual
     # pi 1001b (P1): the "no usable response cookie → reject" rule now covers BOTH brands (it used to
     # be `brand == .apporo && cookie == nil`); the response SID must be the cookie's value.
@@ -187,7 +187,7 @@ class PushContractSourceTests(unittest.TestCase):
             self.assertNotIn(forbidden, credential)
         account = source("odoo/Data/Repository/AccountRepository.swift")
         self.assertIn("PushManualLoginOrder.isCurrent(attempt)", account)
-        guarded = account.split("let rejection = await MainActor.run", 1)[1].split("if let rejection {", 1)[0]
+        guarded = account.split("let outcome = await MainActor.run", 1)[1].split("if let rejection = outcome.rejection {", 1)[0]
         self.assertLess(guarded.index("PushManualLoginOrder.isCurrent(attempt)"), guarded.index("$0.isActive = false"))
         self.assertIn("secureStorage.saveSessionId(", guarded)
         self.assertIn("HTTPCookieStorage.shared.setCookie(cookie)", guarded)

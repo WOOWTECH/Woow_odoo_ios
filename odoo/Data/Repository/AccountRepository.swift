@@ -107,12 +107,6 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         // pi 1001b (P1): logins and switches share one selection order for both brands — a later
         // selection supersedes this login, and this login supersedes an in-flight switch.
         let attempt = await PushManualLoginOrder.begin()
-        // pi 1001b (P2): a re-login to the same account replaces its stored session; revoke it after
-        // the commit (WOOW below) instead of leaving it valid and untracked on the server.
-        let replacedSessionId = await MainActor.run { () -> String? in
-            getAllAccounts().first { $0.fullServerUrl == fullUrl && $0.database == database && $0.username == username }
-                .flatMap { secureStorage.getSessionId(accountId: $0.id) }
-        }
         // demo111 1001 (defect 2): both brands log in WITHOUT the shared jar. The WOOW login used to
         // send the jar's session_id — another same-host account's — and Odoo re-authenticated THAT
         // session as this user and rotated it, logging the other account out on the server.
@@ -121,9 +115,12 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
 
         if case .success(let auth) = result {
             let context = persistence.container.viewContext
-            let rejection = await MainActor.run { () -> AuthResult? in
+            // pi 1001c (P1): ONE fenced main-actor commit — account row, jar, Keychain password and
+            // session copy, and the replaced-session decision. Nothing is written after the fence, so a
+            // later login to the same account can never be overwritten by an earlier one resuming.
+            let outcome = await MainActor.run { () -> (rejection: AuthResult?, replaced: String?) in
                 if !PushManualLoginOrder.isCurrent(attempt) {
-                    return .error(String(localized: "error_login_superseded"), .unknown)
+                    return (.error(String(localized: "error_login_superseded"), .unknown), nil)
                 }
                 // A short-lived response cookie may expire while waiting to commit. pi 1001b (P1): for
                 // both brands — a WOOW success without a usable cookie used to activate this account
@@ -131,7 +128,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
                 // WebView then borrowed. No usable cookie from THIS response: nothing changes.
                 guard let cookie = auth.sessionCookie?.cookie(), !auth.sessionId.isEmpty,
                       cookie.value == auth.sessionId else {
-                    return .error(String(localized: "error_session_setup"), .serverError)
+                    return (.error(String(localized: "error_session_setup"), .serverError), nil)
                 }
                 // Deactivate all existing accounts
                 let allRequest = OdooAccountEntity.fetchAllRequest()
@@ -147,11 +144,13 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
                 )
                 let found = try? context.fetch(findRequest)
 
+                let savedId: String
                 if let existing = found?.first {
                     existing.displayName = auth.displayName
                     existing.userId = Int32(auth.userId)
                     existing.isActive = true
                     existing.createdAt = Date()
+                    savedId = existing.id
                 } else {
                     let entity = OdooAccountEntity(context: context)
                     entity.id = UUID().uuidString
@@ -162,9 +161,13 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
                     entity.userId = Int32(auth.userId)
                     entity.isActive = true
                     entity.createdAt = Date()
+                    savedId = entity.id
                 }
 
                 try? context.save()
+                // pi 1001b (P2): the session this re-login replaces — read inside the fence, so it is the
+                // one actually stored when this login wins.
+                let replaced = secureStorage.getSessionId(accountId: savedId)
                 if brand == .apporo,
                    let saved = getAllAccounts().first(where: {
                        $0.fullServerUrl == fullUrl && $0.database == database && $0.username == username && $0.isActive
@@ -178,15 +181,19 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
                     // Only the winning manual login publishes to the legacy WebView jar.
                     // Push healing uses the isolated response SID without publishing it.
                     HTTPCookieStorage.shared.setCookie(cookie)
+                    return (nil, nil)
                 }
                 // WOOW (1001, defect 2): the jar holds the ACTIVE account's session for the legacy
-                // requests and the WebView; publish the new account's response session to it.
-                if brand != .apporo {
-                    HTTPCookieStorage.shared.setCookie(cookie)
-                }
-                return nil
+                // requests and the WebView; publish the new account's response session to it, with the
+                // Keychain password and session copy (hardware-backed, kept out of backups).
+                HTTPCookieStorage.shared.setCookie(cookie)
+                secureStorage.savePassword(serverUrl: fullUrl, username: username, password: password)
+                secureStorage.saveSessionId(accountId: savedId, sessionId: auth.sessionId)
+                guard let replaced, !replaced.isEmpty, replaced != auth.sessionId,
+                      !isSessionHeldByAnotherAccount(replaced, accountId: savedId) else { return (nil, nil) }
+                return (nil, replaced)
             }
-            if let rejection {
+            if let rejection = outcome.rejection {
                 // The session this login created was never published — revoke it (best effort).
                 revokeUnpublishedSession(auth.sessionId, serverUrl: fullUrl)
                 return rejection
@@ -194,27 +201,9 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
 #if DEBUG
             afterLoginCommitForTesting?()
 #endif
-            if brand == .apporo { return result }
-
-            // Save password in Keychain, scoped to this server + username
-            secureStorage.savePassword(serverUrl: fullUrl, username: username, password: password)
-
-            // Save session_id to Keychain as a second, hardware-backed copy.
-            // HTTPCookieStorage still holds the cookie for URLSession network requests,
-            // but the Keychain copy is protected against backup extraction and jailbroken
-            // device file access (kSecAttrAccessibleWhenUnlockedThisDeviceOnly).
-            let savedId = await MainActor.run {
-                getAllAccounts().first { $0.fullServerUrl == fullUrl && $0.database == database && $0.username == username }?.id
-            }
-            if !auth.sessionId.isEmpty, let savedId {
-                secureStorage.saveSessionId(accountId: savedId, sessionId: auth.sessionId)
-            }
-            if let old = replacedSessionId, !old.isEmpty, old != auth.sessionId, let savedId {
-                let heldElsewhere = await isSessionHeldByAnotherAccount(old, accountId: savedId)
-                if !heldElsewhere {
-                    let revoke = revokeSession
-                    Task.detached { await revoke(fullUrl, old) }
-                }
+            if let replaced = outcome.replaced {
+                let revoke = revokeSession
+                Task.detached { await revoke(fullUrl, replaced) }
             }
         }
 
