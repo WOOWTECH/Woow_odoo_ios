@@ -41,6 +41,40 @@ def config(name):
 # demo111 live run 2026-09-29 — approved odooApp.swift root deltas (current, baseline).
 # F3 (0930): the external-link handler delegates validation and account binding to the unit-tested
 # `ExternalLinkIntake`; the scheme gate stays in the root. Folded back to the protected baseline.
+# pi 1001e (2026-10-02): a switch refused because the target must sign in again opens a pre-filled
+# sign-in for that account. Folded back to the previous root before the older delta lists apply.
+SIGN_IN_REQUIRED_ROOT_DELTAS = [
+    ("""    @State private var isAddingAccount = false
+    /// pi 1001e: an existing account a switch refused because it must sign in again; the login screen
+    /// opens pre-filled for it (credentials step) with Cancel back to the current account.
+    @State private var signInAccount: OdooAccount?
+    @State private var pendingSignInAccount: OdooAccount?
+""", """    @State private var isAddingAccount = false
+"""),
+    ("""                LoginView(addingAccount: isAddingAccount, signInAccount: signInAccount, onLoginSuccess: {
+                    isAddingAccount = false
+                    signInAccount = nil
+""", """                LoginView(addingAccount: isAddingAccount, onLoginSuccess: {
+                    isAddingAccount = false
+"""),
+    ("""                    isAddingAccount = false
+                    signInAccount = nil
+                    rootViewModel.cancelAddAccount()""", """                    isAddingAccount = false
+                    rootViewModel.cancelAddAccount()"""),
+    ("""                .id("\\(isAddingAccount)-\\(signInAccount?.id ?? "")")""", """                .id(isAddingAccount)"""),
+    ("""            if let account = pendingSignInAccount {
+                pendingSignInAccount = nil
+                signInAccount = account
+                isAddingAccount = true
+                rootViewModel.beginAddAccount()
+            } else if pendingAddAccount {""", """            if pendingAddAccount {"""),
+    ("""                onSignInRequired: { account in
+                    pendingSignInAccount = account
+                    showConfig = false
+                },
+""", ""),
+]
+
 EXTERNAL_LINK_INTAKE_ROOT_DELTAS = [
     ("""        guard AppBrand.current.acceptsScheme(url.scheme) else { return }
         // F3 (0930): validation + account binding live in `ExternalLinkIntake` (unit-tested).
@@ -367,7 +401,7 @@ class BrandLayerTests(unittest.TestCase):
         # Approved root deltas for the demo111 2026-09-29 live-run fixes (D1 orphan-store pruning,
         # D3 add-account Cancel + App Lock coverage). Each current hunk must appear exactly once and
         # is folded back to the protected baseline before the whole-file comparison.
-        for now, baseline in ADD_ACCOUNT_CANCEL_AND_PRUNE_ROOT_DELTAS + EXTERNAL_LINK_INTAKE_ROOT_DELTAS:
+        for now, baseline in SIGN_IN_REQUIRED_ROOT_DELTAS + ADD_ACCOUNT_CANCEL_AND_PRUNE_ROOT_DELTAS + EXTERNAL_LINK_INTAKE_ROOT_DELTAS:
             self.assertEqual(current.count(now), 1, now)
             current = current.replace(now, baseline, 1)
         self.assertEqual(current, expected)

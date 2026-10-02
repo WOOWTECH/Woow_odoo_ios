@@ -156,3 +156,8 @@
 "push_status_unavailable" = "推播註冊暫時無法使用";
 "error_session_setup" = "伺服器未建立有效的登入工作階段，請再試一次。";
 "error_login_superseded" = "較新的帳號選擇已取代此次登入。";
+
+/* pi 1001e: a switch refused because the target account must sign in again */
+"switch_sign_in_required_title" = "需要重新登入";
+"switch_sign_in_required_message" = "「%@」需要重新登入才能切換過去。";
+"switch_sign_in_action" = "登入";

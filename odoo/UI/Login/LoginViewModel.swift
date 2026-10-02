@@ -33,8 +33,12 @@ final class LoginViewModel: ObservableObject {
     ///   (the default), existing active-account credentials are pre-filled for a
     ///   faster session re-authentication after expiry.
     /// - Parameter localizationBundle: Bundle that localizes error messages (default `.main`).
+    /// - Parameter signInAccount: pi 1001e — an existing account that must sign in again (a switch to
+    ///   it was refused): its server, database and username are pre-filled and the form opens on the
+    ///   credentials step; the password is entered by the user.
     init(
         addingAccount: Bool = false,
+        signInAccount: OdooAccount? = nil,
         repository: AccountRepositoryProtocol = AccountRepository(),
         secureStorage: any SecureStorageProtocol = SecureStorage.shared,
         localizationBundle: Bundle = .main
@@ -42,7 +46,13 @@ final class LoginViewModel: ObservableObject {
         self.repository = repository
         self.secureStorage = secureStorage
         self.localizationBundle = localizationBundle
-        if !addingAccount {
+        if let signInAccount {
+            serverUrl = signInAccount.serverUrl
+            database = signInAccount.database
+            username = signInAccount.username
+            if let saved = secureStorage.getPassword(accountId: signInAccount.id) { password = saved }
+            step = .credentials
+        } else if !addingAccount {
             prefillFromActiveAccount()
         }
     }

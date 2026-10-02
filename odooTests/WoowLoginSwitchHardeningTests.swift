@@ -28,11 +28,17 @@ private final class WoowHardeningURLProtocol: URLProtocol {
     private static var _authRequests: [(login: String, db: String, password: String)] = []
     private static var _destroyed: [String] = []
     private static var heldDeliveries: [() -> Void] = []
+    /// `/web/session/get_session_info` answers: session id → (uid, db). Unknown ids are rejected.
+    private static var _sessionInfo: [String: (uid: Int, db: String)] = [:]
+    private static var _sessionChecks: [String] = []
+    static func setSessionInfo(_ info: [String: (uid: Int, db: String)]) { lock.lock(); _sessionInfo = info; lock.unlock() }
+    static var sessionChecks: [String] { lock.lock(); defer { lock.unlock() }; return _sessionChecks }
 
     static func reset(_ scripts: [String: Script]) { reset(sequences: scripts.mapValues { [$0] }) }
     /// One script per authenticate request for that login, in order; the last one repeats.
     static func reset(sequences: [String: [Script]]) {
-        lock.lock(); self.scripts = sequences; _authLogins = []; _authRequests = []; _destroyed = []; heldDeliveries = []; lock.unlock()
+        lock.lock(); self.scripts = sequences; _authLogins = []; _authRequests = []; _destroyed = []; heldDeliveries = []
+        _sessionInfo = [:]; _sessionChecks = []; lock.unlock()
     }
     static var authLogins: [String] { lock.lock(); defer { lock.unlock() }; return _authLogins }
     static var authRequests: [(login: String, db: String, password: String)] {
@@ -54,6 +60,14 @@ private final class WoowHardeningURLProtocol: URLProtocol {
             let cookie = request.value(forHTTPHeaderField: "Cookie") ?? ""
             Self.lock.lock(); Self._destroyed.append(cookie.replacingOccurrences(of: "session_id=", with: "")); Self.lock.unlock()
             return deliver(headers: [:], body: #"{"jsonrpc":"2.0","id":1,"result":true}"#)
+        }
+        if url.path == "/web/session/get_session_info" {
+            let sid = (request.value(forHTTPHeaderField: "Cookie") ?? "").replacingOccurrences(of: "session_id=", with: "")
+            Self.lock.lock(); Self._sessionChecks.append(sid); let info = Self._sessionInfo[sid]; Self.lock.unlock()
+            if let info {
+                return deliver(headers: [:], body: #"{"jsonrpc":"2.0","id":1,"result":{"uid":\#(info.uid),"db":"\#(info.db)"}}"#)
+            }
+            return deliver(headers: [:], body: #"{"jsonrpc":"2.0","id":1,"error":{"code":100,"message":"Odoo Session Expired"}}"#)
         }
         let params = (Self.json(request))?["params"] as? [String: Any]
         let login = params?["login"] as? String ?? "", db = params?["db"] as? String ?? ""
@@ -490,6 +504,94 @@ final class WoowLoginSwitchHardeningTests: XCTestCase {
         XCTAssertEqual(last.db, "db1")
         XCTAssertEqual(last.password, "pw-1", "db1's own password, not db2's")
         XCTAssertEqual(repo.getActiveAccount()?.database, "db1")
+    }
+
+    // MARK: - pi 1001e
+
+    /// P1, end to end through the real Keychain: two databases on one host with the same username
+    /// had colliding legacy keys; the upgrade drops them (owner unknown). Switching to the other
+    /// database then has neither a password nor a session: it must fail closed — the current account
+    /// and its jar stay, and the target is routed to sign in again.
+    func test_upgrade_ambiguousLegacyKeysDropped_switchFailsClosedAndAsksTargetToSignIn() async throws {
+        let store = SecureStorage(service: "odoo.tests.1001e.\(UUID().uuidString)")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [WoowHardeningURLProtocol.self]
+        config.httpCookieStorage = jar
+        let api = OdooAPIClient(session: URLSession(configuration: config))
+        let recorder = revoker!
+        let seeding = AccountRepository(persistence: persistence, secureStorage: store, apiClient: api, brand: .woowtech,
+                                        webDataCleaner: cleaner, revokeSession: { _, sid in await recorder.record(sid) })
+        seeding.replaceAccountsForTesting([
+            SeededAccount(serverURL: server, database: "db1", username: "tester", sessionCookie: "sid-1", isActive: true),
+            SeededAccount(serverURL: server, database: "db2", username: "tester", sessionCookie: "sid-2", isActive: false),
+        ])
+        // Before 1001c/1001d: one colliding legacy password and session for both accounts, no id keys.
+        for account in seeding.getAllAccounts() {
+            store.deleteSessionId(accountId: account.id); store.deletePassword(accountId: account.id)
+        }
+        store.saveLegacyCredentialForTesting(serverUrl: server, username: "tester", password: "pw-shared", sessionId: "sid-shared")
+        putJarSession("sid-1")
+        defer {
+            store.deleteLegacyCredentialForTesting(serverUrl: server, username: "tester")
+            for account in seeding.getAllAccounts() {
+                store.deleteSessionId(accountId: account.id); store.deletePassword(accountId: account.id)
+            }
+        }
+
+        // Upgrade: a new repository runs the key migrations.
+        let upgraded = AccountRepository(persistence: persistence, secureStorage: store, apiClient: api, brand: .woowtech,
+                                         webDataCleaner: cleaner, revokeSession: { _, sid in await recorder.record(sid) })
+        let legacy = store.legacyCredentialForTesting(serverUrl: server, username: "tester")
+        XCTAssertNil(legacy.password, "an ambiguous legacy password is not guessed onto either account")
+        XCTAssertNil(legacy.sessionId)
+        let db2 = try XCTUnwrap(upgraded.getAllAccounts().first { $0.database == "db2" })
+        XCTAssertNil(store.getPassword(accountId: db2.id)); XCTAssertNil(store.getSessionId(accountId: db2.id))
+        WoowHardeningURLProtocol.reset([:])
+
+        let switched = await upgraded.switchAccount(id: db2.id)
+
+        XCTAssertFalse(switched, "no session can be obtained for db2 — fail closed")
+        XCTAssertEqual(upgraded.getActiveAccount()?.database, "db1", "the current account stays active")
+        XCTAssertEqual(jarSessionIds, ["sid-1"], "db2 never borrows db1's jar session")
+        XCTAssertEqual(ReloginSignal.shared.lastRequestedAccountId, db2.id, "db2 is routed to sign in again")
+        XCTAssertTrue(WoowHardeningURLProtocol.authLogins.isEmpty, "nothing to authenticate with")
+    }
+
+    /// P1: a stored session id alone is not an identity — without a password, the server must confirm
+    /// it is still this account's (same user and database) before the switch uses it.
+    func test_switchWithoutPassword_storedSessionRejected_failsClosed() async throws {
+        repo.replaceAccountsForTesting([
+            SeededAccount(serverURL: server, database: "db", username: "tester", sessionCookie: "sid-a", isActive: true),
+            SeededAccount(serverURL: server, database: "db", username: "mate", sessionCookie: "sid-b-stale", isActive: false),
+        ])
+        let b = try XCTUnwrap(repo.getAllAccounts().first { $0.username == "mate" })
+        putJarSession("sid-a")
+        WoowHardeningURLProtocol.reset([:])          // get_session_info rejects every session
+
+        let switched = await repo.switchAccount(id: b.id)
+
+        XCTAssertFalse(switched)
+        XCTAssertEqual(WoowHardeningURLProtocol.sessionChecks, ["sid-b-stale"])
+        XCTAssertEqual(repo.getActiveAccount()?.username, "tester")
+        XCTAssertEqual(jarSessionIds, ["sid-a"])
+        XCTAssertEqual(ReloginSignal.shared.lastRequestedAccountId, b.id)
+    }
+
+    func test_switchWithoutPassword_storedSessionConfirmed_switches() async throws {
+        repo.replaceAccountsForTesting([
+            SeededAccount(serverURL: server, database: "db", username: "tester", sessionCookie: "sid-a", isActive: true),
+            SeededAccount(serverURL: server, database: "db", username: "mate", sessionCookie: "sid-b", isActive: false),
+        ])
+        let b = try XCTUnwrap(repo.getAllAccounts().first { $0.username == "mate" })
+        putJarSession("sid-a")
+        WoowHardeningURLProtocol.reset([:])
+        WoowHardeningURLProtocol.setSessionInfo(["sid-b": (uid: 1, db: "db")])   // seeded accounts have uid 1
+
+        let switched = await repo.switchAccount(id: b.id)
+
+        XCTAssertTrue(switched)
+        XCTAssertEqual(repo.getActiveAccount()?.username, "mate")
+        XCTAssertEqual(jarSessionIds, ["sid-b"])
     }
 }
 

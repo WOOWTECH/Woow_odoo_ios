@@ -28,7 +28,32 @@ final class SecureStorage: SecureStorageProtocol, PushCredentialStorage, Sendabl
 
     static let shared = SecureStorage()
 
-    private let service = AppBrand.current.keychainService
+    private let service: String
+
+    /// `service` is the Keychain service the items live under; tests pass their own so they never
+    /// touch the app's items.
+    init(service: String = AppBrand.current.keychainService) {
+        self.service = service
+    }
+
+#if DEBUG
+    // MARK: - Legacy-key test hooks (pi 1001e: upgrade scenarios through the real Keychain)
+
+    func saveLegacyCredentialForTesting(serverUrl: String, username: String, password: String?, sessionId: String?) {
+        if let password { _ = save(key: legacyPasswordKey(serverUrl: serverUrl, username: username), value: password) }
+        if let sessionId { _ = save(key: legacySessionKey(serverUrl: serverUrl, username: username), value: sessionId) }
+    }
+
+    func legacyCredentialForTesting(serverUrl: String, username: String) -> (password: String?, sessionId: String?) {
+        (get(key: legacyPasswordKey(serverUrl: serverUrl, username: username)),
+         get(key: legacySessionKey(serverUrl: serverUrl, username: username)))
+    }
+
+    func deleteLegacyCredentialForTesting(serverUrl: String, username: String) {
+        delete(key: legacyPasswordKey(serverUrl: serverUrl, username: username))
+        delete(key: legacySessionKey(serverUrl: serverUrl, username: username))
+    }
+#endif
 
     // MARK: - Password Storage (per saved account)
 

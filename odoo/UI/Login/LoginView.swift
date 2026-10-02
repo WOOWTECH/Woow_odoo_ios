@@ -16,11 +16,12 @@ struct LoginView: View {
     @StateObject private var viewModel: LoginViewModel
     /// Observes the user's theme color so the logo accent + button tints
 
-    init(addingAccount: Bool = false, onLoginSuccess: @escaping () -> Void, onCancel: (() -> Void)? = nil) {
+    init(addingAccount: Bool = false, signInAccount: OdooAccount? = nil,
+         onLoginSuccess: @escaping () -> Void, onCancel: (() -> Void)? = nil) {
         self.addingAccount = addingAccount
         self.onLoginSuccess = onLoginSuccess
         self.onCancel = onCancel
-        _viewModel = StateObject(wrappedValue: LoginViewModel(addingAccount: addingAccount))
+        _viewModel = StateObject(wrappedValue: LoginViewModel(addingAccount: addingAccount, signInAccount: signInAccount))
     }
 
     @FocusState private var focusedField: LoginViewModel.Field?

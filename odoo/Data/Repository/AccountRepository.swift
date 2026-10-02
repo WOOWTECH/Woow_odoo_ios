@@ -391,14 +391,25 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
                 }
                 targetSession = cookie
                 freshSessionId = auth.sessionId
-            case .error:
+            case .error(_, let type):
                 AppLogger.auth.info("Session validation failed for \(account.username)")
+                if type == .invalidCredentials { ReloginSignal.shared.requestRelogin(accountId: account.id) }
                 return false
             }
-        } else if let replacedSessionId, !replacedSessionId.isEmpty {
-            // No stored password: the target keeps its own stored session.
+        } else if let replacedSessionId, !replacedSessionId.isEmpty,
+                  await storedSessionIsValid(replacedSessionId, for: account) {
+            // No stored password: the target keeps its own stored session — only once the server has
+            // confirmed it is still this account's (same user and database). pi 1001e (P1): a session
+            // id is not an identity merely because it exists.
             targetSession = HTTPCookie(properties: [.name: "session_id", .value: replacedSessionId,
                                                     .domain: account.serverHost, .path: "/", .secure: "TRUE"])
+        }
+        // pi 1001e (P1): no session can be obtained for the target (no password and no valid stored
+        // session — e.g. an ambiguous legacy key was dropped on upgrade). Fail closed: the current
+        // account and its jar stay as they are, and the target is routed to its own sign-in.
+        guard targetSession != nil else {
+            ReloginSignal.shared.requestRelogin(accountId: account.id)
+            return false
         }
 
         // Revalidate after the await: still the newest selection, target still present and unchanged.
@@ -428,6 +439,14 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         // Broadcast so MainViewModel reloads the WebView onto the newly active account.
         if saved { NotificationCenter.default.post(name: .activeAccountDidChange, object: nil) }
         return saved
+    }
+
+    /// Whether the server still accepts `sessionId` as `account`'s — same user, same database. No
+    /// database in the answer, another user, rejected or no answer: not valid (fail closed).
+    private func storedSessionIsValid(_ sessionId: String, for account: OdooAccount) async -> Bool {
+        guard case .valid(let uid, let db) = await apiClient.pushSessionInfo(
+            serverUrl: account.fullServerUrl, sessionId: sessionId), let db, db == account.database else { return false }
+        return account.userId == nil || account.userId == uid
     }
 
     /// Best-effort revoke of a session a login/switch created but never published (superseded, or

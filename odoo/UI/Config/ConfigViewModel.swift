@@ -7,6 +7,9 @@ final class ConfigViewModel: ObservableObject {
 
     @Published var accounts: [OdooAccount] = []
     @Published var activeAccount: OdooAccount?
+    /// pi 1001e: set when a switch was refused because the target must sign in again (no password
+    /// and no valid stored session). The view offers to open that account's sign-in.
+    @Published var signInRequiredAccount: OdooAccount?
 
     private let accountRepository: AccountRepositoryProtocol
     private let pushTokenRepository: PushTokenRepositoryProtocol
@@ -26,7 +29,15 @@ final class ConfigViewModel: ObservableObject {
     }
 
     func switchAccount(id: String) async -> Bool {
+        let requested = ReloginRequestRecorder()
+        let observer = NotificationCenter.default.addObserver(
+            forName: ReloginSignal.didRequestRelogin, object: nil, queue: nil
+        ) { note in requested.record(note.userInfo?["accountId"] as? String) }
         let result = await accountRepository.switchAccount(id: id)
+        NotificationCenter.default.removeObserver(observer)
+        if !result, requested.contains(id) {
+            signInRequiredAccount = accounts.first { $0.id == id }
+        }
         if result {
             loadAccounts()
             // Account-switch is an "account-available" event (AC8.b): upsert the current
@@ -53,4 +64,13 @@ final class ConfigViewModel: ObservableObject {
         await accountRepository.removeAccount(id: id)
         loadAccounts()
     }
+}
+
+/// Collects relogin requests posted while one switch runs (thread-safe; the notification may be
+/// delivered off the main thread).
+private final class ReloginRequestRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var ids: Set<String> = []
+    func record(_ id: String?) { guard let id else { return }; lock.lock(); ids.insert(id); lock.unlock() }
+    func contains(_ id: String) -> Bool { lock.lock(); defer { lock.unlock() }; return ids.contains(id) }
 }

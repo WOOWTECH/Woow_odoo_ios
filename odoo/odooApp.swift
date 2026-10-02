@@ -59,6 +59,10 @@ struct AppRootView: View {
     /// LoginView can start at the server info step instead of pre-filling the
     /// existing active account's credentials.
     @State private var isAddingAccount = false
+    /// pi 1001e: an existing account a switch refused because it must sign in again; the login screen
+    /// opens pre-filled for it (credentials step) with Cancel back to the current account.
+    @State private var signInAccount: OdooAccount?
+    @State private var pendingSignInAccount: OdooAccount?
     /// Non-nil while a "Switched to <account>" landing toast is shown after a multi-account logout
     /// promoted a remaining account. Auto-clears after a few seconds.
     @State private var fallbackToastAccount: String?
@@ -70,8 +74,9 @@ struct AppRootView: View {
             case .loading:
                 ProgressView()
             case .login:
-                LoginView(addingAccount: isAddingAccount, onLoginSuccess: {
+                LoginView(addingAccount: isAddingAccount, signInAccount: signInAccount, onLoginSuccess: {
                     isAddingAccount = false
+                    signInAccount = nil
                     rootViewModel.onLoginSuccess()
                     if !authViewModel.requiresAuth {
                         authViewModel.setAuthenticated(true)
@@ -80,6 +85,7 @@ struct AppRootView: View {
                     // Back to the account that was active; App Lock re-prompts via the
                     // launchState → .authenticated observer if a background re-locked meanwhile.
                     isAddingAccount = false
+                    signInAccount = nil
                     rootViewModel.cancelAddAccount()
                 } : nil)
                 // `LoginView` 的 view model 是 @StateObject，而 @StateObject 的初值只在
@@ -88,7 +94,7 @@ struct AppRootView: View {
                 // 新傳入的 `addingAccount: true` 因此完全沒有作用 —— viewModel 仍停在
                 // 預填好的憑證步驟，使用者看不到空白的伺服器表單。
                 // 綁定 .id(isAddingAccount) 讓模式切換時強制重建 view 與其 @StateObject。
-                .id(isAddingAccount)
+                .id("\(isAddingAccount)-\(signInAccount?.id ?? "")")
             case .authenticated:
                 authenticatedContent
             }
@@ -203,7 +209,12 @@ struct AppRootView: View {
         )
         .sheet(isPresented: $showConfig, onDismiss: {
             // Deferred transition: navigate to login only after the sheet dismissal animation.
-            if pendingAddAccount {
+            if let account = pendingSignInAccount {
+                pendingSignInAccount = nil
+                signInAccount = account
+                isAddingAccount = true
+                rootViewModel.beginAddAccount()
+            } else if pendingAddAccount {
                 pendingAddAccount = false
                 isAddingAccount = true
                 // 用專屬的導航事件，不要借用 onSessionExpired —— 後者會先嘗試自癒，
@@ -218,6 +229,10 @@ struct AppRootView: View {
                 },
                 onAddAccountClick: {
                     pendingAddAccount = true
+                    showConfig = false
+                },
+                onSignInRequired: { account in
+                    pendingSignInAccount = account
                     showConfig = false
                 },
                 onLogout: { stayAuthenticated in

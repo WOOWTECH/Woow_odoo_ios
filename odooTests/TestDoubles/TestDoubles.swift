@@ -33,7 +33,10 @@ final class MockAccountRepository: AccountRepositoryProtocol, @unchecked Sendabl
 
     func getActiveAccount() -> OdooAccount? { stubbedActiveAccount }
 
-    func getAllAccounts() -> [OdooAccount] { [] }
+    /// Accounts returned by `getAllAccounts()` (pi 1001e).
+    var stubbedAccounts: [OdooAccount] = []
+
+    func getAllAccounts() -> [OdooAccount] { stubbedAccounts }
 
     func getAccount(byTenantId tenantId: String) -> OdooAccount? {
         tenantId.isEmpty ? nil : stubbedTenantAccounts[tenantId]
@@ -43,7 +46,11 @@ final class MockAccountRepository: AccountRepositoryProtocol, @unchecked Sendabl
         stubbedAuthResult
     }
 
-    func switchAccount(id: String) async -> Bool { stubbedSwitchResult }
+    /// Runs inside `switchAccount(id:)` before it returns (pi 1001e: lets a test post the relogin
+    /// signal the real repository posts when a switch is refused for missing credentials).
+    var onSwitch: ((String) -> Void)?
+
+    func switchAccount(id: String) async -> Bool { onSwitch?(id); return stubbedSwitchResult }
 
     func activateAccount(id: String) -> Bool {
         activatedAccountIds.append(id)

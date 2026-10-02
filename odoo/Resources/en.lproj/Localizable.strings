@@ -156,3 +156,8 @@
 "push_status_unavailable" = "Push registration temporarily unavailable";
 "error_session_setup" = "The server did not establish a valid sign-in session. Please try again.";
 "error_login_superseded" = "A newer account selection replaced this sign-in attempt.";
+
+/* pi 1001e: a switch refused because the target account must sign in again */
+"switch_sign_in_required_title" = "Sign in again";
+"switch_sign_in_required_message" = "%@ must sign in again before you can switch to it.";
+"switch_sign_in_action" = "Sign In";

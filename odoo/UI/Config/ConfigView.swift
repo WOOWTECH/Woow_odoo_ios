@@ -12,6 +12,8 @@ struct ConfigView: View {
     let onBackClick: () -> Void
     let onSettingsClick: () -> Void
     let onAddAccountClick: () -> Void
+    /// pi 1001e: opens the sign-in for an account a switch refused (it must sign in again).
+    var onSignInRequired: (OdooAccount) -> Void = { _ in }
     /// Called after the CURRENT account is logged out. The `Bool` is `true` when another account was
     /// promoted (stay authenticated on the main screen) and `false` when no accounts remain (return
     /// to the login screen).
@@ -83,6 +85,18 @@ struct ConfigView: View {
                         Label(String(localized: "logout_current_account"), systemImage: "rectangle.portrait.and.arrow.right")
                     }
                 }
+            }
+            .alert(String(localized: "switch_sign_in_required_title"),
+                   isPresented: Binding(get: { viewModel.signInRequiredAccount != nil },
+                                        set: { if !$0 { viewModel.signInRequiredAccount = nil } }),
+                   presenting: viewModel.signInRequiredAccount) { account in
+                Button(String(localized: "switch_sign_in_action")) {
+                    viewModel.signInRequiredAccount = nil
+                    onSignInRequired(account)
+                }
+                Button(String(localized: "Cancel"), role: .cancel) { viewModel.signInRequiredAccount = nil }
+            } message: { account in
+                Text(String(format: String(localized: "switch_sign_in_required_message"), account.displayName))
             }
             .navigationTitle(String(localized: "configuration_title"))
             .toolbar {

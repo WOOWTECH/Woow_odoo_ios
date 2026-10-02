@@ -360,8 +360,8 @@ final class AccountRepositoryTests: XCTestCase {
 
         try context.save()
 
-        // No password means no reauthentication: Apporo still requires a usable
-        // account-bound cookie; WOOW preserves its legacy credential-free switch.
+        // No password means no reauthentication: Apporo still requires a usable account-bound
+        // cookie; WOOW (pi 1001e) refuses a switch it cannot back with a session.
         let account = e2.toDomainModel()
         secureStorage.deletePassword(accountId: account.id)
         secureStorage.deletePushCredential(accountId: account.id)
@@ -384,15 +384,24 @@ final class AccountRepositoryTests: XCTestCase {
         }
 
         let switched = await repository.switchAccount(id: "acc-2")
-        XCTAssertTrue(switched, "switchAccount must return true on success")
 
         // Re-fetch to verify state after save.
         let all = try? context.fetch(OdooAccountEntity.fetchAllRequest())
         let acc1 = all?.first(where: { $0.id == "acc-1" })
         let acc2 = all?.first(where: { $0.id == "acc-2" })
 
-        XCTAssertFalse(acc1?.isActive ?? true, "Previously active account must now be inactive")
-        XCTAssertTrue(acc2?.isActive ?? false, "Target account must now be active")
+        if AppBrand.current.code == .apporo {
+            XCTAssertTrue(switched, "switchAccount must return true on success")
+            XCTAssertFalse(acc1?.isActive ?? true, "Previously active account must now be inactive")
+            XCTAssertTrue(acc2?.isActive ?? false, "Target account must now be active")
+        } else {
+            // pi 1001e (P1): WOOW no longer switches credential-free. With neither a password nor a
+            // server-confirmed stored session for the target, the switch fails closed and the
+            // previously active account stays active (the target is asked to sign in again).
+            XCTAssertFalse(switched, "a WOOW switch with no obtainable target session must fail closed")
+            XCTAssertTrue(acc1?.isActive ?? false, "the previously active account stays active")
+            XCTAssertFalse(acc2?.isActive ?? true, "the target is not activated")
+        }
     }
 
     // switchAccount with an unknown ID must return false and leave DB unchanged.

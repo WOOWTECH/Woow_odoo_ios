@@ -156,3 +156,8 @@
 "push_status_unavailable" = "推送注册暂时不可用";
 "error_session_setup" = "服务器未建立有效的登录会话，请重试。";
 "error_login_superseded" = "较新的账户选择已取代此次登录。";
+
+/* pi 1001e: a switch refused because the target account must sign in again */
+"switch_sign_in_required_title" = "需要重新登录";
+"switch_sign_in_required_message" = "「%@」需要重新登录才能切换过去。";
+"switch_sign_in_action" = "登录";
