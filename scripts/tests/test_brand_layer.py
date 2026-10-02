@@ -131,8 +131,9 @@ class BrandLayerTests(unittest.TestCase):
             ("WoowRelease", "woowtech", "io.woowtech.odoo", "woowodoo", "3", "AppIcon"),
             ("ApporoDebug", "apporo", "com.apporo.odoo.dev", "apporoodoo-dev", "1", "ApporoAppIcon"),
             # ApporoRelease build 1 = App Store Connect 2026-09-27 (b902ff47), build 2 = 8c03e44
-            # (TestFlight 2026-09-29). Uploaded numbers can never be reused.
-            ("ApporoRelease", "apporo", "com.apporo.odoo", "apporoodoo", "2", "ApporoAppIcon"),
+            # (TestFlight 2026-09-29), build 3 = the 1001g bump (1001b–1001g fixes; not yet
+            # uploaded). Uploaded numbers can never be reused.
+            ("ApporoRelease", "apporo", "com.apporo.odoo", "apporoodoo", "3", "ApporoAppIcon"),
         ]
         for name, brand, bundle, scheme, version, icon in matrix:
             with self.subTest(name=name):
@@ -142,7 +143,7 @@ class BrandLayerTests(unittest.TestCase):
                 self.assertEqual(c["APP_DISPLAY_NAME"], "Apporo platform" if brand == "apporo" else "woowtech platform")
         self.assertIn("MARKETING_VERSION = 1.0", text("Config/Shared.xcconfig"))
         # Guard against re-using an uploaded ApporoRelease build number.
-        self.assertGreaterEqual(int(config("ApporoRelease")["CURRENT_PROJECT_VERSION"]), 2)
+        self.assertGreaterEqual(int(config("ApporoRelease")["CURRENT_PROJECT_VERSION"]), 3)
 
     def test_project_and_three_targets_have_matching_configurations(self):
         lists = [v for v in self.objects.values() if v.get("isa") == "XCConfigurationList"]
