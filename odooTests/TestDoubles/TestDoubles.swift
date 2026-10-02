@@ -82,7 +82,8 @@ final class MockSecureStorage: SecureStorageProtocol, @unchecked Sendable {
     /// Internal dictionary keyed by saved account id, matching SecureStorage (pi 1001c/1001d).
     var store: [String: String] = [:]
 
-    func savePassword(accountId: String, password: String) { store["pwd_acct_\(accountId)"] = password }
+    @discardableResult
+    func savePassword(accountId: String, password: String) -> Bool { store["pwd_acct_\(accountId)"] = password; return true }
 
     func getPassword(accountId: String) -> String? { store["pwd_acct_\(accountId)"] }
 
@@ -93,7 +94,8 @@ final class MockSecureStorage: SecureStorageProtocol, @unchecked Sendable {
     }
 
     // H3: Session cookie storage — keyed by saved account id (pi 1001c), like SecureStorage.
-    func saveSessionId(accountId: String, sessionId: String) { store["session_acct_\(accountId)"] = sessionId }
+    @discardableResult
+    func saveSessionId(accountId: String, sessionId: String) -> Bool { store["session_acct_\(accountId)"] = sessionId; return true }
 
     func getSessionId(accountId: String) -> String? { store["session_acct_\(accountId)"] }
 

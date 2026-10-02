@@ -5,14 +5,14 @@ import Security
 protocol SecureStorageProtocol: Sendable {
     /// Passwords are keyed by the saved account's id (pi 1001d): host+username collided for two
     /// databases on one host with the same username.
-    func savePassword(accountId: String, password: String)
+    @discardableResult func savePassword(accountId: String, password: String) -> Bool
     func getPassword(accountId: String) -> String?
     func deletePassword(accountId: String)
     func migratePasswordKeys(accounts: [OdooAccount])
 
     /// Session ids are keyed by the saved account's id (pi 1001c): host+username collided for two
     /// databases on one host with the same username.
-    func saveSessionId(accountId: String, sessionId: String)
+    @discardableResult func saveSessionId(accountId: String, sessionId: String) -> Bool
     func getSessionId(accountId: String) -> String?
     func deleteSessionId(accountId: String)
     func migrateSessionKeys(accounts: [OdooAccount])
@@ -29,11 +29,14 @@ final class SecureStorage: SecureStorageProtocol, PushCredentialStorage, Sendabl
     static let shared = SecureStorage()
 
     private let service: String
+    /// Test seam (pi 1001e): makes Keychain writes for matching keys fail, as an OSStatus error would.
+    private let writeFails: (@Sendable (String) -> Bool)?
 
     /// `service` is the Keychain service the items live under; tests pass their own so they never
     /// touch the app's items.
-    init(service: String = AppBrand.current.keychainService) {
+    init(service: String = AppBrand.current.keychainService, writeFails: (@Sendable (String) -> Bool)? = nil) {
         self.service = service
+        self.writeFails = writeFails
     }
 
 #if DEBUG
@@ -68,10 +71,11 @@ final class SecureStorage: SecureStorageProtocol, PushCredentialStorage, Sendabl
         return "pwd_\(host)_\(username)"
     }
 
-    /// Saves one saved account's password.
-    func savePassword(accountId: String, password: String) {
-        guard !accountId.isEmpty else { return }
-        save(key: passwordKey(accountId: accountId), value: password)
+    /// Saves one saved account's password. Returns whether the Keychain write succeeded.
+    @discardableResult
+    func savePassword(accountId: String, password: String) -> Bool {
+        guard !accountId.isEmpty else { return false }
+        return save(key: passwordKey(accountId: accountId), value: password)
     }
 
     /// Retrieves one saved account's password.
@@ -89,22 +93,36 @@ final class SecureStorage: SecureStorageProtocol, PushCredentialStorage, Sendabl
     /// Moves each legacy password — `pwd_{host}_{username}`, or the oldest `pwd_{username}` — to its
     /// account's key. A legacy key that two or more saved accounts map to (same host and username,
     /// different databases or ports) cannot say whose password it was: it is dropped, not guessed —
-    /// that account asks for its password again. Idempotent: legacy keys are deleted once processed.
+    /// that account asks for its password again. pi 1001e (P2): a uniquely owned legacy key is deleted
+    /// only once its value has been written to the account's key AND read back; a failed write keeps
+    /// the legacy key so the next launch retries. Idempotent.
     func migratePasswordKeys(accounts: [OdooAccount]) {
-        for (legacyKey, owners) in Dictionary(grouping: accounts, by: { legacyPasswordKey(serverUrl: $0.fullServerUrl, username: $0.username) }) {
-            guard let legacy = get(key: legacyKey) else { continue }
-            if owners.count == 1, let owner = owners.first, getPassword(accountId: owner.id) == nil {
-                savePassword(accountId: owner.id, password: legacy)
+        let groupings: [(OdooAccount) -> String] = [
+            { self.legacyPasswordKey(serverUrl: $0.fullServerUrl, username: $0.username) },
+            { "pwd_\($0.username)" },
+        ]
+        for grouping in groupings {
+            for (legacyKey, owners) in Dictionary(grouping: accounts, by: grouping) {
+                guard let legacy = get(key: legacyKey) else { continue }
+                migrateLegacyKey(legacyKey, value: legacy, owners: owners,
+                                 current: { self.getPassword(accountId: $0) },
+                                 write: { self.savePassword(accountId: $0, password: $1) })
             }
-            delete(key: legacyKey)
         }
-        for (legacyKey, owners) in Dictionary(grouping: accounts, by: { "pwd_\($0.username)" }) {
-            guard let legacy = get(key: legacyKey) else { continue }
-            if owners.count == 1, let owner = owners.first, getPassword(accountId: owner.id) == nil {
-                savePassword(accountId: owner.id, password: legacy)
-            }
-            delete(key: legacyKey)
+    }
+
+    /// One legacy key: ambiguous (several owners) → dropped; unique owner whose account key already
+    /// holds a value → the legacy copy is redundant and dropped; otherwise copied, verified by read
+    /// back, and only then deleted. A failed write or read-back keeps the legacy key for a retry.
+    private func migrateLegacyKey(_ legacyKey: String, value: String, owners: [OdooAccount],
+                                  current: (String) -> String?, write: (String, String) -> Bool) {
+        guard owners.count == 1, let owner = owners.first else { delete(key: legacyKey); return }
+        if current(owner.id) != nil { delete(key: legacyKey); return }
+        guard write(owner.id, value), current(owner.id) == value else {
+            AppLogger.data.error("SecureStorage migration kept a legacy key: the account key write failed")
+            return
         }
+        delete(key: legacyKey)
     }
 
     // MARK: - Session Cookie Storage (per saved account)
@@ -124,9 +142,10 @@ final class SecureStorage: SecureStorageProtocol, PushCredentialStorage, Sendabl
     /// Storing the session in Keychain (hardware-backed, excluded from backups) instead of
     /// relying solely on HTTPCookieStorage (plaintext on disk) prevents session hijacking via
     /// backup extraction, MDM forensics tools, and jailbroken device file access.
-    func saveSessionId(accountId: String, sessionId: String) {
-        guard !accountId.isEmpty else { return }
-        save(key: sessionKey(accountId: accountId), value: sessionId)
+    @discardableResult
+    func saveSessionId(accountId: String, sessionId: String) -> Bool {
+        guard !accountId.isEmpty else { return false }
+        return save(key: sessionKey(accountId: accountId), value: sessionId)
     }
 
     /// Retrieves the stored session_id for one saved account from Keychain.
@@ -149,10 +168,10 @@ final class SecureStorage: SecureStorageProtocol, PushCredentialStorage, Sendabl
         let groups = Dictionary(grouping: accounts) { legacySessionKey(serverUrl: $0.fullServerUrl, username: $0.username) }
         for (legacyKey, owners) in groups {
             guard let legacy = get(key: legacyKey) else { continue }
-            if owners.count == 1, let owner = owners.first, getSessionId(accountId: owner.id) == nil {
-                saveSessionId(accountId: owner.id, sessionId: legacy)
-            }
-            delete(key: legacyKey)
+            // pi 1001e (P2): same rule as passwords — delete only after a verified write.
+            migrateLegacyKey(legacyKey, value: legacy, owners: owners,
+                             current: { self.getSessionId(accountId: $0) },
+                             write: { self.saveSessionId(accountId: $0, sessionId: $1) })
         }
     }
 
@@ -253,6 +272,10 @@ final class SecureStorage: SecureStorageProtocol, PushCredentialStorage, Sendabl
     /// Avoids race condition from delete-then-add.
     @discardableResult
     private func save(key: String, value: String) -> Bool {
+        if let writeFails, writeFails(key) {
+            AppLogger.data.error("SecureStorage failed to save key=\(key): injected failure")
+            return false
+        }
         guard let data = value.data(using: .utf8) else { return false }
 
         let query: [String: Any] = [
