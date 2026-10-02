@@ -373,6 +373,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         let replacedSessionId = secureStorage.getSessionId(accountId: account.id)
         var targetSession: HTTPCookie?
         var freshSessionId: String?
+        var provenUserId: Int?
         if let password = secureStorage.getPassword(accountId: account.id) {
             let result = await apiClient.authenticatePushSession(
                 serverUrl: account.fullServerUrl,
@@ -391,6 +392,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
                 }
                 targetSession = cookie
                 freshSessionId = auth.sessionId
+                provenUserId = auth.userId
             case .error(_, let type):
                 AppLogger.auth.info("Session validation failed for \(account.username)")
                 if type == .invalidCredentials { ReloginSignal.shared.requestRelogin(accountId: account.id) }
@@ -400,7 +402,8 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
                   await storedSessionIsValid(replacedSessionId, for: account) {
             // No stored password: the target keeps its own stored session — only once the server has
             // confirmed it is still this account's (same user and database). pi 1001e (P1): a session
-            // id is not an identity merely because it exists.
+            // id is not an identity merely because it exists. pi 1001f (P1): nor is a database match —
+            // an account whose user id is unknown cannot prove the session is its own (sign in again).
             targetSession = HTTPCookie(properties: [.name: "session_id", .value: replacedSessionId,
                                                     .domain: account.serverHost, .path: "/", .secure: "TRUE"])
         }
@@ -425,6 +428,9 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         // Activate the target account
         all.forEach { $0.isActive = false }
         target.isActive = true
+        // pi 1001f (P1): a credential login proves the user — record its id so the account's own
+        // stored session can be proven on a later switch without a password.
+        if target.userId <= 0, let provenUserId, provenUserId > 0 { target.userId = Int32(provenUserId) }
         let saved = (try? context.save()) != nil
         if saved, let targetSession {
             // The jar holds the active account's session (legacy requests, WebView) — the target's.
@@ -443,10 +449,12 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
 
     /// Whether the server still accepts `sessionId` as `account`'s — same user, same database. No
     /// database in the answer, another user, rejected or no answer: not valid (fail closed).
+    /// pi 1001f (P1): an account whose user id is unknown proves nothing — not valid either.
     private func storedSessionIsValid(_ sessionId: String, for account: OdooAccount) async -> Bool {
-        guard case .valid(let uid, let db) = await apiClient.pushSessionInfo(
+        guard let userId = account.userId,
+              case .valid(let uid, let db) = await apiClient.pushSessionInfo(
             serverUrl: account.fullServerUrl, sessionId: sessionId), let db, db == account.database else { return false }
-        return account.userId == nil || account.userId == uid
+        return userId == uid
     }
 
     /// Best-effort revoke of a session a login/switch created but never published (superseded, or
@@ -470,7 +478,10 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         // pi 0930: no database in the answer is no proof the session belongs to this database (two
         // databases on one host can share a uid) — fail closed to a fresh login.
         guard let db, db == account.database else { return false }
-        return account.userId == nil || account.userId == uid
+        // pi 1001f (P1): the user must be positively the same — an unknown user id is no proof, so
+        // the switch logs in with the stored credential instead.
+        guard let userId = account.userId else { return false }
+        return userId == uid
     }
 
     /// D5 (pi 0930): best-effort revoke of the session a switch replaced — called only AFTER the new

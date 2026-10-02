@@ -593,6 +593,88 @@ final class WoowLoginSwitchHardeningTests: XCTestCase {
         XCTAssertEqual(repo.getActiveAccount()?.username, "mate")
         XCTAssertEqual(jarSessionIds, ["sid-b"])
     }
+
+    // MARK: - pi 1001f
+
+    /// A repository over its own real-Keychain service (nothing shared with other tests), seeded with
+    /// the active `tester` and the inactive `mate`; `mate`'s row has no recorded user id when
+    /// `mateUserIdKnown` is false (a historical row: `userId <= 0` reads as nil).
+    private func isolatedRepo(mateUserIdKnown: Bool) throws -> (AccountRepository, SecureStorage, OdooAccount) {
+        let store = SecureStorage(service: "odoo.tests.1001f.\(UUID().uuidString)")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [WoowHardeningURLProtocol.self]
+        config.httpCookieStorage = jar
+        let recorder = revoker!
+        let isolated = AccountRepository(persistence: persistence, secureStorage: store,
+                                         apiClient: OdooAPIClient(session: URLSession(configuration: config)),
+                                         brand: .woowtech, webDataCleaner: cleaner,
+                                         revokeSession: { _, sid in await recorder.record(sid) })
+        isolated.replaceAccountsForTesting([
+            SeededAccount(serverURL: server, database: "db", username: "tester", sessionCookie: "sid-a", isActive: true),
+            SeededAccount(serverURL: server, database: "db", username: "mate", sessionCookie: "sid-b-old", isActive: false),
+        ])
+        let context = persistence.container.viewContext
+        let mateEntity = try XCTUnwrap(try context.fetch(OdooAccountEntity.fetchAllRequest()).first { $0.username == "mate" })
+        if !mateUserIdKnown { mateEntity.userId = 0 }
+        try context.save()
+        let mate = try XCTUnwrap(isolated.getAllAccounts().first { $0.username == "mate" })
+        XCTAssertEqual(mate.userId, mateUserIdKnown ? 1 : nil, "precondition")
+        let ids = isolated.getAllAccounts().map(\.id)
+        addTeardownBlock {
+            for id in ids { store.deleteSessionId(accountId: id); store.deletePassword(accountId: id) }
+        }
+        putJarSession("sid-a")
+        return (isolated, store, mate)
+    }
+
+    /// P1 counterexample: mate's user id is unknown and mate's own Keychain key holds the session of
+    /// ANOTHER user (C, uid 7) of the same database. A database match is no proof of identity — the
+    /// session must not be adopted; tester and the jar stay, and mate is asked to sign in again.
+    func test_switchWithoutPassword_userIdUnknown_otherUsersSessionSameDatabase_notAdopted() async throws {
+        let (isolated, store, mate) = try isolatedRepo(mateUserIdKnown: false)
+        XCTAssertTrue(store.saveSessionId(accountId: mate.id, sessionId: "sid-c"))
+        XCTAssertNil(store.getPassword(accountId: mate.id))
+        WoowHardeningURLProtocol.reset([:])
+        WoowHardeningURLProtocol.setSessionInfo(["sid-c": (uid: 7, db: "db")])   // user C, same database
+
+        let switched = await isolated.switchAccount(id: mate.id)
+
+        XCTAssertFalse(switched, "an unproven session must not activate the account")
+        XCTAssertEqual(isolated.getActiveAccount()?.username, "tester")
+        XCTAssertEqual(jarSessionIds, ["sid-a"], "C's session is never published")
+        XCTAssertEqual(ReloginSignal.shared.lastRequestedAccountId, mate.id)
+        XCTAssertTrue(WoowHardeningURLProtocol.authLogins.isEmpty)
+    }
+
+    /// P1: a known user id that differs from the session's user is rejected the same way.
+    func test_switchWithoutPassword_knownUserIdDiffersFromSessionUser_notAdopted() async throws {
+        let (isolated, store, mate) = try isolatedRepo(mateUserIdKnown: true)
+        XCTAssertTrue(store.saveSessionId(accountId: mate.id, sessionId: "sid-c"))
+        WoowHardeningURLProtocol.reset([:])
+        WoowHardeningURLProtocol.setSessionInfo(["sid-c": (uid: 7, db: "db")])   // mate is uid 1
+
+        let switched = await isolated.switchAccount(id: mate.id)
+
+        XCTAssertFalse(switched)
+        XCTAssertEqual(isolated.getActiveAccount()?.username, "tester")
+        XCTAssertEqual(jarSessionIds, ["sid-a"])
+        XCTAssertEqual(ReloginSignal.shared.lastRequestedAccountId, mate.id)
+    }
+
+    /// P1: a sign-in with credentials proves the identity — a switch that authenticates with the
+    /// stored password records the server's user id, so mate's own session can be proven later.
+    func test_switchWithPassword_userIdUnknown_recordsTheServerUserId() async throws {
+        let (isolated, store, mate) = try isolatedRepo(mateUserIdKnown: false)
+        XCTAssertTrue(store.savePassword(accountId: mate.id, password: "pw-b"))
+        WoowHardeningURLProtocol.reset(["mate": .init(sid: "sid-b-new")])   // authenticate answers uid 9
+
+        let switched = await isolated.switchAccount(id: mate.id)
+
+        XCTAssertTrue(switched)
+        XCTAssertEqual(isolated.getActiveAccount()?.username, "mate")
+        XCTAssertEqual(isolated.getActiveAccount()?.userId, 9, "the proven user id is persisted")
+        XCTAssertEqual(jarSessionIds, ["sid-b-new"])
+    }
 }
 
 /// Thread-safe call counter for the login-commit test seam.

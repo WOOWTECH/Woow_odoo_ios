@@ -154,7 +154,7 @@ AUDITED_SESSION_PROTOCOLS = {
     "SelfHealSharedJarIsolationTests.swift": ("HealJarURLProtocol",),  # 0930b (pi P1): offline authenticate replies only
     "SelfHealWebViewRecoveryTests.swift": ("RecoveryURLProtocol",),  # 1001 (demo111 defect 1): offline authenticate/destroy replies only
     "WoowSameHostLoginIsolationTests.swift": ("WoowLoginURLProtocol",),  # 1001 (demo111 defect 2): offline authenticate/destroy replies only
-    "WoowLoginSwitchHardeningTests.swift": ("WoowHardeningURLProtocol", "WoowHardeningURLProtocol"),  # 1001b/1001e (pi): offline authenticate/destroy/session-info replies only; 1001e adds a second (scoped Keychain) repository
+    "WoowLoginSwitchHardeningTests.swift": ("WoowHardeningURLProtocol", "WoowHardeningURLProtocol", "WoowHardeningURLProtocol"),  # 1001b/1001e/1001f (pi): offline authenticate/destroy/session-info replies only; 1001e and 1001f each add a scoped-Keychain repository
     "ServerUrlInputTests.swift": ("AuthRecordingURLProtocol",),
 }
 

@@ -194,6 +194,26 @@ final class ApporoSwitchSessionReuseTests: XCTestCase {
         XCTAssertEqual(revoked, ["sess-b"], "the replaced session is revoked best-effort")
     }
 
+    /// pi 1001f (P1): the account's user id was never recorded — a session the server accepts for
+    /// this database is still no proof it is THIS user's. Re-authenticate with the stored credential.
+    func test_switch_givenUnknownUserId_doesNotReuseSessionAndReauthenticates() async throws {
+        let context = persistence.container.viewContext
+        let entity = try XCTUnwrap(try context.fetch(OdooAccountEntity.fetchAllRequest()).first { $0.id == accountB.id })
+        entity.userId = 0
+        try context.save()
+        accountB = try XCTUnwrap(repo.getAllAccounts().first { $0.id == accountB.id })
+        XCTAssertNil(accountB.userId, "precondition")
+        _ = try storeCredential(withCookie: true)
+
+        let switched = await repo.switchAccount(id: accountB.id)
+
+        XCTAssertTrue(switched)
+        XCTAssertEqual(SwitchURLProtocol.requests.map(\.path),
+                       ["/web/session/get_session_info", "/web/session/authenticate"],
+                       "an unproven session is replaced by a credential login")
+        XCTAssertEqual(secureStorage.pushCredential(accountId: accountB.id)?.sessionId, "sess-new")
+    }
+
     func test_switch_givenSessionOfAnotherUser_reauthenticates() async throws {
         _ = try storeCredential(withCookie: true)
         SwitchURLProtocol.infoMode = .valid(uid: 99, db: "demo888")
