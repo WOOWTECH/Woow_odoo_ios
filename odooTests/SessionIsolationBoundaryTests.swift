@@ -29,15 +29,15 @@ final class SessionIsolationBoundaryTests: XCTestCase {
 
     // MARK: - 缺陷 2：SecureStorage 的 key 組成（credential / session 歸屬）
 
-    /// 既定支援範圍：不同 host 的同名使用者，密碼必須各自獨立。
-    func test_secureStorageKey_givenDifferentHosts_isolatesCredentials() {
+    /// 既定支援範圍：不同帳號的同名使用者，密碼必須各自獨立。pi 1001d：密碼以帳號 id 定址。
+    func test_secureStorageKey_givenDifferentAccounts_isolatesCredentials() {
         let store = MockSecureStorage()
-        store.savePassword(serverUrl: hostA, username: "admin", password: "pw-A")
-        store.savePassword(serverUrl: hostB, username: "admin", password: "pw-B")
+        store.savePassword(accountId: "acct-A", password: "pw-A")
+        store.savePassword(accountId: "acct-B", password: "pw-B")
 
-        XCTAssertEqual(store.getPassword(serverUrl: hostA, username: "admin"), "pw-A",
-                       "不同 host 的憑證必須各自獨立 —— 這是既定支援範圍")
-        XCTAssertEqual(store.getPassword(serverUrl: hostB, username: "admin"), "pw-B")
+        XCTAssertEqual(store.getPassword(accountId: "acct-A"), "pw-A",
+                       "不同帳號的憑證必須各自獨立 —— 這是既定支援範圍")
+        XCTAssertEqual(store.getPassword(accountId: "acct-B"), "pw-B")
         XCTAssertEqual(store.store.count, 2, "應產生兩把相異的 key")
     }
 
@@ -55,33 +55,21 @@ final class SessionIsolationBoundaryTests: XCTestCase {
         XCTAssertEqual(store.getSessionId(accountId: "acct-db2"), "sess-2")
     }
 
-    /// 風險探測（characterisation）：**同 host 不同 port 會共用同一把 key**。
-    ///
-    /// 根因：`SecureStorage.passwordKey` 用 `URL(string:)?.host`，而 Swift 的
-    /// `URL.host` **不含 port**（port 另存於 `URL.port`）。
-    /// ⚠️ 此處 PASS 代表「已重現碰撞」，**不代表此行為正確**。
-    func test_secureStorageKey_givenSameHostDifferentPort_collides_characterisation() {
+    /// 原風險探測（同 host 不同 port、同 host 不同 DB 共用一把 key）已依檔頭說明翻轉為驗收：
+    /// pi 1001d 決定支援同 host 多 DB／多 port，密碼改以帳號 id 定址後，兩個帳號各自獨立。
+    func test_secureStorageKey_givenSameHostDifferentPortOrDatabase_isolatesCredentials() {
         let store = MockSecureStorage()
-        store.savePassword(serverUrl: sameHostP1, username: "admin", password: "pw-port-443")
-        store.savePassword(serverUrl: sameHostP2, username: "admin", password: "pw-port-8069")
+        store.savePassword(accountId: "acct-port-443", password: "pw-port-443")
+        store.savePassword(accountId: "acct-port-8069", password: "pw-port-8069")
+        store.savePassword(accountId: "acct-db-alpha", password: "pw-db-alpha")
+        store.savePassword(accountId: "acct-db-beta", password: "pw-db-beta")
 
-        XCTAssertEqual(store.store.count, 1,
-                       "重現：port 不進 key，兩個 port 共用一筆 —— 支援範圍待 owner 決定")
-        XCTAssertEqual(store.getPassword(serverUrl: sameHostP1, username: "admin"), "pw-port-8069",
-                       "重現：後寫入者覆蓋前者，:443 取回的是 :8069 的密碼")
-    }
-
-    /// 風險探測（characterisation）：**同 host 同使用者、不同 DB 會共用同一把 key**。
-    /// 根因：key 只有 host+username，DB 完全不參與。
-    func test_secureStorageKey_givenSameHostDifferentDatabase_collides_characterisation() {
-        let store = MockSecureStorage()
-        // 兩個 DB 的同名使用者，serverUrl 完全相同 —— key 無從區分
-        store.savePassword(serverUrl: sameHostP1, username: "admin", password: "pw-db-alpha")
-        store.savePassword(serverUrl: sameHostP1, username: "admin", password: "pw-db-beta")
-
-        XCTAssertEqual(store.store.count, 1, "重現：DB 不進 key")
-        XCTAssertEqual(store.getPassword(serverUrl: sameHostP1, username: "admin"), "pw-db-beta",
-                       "重現：第二個 DB 的密碼覆蓋了第一個")
+        XCTAssertEqual(store.store.count, 4, "每個帳號一把 key")
+        XCTAssertEqual(store.getPassword(accountId: "acct-port-443"), "pw-port-443")
+        XCTAssertEqual(store.getPassword(accountId: "acct-port-8069"), "pw-port-8069")
+        XCTAssertEqual(store.getPassword(accountId: "acct-db-alpha"), "pw-db-alpha",
+                       "第二個 DB 的密碼不再覆蓋第一個")
+        XCTAssertEqual(store.getPassword(accountId: "acct-db-beta"), "pw-db-beta")
     }
 
     // MARK: - 缺陷 3：tenant 回寫的歸屬（可修）

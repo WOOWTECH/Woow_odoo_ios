@@ -72,23 +72,14 @@ final class MockAccountRepository: AccountRepositoryProtocol, @unchecked Sendabl
 /// Stores passwords in a plain dictionary — no Keychain access required.
 final class MockSecureStorage: SecureStorageProtocol, @unchecked Sendable {
 
-    /// Internal dictionary keyed as `"pwd_{host}_{username}"`, matching SecureStorage's scoped format (H6).
+    /// Internal dictionary keyed by saved account id, matching SecureStorage (pi 1001c/1001d).
     var store: [String: String] = [:]
 
-    func savePassword(serverUrl: String, username: String, password: String) {
-        let host = URL(string: serverUrl)?.host ?? serverUrl
-        store["pwd_\(host)_\(username)"] = password
-    }
+    func savePassword(accountId: String, password: String) { store["pwd_acct_\(accountId)"] = password }
 
-    func getPassword(serverUrl: String, username: String) -> String? {
-        let host = URL(string: serverUrl)?.host ?? serverUrl
-        return store["pwd_\(host)_\(username)"]
-    }
+    func getPassword(accountId: String) -> String? { store["pwd_acct_\(accountId)"] }
 
-    func deletePassword(serverUrl: String, username: String) {
-        let host = URL(string: serverUrl)?.host ?? serverUrl
-        store.removeValue(forKey: "pwd_\(host)_\(username)")
-    }
+    func deletePassword(accountId: String) { store.removeValue(forKey: "pwd_acct_\(accountId)") }
 
     func migratePasswordKeys(accounts: [OdooAccount]) {
         // No-op in mock — migration only applies to real Keychain

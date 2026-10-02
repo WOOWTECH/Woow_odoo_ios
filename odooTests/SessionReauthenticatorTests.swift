@@ -162,7 +162,7 @@ final class SessionReauthenticatorTests: XCTestCase {
         let repo = StubAccountRepo(); repo.accounts = accounts
         let storage = MockSecureStorage()
         if let password, let acc = accounts.first {
-            storage.savePassword(serverUrl: acc.fullServerUrl, username: acc.username, password: password)
+            storage.savePassword(accountId: acc.id, password: password)
         }
         return SessionReauthenticator(
             accountRepository: repo,

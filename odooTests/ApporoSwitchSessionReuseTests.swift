@@ -155,8 +155,8 @@ final class ApporoSwitchSessionReuseTests: XCTestCase {
     /// session. After a heal, switching to B must reuse the healed session (no new login).
     func test_switch_afterSelfHealOfTarget_reusesHealedSessionWithoutReauthenticating() async throws {
         let stored = try storeCredential(withCookie: true)
-        secureStorage.savePassword(serverUrl: accountB.fullServerUrl, username: accountB.username, password: "password-b")
-        defer { secureStorage.deletePassword(serverUrl: accountB.fullServerUrl, username: accountB.username) }
+        secureStorage.savePassword(accountId: accountB.id, password: "password-b")
+        defer { secureStorage.deletePassword(accountId: accountB.id) }
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [SwitchURLProtocol.self]
         let reauth = SessionReauthenticator(accountRepository: repo, secureStorage: secureStorage,

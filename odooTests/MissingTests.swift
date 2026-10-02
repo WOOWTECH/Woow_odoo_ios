@@ -363,7 +363,7 @@ final class AccountRepositoryTests: XCTestCase {
         // No password means no reauthentication: Apporo still requires a usable
         // account-bound cookie; WOOW preserves its legacy credential-free switch.
         let account = e2.toDomainModel()
-        secureStorage.deletePassword(serverUrl: account.fullServerUrl, username: account.username)
+        secureStorage.deletePassword(accountId: account.id)
         secureStorage.deletePushCredential(accountId: account.id)
         defer {
             secureStorage.deletePushCredential(accountId: account.id)
@@ -416,13 +416,13 @@ final class AccountRepositoryTests: XCTestCase {
         try? context.save()
 
         // Seed a password that logout must clear.
-        secureStorage.savePassword(serverUrl: "https://odoo.example.com", username: "admin", password: "secret")
+        secureStorage.savePassword(accountId: "logout-test", password: "secret")
 
         await repository.logout(accountId: "logout-test")
 
         let remaining = try? context.fetch(OdooAccountEntity.fetchByIdRequest(id: "logout-test"))
         XCTAssertEqual(remaining?.count ?? 0, 0, "logout must delete the Core Data entity")
-        XCTAssertNil(secureStorage.getPassword(serverUrl: "https://odoo.example.com", username: "admin"),
+        XCTAssertNil(secureStorage.getPassword(accountId: "logout-test"),
                      "logout must remove the password from Keychain")
     }
 
@@ -1282,21 +1282,21 @@ final class SecureStorageConcurrencyTests: XCTestCase {
         await withTaskGroup(of: Void.self) { group in
             for i in 0..<20 {
                 group.addTask {
-                    storage.savePassword(serverUrl: "https://test.com", username: key, password: "value-\(i)")
+                    storage.savePassword(accountId: key, password: "value-\(i)")
                 }
                 group.addTask {
-                    _ = storage.getPassword(serverUrl: "https://test.com", username: key)
+                    _ = storage.getPassword(accountId: key)
                 }
             }
         }
 
         // After all concurrent ops, the stored value must be one of the written values.
-        let finalValue = storage.getPassword(serverUrl: "https://test.com", username: key)
+        let finalValue = storage.getPassword(accountId: key)
         if let finalValue {
             XCTAssertTrue(finalValue.hasPrefix("value-"),
                           "After concurrent writes, stored value must be one of the written values, got: \(finalValue)")
         }
-        storage.deletePassword(serverUrl: "https://test.com", username: key)
+        storage.deletePassword(accountId: key)
     }
 }
 

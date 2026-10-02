@@ -113,7 +113,7 @@ final class WoowSameHostLoginIsolationTests: XCTestCase {
     override func tearDown() async throws {
         for account in repo.getAllAccounts() {
             keychain.deleteSessionId(accountId: account.id)
-            keychain.deletePassword(serverUrl: account.fullServerUrl, username: account.username)
+            keychain.deletePassword(accountId: account.id)
         }
         jar.cookies(for: URL(string: server)!)?.forEach { jar.deleteCookie($0) }
         repo = nil
@@ -163,7 +163,7 @@ final class WoowSameHostLoginIsolationTests: XCTestCase {
             SeededAccount(serverURL: server, database: "db", username: "mate", sessionCookie: "sid-b", isActive: true),
         ])
         let a = try XCTUnwrap(repo.getAllAccounts().first { $0.username == "tester" })
-        keychain.savePassword(serverUrl: server, username: "tester", password: "pw-a")
+        keychain.savePassword(accountId: try XCTUnwrap(repo.getAllAccounts().first { $0.username == "tester" }).id, password: "pw-a")
         putJarSession("sid-b")
         WoowLoginURLProtocol.reset(reply: "sid-a-new")
 

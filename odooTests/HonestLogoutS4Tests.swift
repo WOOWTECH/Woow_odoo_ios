@@ -125,14 +125,14 @@ final class HonestLogoutS4Tests: XCTestCase {
         ])
 
         // Store passwords for both accounts (replaceAccountsForTesting only seeds session ids).
-        secureStorage.savePassword(serverUrl: serverA, username: "admin", password: passwordA)
-        secureStorage.savePassword(serverUrl: serverB, username: "admin", password: passwordB)
+        for account in repo.getAllAccounts() {
+            secureStorage.savePassword(accountId: account.id, password: account.database == "demo777" ? passwordA : passwordB)
+        }
     }
 
     override func tearDown() async throws {
         // Clean up the shared Keychain singleton so tests stay independent.
-        secureStorage.deletePassword(serverUrl: serverA, username: "admin")
-        secureStorage.deletePassword(serverUrl: serverB, username: "admin")
+        for account in repo?.getAllAccounts() ?? [] { secureStorage.deletePassword(accountId: account.id) }
         for account in repo?.getAllAccounts() ?? [] { secureStorage.deleteSessionId(accountId: account.id) }
         secureStorage.deleteFcmToken()
         LogoutURLProtocol.reset()
@@ -150,9 +150,9 @@ final class HonestLogoutS4Tests: XCTestCase {
     ///       — not merely the cookie.
     func test_honestLogout_firesUnregister_removesRow_andClearsCredentials() async {
         XCTAssertEqual(repo.getActiveAccount()?.database, "demo888", "precondition: B active")
-        XCTAssertNotNil(secureStorage.getPassword(serverUrl: serverB, username: "admin"),
-                        "precondition: B's password is stored")
         let bId = repo.getActiveAccount()?.id ?? ""
+        XCTAssertNotNil(secureStorage.getPassword(accountId: bId),
+                        "precondition: B's password is stored")
 
         await repo.logout(accountId: nil) // logs out the active account (B)
 
@@ -169,7 +169,7 @@ final class HonestLogoutS4Tests: XCTestCase {
         )
 
         // (b2) B's stored credentials are cleared.
-        XCTAssertNil(secureStorage.getPassword(serverUrl: serverB, username: "admin"),
+        XCTAssertNil(secureStorage.getPassword(accountId: bId),
                      "honest logout must clear B's stored password")
         XCTAssertNil(secureStorage.getSessionId(accountId: bId),
                      "honest logout must clear B's stored session id")
@@ -189,7 +189,7 @@ final class HonestLogoutS4Tests: XCTestCase {
         XCTAssertEqual(repo.getAllAccounts().count, 1, "only the logged-out account B is removed")
 
         // A's credentials are intact.
-        XCTAssertEqual(secureStorage.getPassword(serverUrl: serverA, username: "admin"), passwordA,
+        XCTAssertEqual(secureStorage.getPassword(accountId: active?.id ?? ""), passwordA,
                        "the sibling A's stored password must be untouched")
         XCTAssertEqual(secureStorage.getSessionId(accountId: active?.id ?? ""), sessionA,
                        "the sibling A's stored session id must be untouched")
@@ -208,6 +208,7 @@ final class HonestLogoutS4Tests: XCTestCase {
     /// cannot linger and poison future reconciles.
     func test_honestLogout_whenUnregisterFails_stillRemovesRowAndClearsCredentials() async {
         LogoutURLProtocol.mode = .fail
+        let bId = repo.getActiveAccount()?.id ?? ""
 
         await repo.logout(accountId: nil) // B out — unregister will throw
 
@@ -222,7 +223,7 @@ final class HonestLogoutS4Tests: XCTestCase {
             repo.getAllAccounts().first(where: { $0.database == "demo888" }),
             "a failed remote unregister must NOT block local row removal (best-effort)"
         )
-        XCTAssertNil(secureStorage.getPassword(serverUrl: serverB, username: "admin"),
+        XCTAssertNil(secureStorage.getPassword(accountId: bId),
                      "credentials must be cleared even when unregister fails")
 
         // And the app stays authenticated on the surviving sibling.

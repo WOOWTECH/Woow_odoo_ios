@@ -3,9 +3,11 @@ import Security
 
 /// Protocol for secure credential storage, enabling injection and testing without Keychain access.
 protocol SecureStorageProtocol: Sendable {
-    func savePassword(serverUrl: String, username: String, password: String)
-    func getPassword(serverUrl: String, username: String) -> String?
-    func deletePassword(serverUrl: String, username: String)
+    /// Passwords are keyed by the saved account's id (pi 1001d): host+username collided for two
+    /// databases on one host with the same username.
+    func savePassword(accountId: String, password: String)
+    func getPassword(accountId: String) -> String?
+    func deletePassword(accountId: String)
     func migratePasswordKeys(accounts: [OdooAccount])
 
     /// Session ids are keyed by the saved account's id (pi 1001c): host+username collided for two
@@ -28,45 +30,54 @@ final class SecureStorage: SecureStorageProtocol, PushCredentialStorage, Sendabl
 
     private let service = AppBrand.current.keychainService
 
-    // MARK: - Password Storage (per account, scoped to server host)
+    // MARK: - Password Storage (per saved account)
 
-    /// Builds a Keychain key scoped to both the server host and username, preventing
-    /// credential collisions when the same username exists on multiple Odoo servers.
-    /// Uses only the hostname component (e.g. "company.odoo.com") to keep the key clean.
-    private func passwordKey(serverUrl: String, username: String) -> String {
+    /// pi 1001d: a password is keyed by the saved account's id. The former key
+    /// (`pwd_{host}_{username}`) collided when one host served two databases (or ports) with the
+    /// same username, so switching to one account authenticated with the other's password.
+    private func passwordKey(accountId: String) -> String { "pwd_acct_\(accountId)" }
+
+    /// The former keys, read only by ``migratePasswordKeys(accounts:)``.
+    private func legacyPasswordKey(serverUrl: String, username: String) -> String {
         let host = URL(string: serverUrl)?.host ?? serverUrl
         return "pwd_\(host)_\(username)"
     }
 
-    /// Saves a password scoped to a specific server and username.
-    func savePassword(serverUrl: String, username: String, password: String) {
-        save(key: passwordKey(serverUrl: serverUrl, username: username), value: password)
+    /// Saves one saved account's password.
+    func savePassword(accountId: String, password: String) {
+        guard !accountId.isEmpty else { return }
+        save(key: passwordKey(accountId: accountId), value: password)
     }
 
-    /// Retrieves the password for a specific server and username combination.
-    func getPassword(serverUrl: String, username: String) -> String? {
-        get(key: passwordKey(serverUrl: serverUrl, username: username))
+    /// Retrieves one saved account's password.
+    func getPassword(accountId: String) -> String? {
+        guard !accountId.isEmpty else { return nil }
+        return get(key: passwordKey(accountId: accountId))
     }
 
-    /// Deletes the password for a specific server and username combination.
-    func deletePassword(serverUrl: String, username: String) {
-        delete(key: passwordKey(serverUrl: serverUrl, username: username))
+    /// Deletes one saved account's password.
+    func deletePassword(accountId: String) {
+        guard !accountId.isEmpty else { return }
+        delete(key: passwordKey(accountId: accountId))
     }
 
-    /// Migrates legacy Keychain keys from the old format `pwd_{username}` to the
-    /// server-scoped format `pwd_{host}_{username}`. Safe to call multiple times —
-    /// already-migrated entries are skipped because the old key no longer exists
-    /// after the first successful migration.
+    /// Moves each legacy password — `pwd_{host}_{username}`, or the oldest `pwd_{username}` — to its
+    /// account's key. A legacy key that two or more saved accounts map to (same host and username,
+    /// different databases or ports) cannot say whose password it was: it is dropped, not guessed —
+    /// that account asks for its password again. Idempotent: legacy keys are deleted once processed.
     func migratePasswordKeys(accounts: [OdooAccount]) {
-        for account in accounts {
-            let legacyKey = "pwd_\(account.username)"
-            let newKey = passwordKey(serverUrl: account.fullServerUrl, username: account.username)
-
-            // Skip if the new key already exists, or if there is nothing to migrate
-            guard get(key: newKey) == nil,
-                  let existingPassword = get(key: legacyKey) else { continue }
-
-            save(key: newKey, value: existingPassword)
+        for (legacyKey, owners) in Dictionary(grouping: accounts, by: { legacyPasswordKey(serverUrl: $0.fullServerUrl, username: $0.username) }) {
+            guard let legacy = get(key: legacyKey) else { continue }
+            if owners.count == 1, let owner = owners.first, getPassword(accountId: owner.id) == nil {
+                savePassword(accountId: owner.id, password: legacy)
+            }
+            delete(key: legacyKey)
+        }
+        for (legacyKey, owners) in Dictionary(grouping: accounts, by: { "pwd_\($0.username)" }) {
+            guard let legacy = get(key: legacyKey) else { continue }
+            if owners.count == 1, let owner = owners.first, getPassword(accountId: owner.id) == nil {
+                savePassword(accountId: owner.id, password: legacy)
+            }
             delete(key: legacyKey)
         }
     }

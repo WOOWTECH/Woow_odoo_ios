@@ -309,7 +309,7 @@ final class SecureStorageTests: XCTestCase {
 
     override func tearDown() {
         super.tearDown()
-        storage.deletePassword(serverUrl: "https://test.com", username: "test-account")
+        storage.deletePassword(accountId: "test-account")
         storage.deletePinHash()
         // CLAUDE.md "Test Independence" — `test_saveAndGetSettings_roundTrips`
         // writes themeColor=#FF0000 to the simulator's keychain. Without
@@ -320,20 +320,20 @@ final class SecureStorageTests: XCTestCase {
     }
 
     func test_saveAndGetPassword_givenValidData_roundTrips() {
-        storage.savePassword(serverUrl: "https://test.com", username: "test-account", password: "secret123")
-        let retrieved = storage.getPassword(serverUrl: "https://test.com", username: "test-account")
+        storage.savePassword(accountId: "test-account", password: "secret123")
+        let retrieved = storage.getPassword(accountId: "test-account")
         XCTAssertEqual(retrieved, "secret123")
     }
 
     func test_getPassword_givenMissingKey_returnsNil() {
-        let result = storage.getPassword(serverUrl: "https://none.com", username: "nonexistent-account")
+        let result = storage.getPassword(accountId: "nonexistent-account")
         XCTAssertNil(result)
     }
 
     func test_deletePassword_givenExistingKey_removesIt() {
-        storage.savePassword(serverUrl: "https://test.com", username: "test-account", password: "toDelete")
-        storage.deletePassword(serverUrl: "https://test.com", username: "test-account")
-        XCTAssertNil(storage.getPassword(serverUrl: "https://test.com", username: "test-account"))
+        storage.savePassword(accountId: "test-account", password: "toDelete")
+        storage.deletePassword(accountId: "test-account")
+        XCTAssertNil(storage.getPassword(accountId: "test-account"))
     }
 
     func test_saveAndGetSettings_roundTrips() {

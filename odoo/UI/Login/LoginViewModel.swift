@@ -56,7 +56,7 @@ final class LoginViewModel: ObservableObject {
         serverUrl = account.serverUrl
         database = account.database
         username = account.username
-        if let savedPassword = secureStorage.getPassword(serverUrl: account.fullServerUrl, username: account.username) {
+        if let savedPassword = secureStorage.getPassword(accountId: account.id) {
             password = savedPassword
         }
         step = .credentials

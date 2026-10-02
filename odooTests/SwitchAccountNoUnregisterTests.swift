@@ -160,7 +160,8 @@ final class SwitchAccountNoUnregisterTests: XCTestCase {
 
         // Store a password for B so switchAccount's session-validation authenticate call runs.
         // (replaceAccountsForTesting seeds only the session cookie, not a password.)
-        secureStorage.savePassword(serverUrl: serverB, username: usernameB, password: passwordB)
+        let accountForB = try XCTUnwrap(repo.getAllAccounts().first { $0.database == "demo888" })
+        secureStorage.savePassword(accountId: accountForB.id, password: passwordB)
 
         // Apporo must authenticate with the selected account's scoped credential,
         // never the ambiguous legacy host+username password. WOOW retains that legacy fixture.
@@ -182,7 +183,7 @@ final class SwitchAccountNoUnregisterTests: XCTestCase {
             }
         }
         secureStorage.deleteFcmToken()
-        secureStorage.deletePassword(serverUrl: serverB, username: usernameB)
+        for account in repo?.getAllAccounts() ?? [] { secureStorage.deletePassword(accountId: account.id) }
         repo = nil
         persistence = nil
         secureStorage = nil

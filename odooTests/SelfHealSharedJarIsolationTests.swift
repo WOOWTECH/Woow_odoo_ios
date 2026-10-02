@@ -161,7 +161,7 @@ final class SelfHealSharedJarIsolationTests: XCTestCase {
     private func storage(_ accounts: [OdooAccount], sessions: [String: String]) -> MockSecureStorage {
         let storage = MockSecureStorage()
         for a in accounts {
-            storage.savePassword(serverUrl: a.fullServerUrl, username: a.username, password: "pw-\(a.username)")
+            storage.savePassword(accountId: a.id, password: "pw-\(a.username)")
             if let sid = sessions[a.username] {
                 storage.saveSessionId(accountId: a.id, sessionId: sid)
             }

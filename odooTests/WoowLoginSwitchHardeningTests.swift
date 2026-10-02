@@ -25,15 +25,19 @@ private final class WoowHardeningURLProtocol: URLProtocol {
     private static let lock = NSLock()
     private static var scripts: [String: [Script]] = [:]
     private static var _authLogins: [String] = []
+    private static var _authRequests: [(login: String, db: String, password: String)] = []
     private static var _destroyed: [String] = []
     private static var heldDeliveries: [() -> Void] = []
 
     static func reset(_ scripts: [String: Script]) { reset(sequences: scripts.mapValues { [$0] }) }
     /// One script per authenticate request for that login, in order; the last one repeats.
     static func reset(sequences: [String: [Script]]) {
-        lock.lock(); self.scripts = sequences; _authLogins = []; _destroyed = []; heldDeliveries = []; lock.unlock()
+        lock.lock(); self.scripts = sequences; _authLogins = []; _authRequests = []; _destroyed = []; heldDeliveries = []; lock.unlock()
     }
     static var authLogins: [String] { lock.lock(); defer { lock.unlock() }; return _authLogins }
+    static var authRequests: [(login: String, db: String, password: String)] {
+        lock.lock(); defer { lock.unlock() }; return _authRequests
+    }
     static var destroyed: [String] { lock.lock(); defer { lock.unlock() }; return _destroyed }
     static func releaseHeld() {
         lock.lock(); let pending = heldDeliveries; heldDeliveries = []; lock.unlock()
@@ -55,6 +59,7 @@ private final class WoowHardeningURLProtocol: URLProtocol {
         let login = params?["login"] as? String ?? "", db = params?["db"] as? String ?? ""
         Self.lock.lock()
         Self._authLogins.append(login)
+        Self._authRequests.append((login, db, params?["password"] as? String ?? ""))
         var queue = Self.scripts[login] ?? []
         let script = queue.first ?? Script(sid: "sid-\(login)")
         if queue.count > 1 { queue.removeFirst(); Self.scripts[login] = queue }
@@ -94,9 +99,22 @@ private final class WoowHardeningURLProtocol: URLProtocol {
     }
 }
 
+/// No-op WebKit cleaner that can hold the next removal's cleanup step (pi 1001d: lets a test order
+/// a login against a logout that is still in progress).
 @MainActor
 private final class HardeningNoopWebDataCleaner: AccountWebDataCleaning {
-    func sessionIds(forAccountId id: String, host: String) async -> [String] { [] }
+    var holdNext = false
+    var onHeld: (() -> Void)?
+    private var waiter: CheckedContinuation<Void, Never>?
+    func release() { waiter?.resume(); waiter = nil }
+    func sessionIds(forAccountId id: String, host: String) async -> [String] {
+        if holdNext {
+            holdNext = false
+            onHeld?()
+            await withCheckedContinuation { waiter = $0 }
+        }
+        return []
+    }
     func removeWebData(forAccountId id: String, host: String, sessionIds: Set<String>,
                        otherAccountHosts: [String]) async {}
     func pruneOrphanStores(keeping accountIds: Set<String>) async {}
@@ -117,6 +135,7 @@ final class WoowLoginSwitchHardeningTests: XCTestCase {
     private var persistence: PersistenceController!
     private var repo: AccountRepository!
     private var revoker: HardeningRevokeRecorder!
+    private var cleaner: HardeningNoopWebDataCleaner!
 
     override func setUp() async throws {
         try await super.setUp()
@@ -127,17 +146,19 @@ final class WoowLoginSwitchHardeningTests: XCTestCase {
         config.httpCookieStorage = jar
         revoker = HardeningRevokeRecorder()
         let recorder = revoker!
+        cleaner = HardeningNoopWebDataCleaner()
         repo = AccountRepository(persistence: persistence, secureStorage: keychain,
                                  apiClient: OdooAPIClient(session: URLSession(configuration: config)),
-                                 brand: .woowtech, webDataCleaner: HardeningNoopWebDataCleaner(),
+                                 brand: .woowtech, webDataCleaner: cleaner,
                                  revokeSession: { _, sid in await recorder.record(sid) })
     }
 
     override func tearDown() async throws {
         WoowHardeningURLProtocol.releaseHeld()
+        cleaner?.release()
         for account in repo.getAllAccounts() {
             keychain.deleteSessionId(accountId: account.id)
-            keychain.deletePassword(serverUrl: account.fullServerUrl, username: account.username)
+            keychain.deletePassword(accountId: account.id)
         }
         jar.cookies(for: URL(string: server)!)?.forEach { jar.deleteCookie($0) }
         repo = nil
@@ -210,7 +231,7 @@ final class WoowLoginSwitchHardeningTests: XCTestCase {
             SeededAccount(serverURL: server, database: "db", username: "mate", sessionCookie: "sid-b-old", isActive: false),
         ])
         let b = try XCTUnwrap(repo.getAllAccounts().first { $0.username == "mate" })
-        keychain.savePassword(serverUrl: server, username: "mate", password: "pw-b")
+        keychain.savePassword(accountId: try XCTUnwrap(repo.getAllAccounts().first { $0.username == "mate" }).id, password: "pw-b")
         putJarSession("sid-a")
         WoowHardeningURLProtocol.reset(["mate": .init(sid: "sid-b-new", maxAge: 1, hold: true)])
 
@@ -237,8 +258,8 @@ final class WoowLoginSwitchHardeningTests: XCTestCase {
         ])
         let b = try XCTUnwrap(repo.getAllAccounts().first { $0.username == "mate" })
         let c = try XCTUnwrap(repo.getAllAccounts().first { $0.username == "third" })
-        keychain.savePassword(serverUrl: server, username: "mate", password: "pw-b")
-        keychain.savePassword(serverUrl: server, username: "third", password: "pw-c")
+        keychain.savePassword(accountId: try XCTUnwrap(repo.getAllAccounts().first { $0.username == "mate" }).id, password: "pw-b")
+        keychain.savePassword(accountId: try XCTUnwrap(repo.getAllAccounts().first { $0.username == "third" }).id, password: "pw-c")
         putJarSession("sid-a")
         WoowHardeningURLProtocol.reset(["mate": .init(sid: "sid-b-new", hold: true),
                                         "third": .init(sid: "sid-c-new")])
@@ -346,7 +367,7 @@ final class WoowLoginSwitchHardeningTests: XCTestCase {
         ])
         let b = try XCTUnwrap(repo.getAllAccounts().first { $0.username == "mate" })
         let c = try XCTUnwrap(repo.getAllAccounts().first { $0.username == "third" })
-        keychain.savePassword(serverUrl: server, username: "mate", password: "pw-b")
+        keychain.savePassword(accountId: try XCTUnwrap(repo.getAllAccounts().first { $0.username == "mate" }).id, password: "pw-b")
         WoowHardeningURLProtocol.reset(["mate": .init(sid: "sid-b-new", hold: true)])
 
         let toB = Task { await repo.switchAccount(id: b.id) }
@@ -416,6 +437,58 @@ final class WoowLoginSwitchHardeningTests: XCTestCase {
         let afterLogout = await revoked(containing: "sid-2")
         XCTAssertTrue(afterLogout.contains("sid-2"), "logging db2 out revokes db2's own session")
         XCTAssertFalse(afterLogout.contains("sid-1n"), "db1's live session is never revoked by db2's logout")
+        XCTAssertEqual(repo.getActiveAccount()?.database, "db1")
+    }
+
+    // MARK: - pi 1001d
+
+    /// P1 (reverse order): the logout of B is in progress when B's login starts; the logout finishes;
+    /// then the login's response arrives. B must stay removed; a session the login obtained is revoked.
+    func test_logoutInProgress_loginStartsThenAnswersAfterLogout_doesNotResurrect() async throws {
+        repo.replaceAccountsForTesting([
+            SeededAccount(serverURL: server, database: "db", username: "tester", sessionCookie: "sid-a", isActive: true),
+            SeededAccount(serverURL: server, database: "db", username: "mate", sessionCookie: "sid-b-old", isActive: false),
+        ])
+        let b = try XCTUnwrap(repo.getAllAccounts().first { $0.username == "mate" })
+        let removalHeld = expectation(description: "logout of B is mid-removal")
+        cleaner.holdNext = true
+        cleaner.onHeld = { removalHeld.fulfill() }
+        let logout = Task { await repo.logout(accountId: b.id) }
+        await fulfillment(of: [removalHeld], timeout: 5)
+
+        WoowHardeningURLProtocol.reset(["mate": .init(sid: "sid-b-new", hold: true)])
+        let login = Task { await repo.authenticate(serverUrl: server, database: "db", username: "mate", password: "pw-b") }
+        await waitForAuthRequests(1)          // a fixed login may refuse before any request
+        cleaner.release()
+        await logout.value
+        WoowHardeningURLProtocol.releaseHeld()
+        let result = await login.value
+
+        XCTAssertFalse(result.isSuccess, "a login started during B's removal must not commit")
+        XCTAssertFalse(repo.getAllAccounts().contains { $0.username == "mate" }, "the removed account stays removed")
+        XCTAssertEqual(repo.getActiveAccount()?.username, "tester")
+        XCTAssertFalse(jarSessionIds.contains("sid-b-new"))
+        if WoowHardeningURLProtocol.authLogins.contains("mate") {
+            let ids = await revoked(containing: "sid-b-new")
+            XCTAssertTrue(ids.contains("sid-b-new"), "a session obtained by the refused login is revoked")
+        }
+    }
+
+    /// P2: two databases on one host, same username, different passwords. Switching back to the first
+    /// must authenticate with ITS password, not the one saved last for the other database.
+    func test_sameHostSameUsername_twoDatabasesDifferentPasswords_switchUsesOwnPassword() async throws {
+        WoowHardeningURLProtocol.reset(sequences: ["tester": [.init(sid: "sid-1"), .init(sid: "sid-2"), .init(sid: "sid-1b")]])
+        let first = await repo.authenticate(serverUrl: server, database: "db1", username: "tester", password: "pw-1")
+        let second = await repo.authenticate(serverUrl: server, database: "db2", username: "tester", password: "pw-2")
+        XCTAssertTrue(first.isSuccess); XCTAssertTrue(second.isSuccess)
+        let db1 = try XCTUnwrap(repo.getAllAccounts().first { $0.database == "db1" })
+
+        let switched = await repo.switchAccount(id: db1.id)
+
+        XCTAssertTrue(switched)
+        let last = try XCTUnwrap(WoowHardeningURLProtocol.authRequests.last)
+        XCTAssertEqual(last.db, "db1")
+        XCTAssertEqual(last.password, "pw-1", "db1's own password, not db2's")
         XCTAssertEqual(repo.getActiveAccount()?.database, "db1")
     }
 }

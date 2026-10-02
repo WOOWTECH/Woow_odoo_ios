@@ -78,7 +78,7 @@ final class SelfHealAccountSwitchTests: XCTestCase {
 
     private func storage(for accounts: [OdooAccount]) -> MockSecureStorage {
         let storage = MockSecureStorage()
-        for a in accounts { storage.savePassword(serverUrl: a.fullServerUrl, username: a.username, password: "pw-\(a.username)") }
+        for a in accounts { storage.savePassword(accountId: a.id, password: "pw-\(a.username)") }
         return storage
     }
 

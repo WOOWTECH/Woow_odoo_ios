@@ -269,7 +269,7 @@ actor SessionReauthenticator {
     /// credentials, and applies the guardrails to the result. Returns true only when a fresh session
     /// was established and the request should be retried.
     private func performReauth(_ account: OdooAccount) async -> Bool {
-        guard let password = secureStorage.getPassword(serverUrl: account.fullServerUrl, username: account.username),
+        guard let password = secureStorage.getPassword(accountId: account.id),
               !password.isEmpty else {
             // No stored secret to re-auth with — surface a re-login rather than silently failing.
             AppLogger.auth.warning("Re-auth: no stored credentials for account \(account.id, privacy: .public) — signalling re-login")

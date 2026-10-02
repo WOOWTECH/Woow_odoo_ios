@@ -42,7 +42,7 @@ final class PushDeviceRegistrarTests: XCTestCase {
         session.invalidateAndCancel()
         SecureStorage.shared.deleteFcmToken()
         for account in [a, b] {
-            SecureStorage.shared.deletePassword(serverUrl: account.fullServerUrl, username: account.username)
+            SecureStorage.shared.deletePassword(accountId: account.id)
             SecureStorage.shared.deleteSessionId(accountId: account.id)
         }
         clearFixtureCookies()
@@ -202,7 +202,7 @@ final class PushDeviceRegistrarTests: XCTestCase {
 
     func test_apporo_missingScopedCredential_refusesLegacyFallback() async {
         credentials.deletePushCredential(accountId: a.id)
-        SecureStorage.shared.savePassword(serverUrl: a.fullServerUrl, username: a.username, password: "legacy-fixture")
+        SecureStorage.shared.savePassword(accountId: a.id, password: "legacy-fixture")
         SecureStorage.shared.saveSessionId(accountId: a.id, sessionId: "legacy-sid")
         await expectFailure { _ = try await self.register() }
         XCTAssertEqual(PushContractURLProtocol.calls.count, 0)
@@ -880,7 +880,7 @@ final class PushDeviceRegistrarTests: XCTestCase {
     func test_apporo_switchAccount_missingScopedCredential_doesNotBorrowLegacyOrActivate() async throws {
         let repository = try switchRepository()
         credentials.deletePushCredential(accountId: a.id)
-        SecureStorage.shared.savePassword(serverUrl: a.fullServerUrl, username: a.username, password: "legacy-ambiguous")
+        SecureStorage.shared.savePassword(accountId: a.id, password: "legacy-ambiguous")
         let beforeB = credentials.pushCredential(accountId: b.id)
         let switched = await repository.switchAccount(id: a.id)
         XCTAssertFalse(switched)
