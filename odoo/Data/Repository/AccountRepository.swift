@@ -107,6 +107,15 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         // pi 1001b (P1): logins and switches share one selection order for both brands — a later
         // selection supersedes this login, and this login supersedes an in-flight switch.
         let attempt = await PushManualLoginOrder.begin()
+        // pi 1001d (P1): a login that starts while this identity is being logged out or removed is
+        // refused at once; and one whose identity began a removal after it started stays stale even
+        // after that removal ends (removal generation captured here, re-checked at the commit).
+        let removalAtStart = await MainActor.run {
+            AccountRemovalFence.state(serverUrl: fullUrl, database: database, username: username)
+        }
+        if removalAtStart.isRemoving {
+            return .error(String(localized: "error_login_superseded"), .unknown)
+        }
         // demo111 1001 (defect 2): both brands log in WITHOUT the shared jar. The WOOW login used to
         // send the jar's session_id — another same-host account's — and Odoo re-authenticated THAT
         // session as this user and rotated it, logging the other account out on the server.
@@ -123,7 +132,7 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
                 // that raced the removal (its order is invalidated before the removal's first await;
                 // a login started during the removal is refused here).
                 if !PushManualLoginOrder.isCurrent(attempt) ||
-                    AccountRemovalFence.isRemoving(serverUrl: fullUrl, database: database, username: username) {
+                    AccountRemovalFence.state(serverUrl: fullUrl, database: database, username: username) != removalAtStart {
                     return (.error(String(localized: "error_login_superseded"), .unknown), nil)
                 }
                 // A short-lived response cookie may expire while waiting to commit. pi 1001b (P1): for
@@ -794,21 +803,28 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
 /// is refused, so a removed account is never resurrected by a login that raced the removal.
 @MainActor
 enum AccountRemovalFence {
+    /// pi 1001d: the identity's removal state — removing now, and how many removals ever began. A
+    /// login compares the state at its start with the state at its commit; any removal in between
+    /// (even one already finished) makes it stale.
+    struct State: Equatable { let isRemoving: Bool; let generation: Int }
     private static var removing: [String: Int] = [:]
+    private static var generations: [String: Int] = [:]
     private static func key(_ serverUrl: String, _ database: String, _ username: String) -> String {
         "\(serverUrl.ensureHTTPS)|\(database)|\(username)"
     }
     static func begin(_ account: OdooAccount) -> String {
         let k = key(account.serverUrl, account.database, account.username)
         removing[k, default: 0] += 1
+        generations[k, default: 0] += 1
         return k
+    }
+    static func state(serverUrl: String, database: String, username: String) -> State {
+        let k = key(serverUrl, database, username)
+        return State(isRemoving: removing[k] != nil, generation: generations[k] ?? 0)
     }
     static func end(_ key: String) {
         guard let count = removing[key] else { return }
         if count <= 1 { removing.removeValue(forKey: key) } else { removing[key] = count - 1 }
-    }
-    static func isRemoving(serverUrl: String, database: String, username: String) -> Bool {
-        removing[key(serverUrl, database, username)] != nil
     }
 }
 
