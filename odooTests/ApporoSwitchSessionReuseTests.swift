@@ -208,8 +208,8 @@ final class ApporoSwitchSessionReuseTests: XCTestCase {
         let switched = await repo.switchAccount(id: accountB.id)
 
         XCTAssertTrue(switched)
-        XCTAssertEqual(SwitchURLProtocol.requests.map(\.path),
-                       ["/web/session/get_session_info", "/web/session/authenticate"],
+        // pi 1001g: an unknown user id cannot prove any session, so it is not even asked about.
+        XCTAssertEqual(SwitchURLProtocol.requests.map(\.path), ["/web/session/authenticate"],
                        "an unproven session is replaced by a credential login")
         XCTAssertEqual(secureStorage.pushCredential(accountId: accountB.id)?.sessionId, "sess-new")
     }

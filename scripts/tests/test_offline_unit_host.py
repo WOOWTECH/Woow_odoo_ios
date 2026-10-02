@@ -45,7 +45,7 @@ def allow_audited_cookie_consumer_apply(text):
     # navigation is intercepted after real cookie-store completion; no remote load.
     name = "test_apporo_switchAccount_expiredAThroughBToA_withoutToken_reachesWebCookieConsumer"
     start = text.index("    func " + name + "()")
-    end = text.index("    private func switchRepository()", start)
+    end = text.index("    private func switchRepository(", start)  # 1001g: takes an optional aUserId
     test = text[start:end]
     for required in ["let stores = [a.id: WKWebsiteDataStore.nonPersistent(), b.id: WKWebsiteDataStore.nonPersistent()]",
                      "websiteDataStore: { stores[$0]! }, loadBaseRequest: { webView, request in",

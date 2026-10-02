@@ -473,15 +473,10 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         guard !credential.sessionId.isEmpty,
               let cookie = credential.sessionCookie?.cookie(), cookie.value == credential.sessionId,
               cookie.expiresDate.map({ $0 > Date() }) ?? true else { return false }
-        guard case .valid(let uid, let db) = await apiClient.pushSessionInfo(
-            serverUrl: account.fullServerUrl, sessionId: credential.sessionId) else { return false }
         // pi 0930: no database in the answer is no proof the session belongs to this database (two
-        // databases on one host can share a uid) — fail closed to a fresh login.
-        guard let db, db == account.database else { return false }
-        // pi 1001f (P1): the user must be positively the same — an unknown user id is no proof, so
-        // the switch logs in with the stored credential instead.
-        guard let userId = account.userId else { return false }
-        return userId == uid
+        // databases on one host can share a uid). pi 1001f (P1): the user must be positively the
+        // same — an unknown user id is no proof (not even asked).
+        return await storedSessionIsValid(credential.sessionId, for: account)
     }
 
     /// D5 (pi 0930): best-effort revoke of the session a switch replaced — called only AFTER the new
@@ -517,6 +512,14 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
                     sessionId: auth.sessionId, sessionCookie: auth.sessionCookie)
             }
         } else {
+            // pi 1001g (P1): without a password the stored session is the only way in — it is used
+            // only once the server proves it is still this account's (usable bound cookie, known user
+            // id, same uid and database). Unknown user id, another user or database, rejected or no
+            // answer: fail closed — the current account and its jar stay, this account signs in again.
+            guard await canReuseSession(of: captured, for: account) else {
+                ReloginSignal.shared.requestRelogin(accountId: account.id)
+                return false
+            }
             selected = captured
         }
 

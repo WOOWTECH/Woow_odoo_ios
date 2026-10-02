@@ -848,9 +848,12 @@ final class PushDeviceRegistrarTests: XCTestCase {
         XCTAssertTrue(PushContractURLProtocol.calls.allSatisfy { !$0.handlesCookies && $0.cookie == nil })
     }
 
-    private func switchRepository() throws -> AccountRepository {
+    /// `aUserId`: the user id recorded on account A's row (the fixture's is unknown — nil).
+    private func switchRepository(aUserId: Int? = nil) throws -> AccountRepository {
         let persistence = PersistenceController(inMemory: true)
-        for account in [a, b] { OdooAccountEntity(context: persistence.container.viewContext).update(from: account) }
+        for account in [aUserId.map { accountA(userId: $0) } ?? a, b] {
+            OdooAccountEntity(context: persistence.container.viewContext).update(from: account)
+        }
         try persistence.container.viewContext.save()
         let repository = AccountRepository(persistence: persistence, apiClient: api,
             brand: .apporo, pushCredentials: credentials)
@@ -890,23 +893,117 @@ final class PushDeviceRegistrarTests: XCTestCase {
         XCTAssertTrue(PushContractURLProtocol.calls.isEmpty)
     }
 
+    private func accountA(userId: Int) -> OdooAccount {
+        OdooAccount(id: a.id, serverUrl: a.serverUrl, database: a.database, username: a.username,
+                    displayName: a.displayName, userId: userId)
+    }
+
+    /// A passwordless credential whose session cookie is bound to `account`'s server.
+    private func passwordlessBoundCredential(for account: OdooAccount, sessionId: String) throws -> PushCredential {
+        let url = try XCTUnwrap(URL(string: account.fullServerUrl + "/web/session/authenticate"))
+        let cookie = try XCTUnwrap(HTTPCookie(properties: [.name: "session_id", .value: sessionId,
+            .domain: "push.invalid", .path: "/base", .secure: "TRUE"]))
+        let policy = try XCTUnwrap(PushSessionCookie(cookie: cookie, responseURL: url))
+        return PushCredential(account: account, password: "", sessionId: sessionId, sessionCookie: policy)
+    }
+
+    /// B's session in the jar, and a relogin baseline so a request for A is this test's own.
+    private func putPreviousJarSession() throws {
+        ReloginSignal.shared.requestRelogin(accountId: "baseline")
+        HTTPCookieStorage.shared.setCookie(try XCTUnwrap(HTTPCookie(properties: [.name: "session_id",
+            .value: "previous-b", .domain: "push.invalid", .path: "/", .secure: "TRUE"])))
+    }
+
+    /// pi 1001g: a passwordless switch needs a usable bound cookie AND the server's proof that the
+    /// session is still this account's (known user id, same uid and database) — one isolated
+    /// `get_session_info` call, never an authenticate. Without a cookie nothing is asked at all.
     func test_apporo_switchAccount_withoutPassword_requiresUsableBoundCookie() async throws {
-        let repository = try switchRepository()
-        credentials.savePushCredential(PushCredential(account: a, password: "", sessionId: "no-policy"))
+        let repository = try switchRepository(aUserId: 7)
+        let a7 = accountA(userId: 7)
+        credentials.savePushCredential(PushCredential(account: a7, password: "", sessionId: "no-policy"))
         let rejected = await repository.switchAccount(id: a.id)
         XCTAssertFalse(rejected)
         XCTAssertEqual(repository.getActiveAccount()?.id, b.id)
-        let url = try XCTUnwrap(URL(string: a.fullServerUrl + "/web/session/authenticate"))
-        let cookie = try XCTUnwrap(HTTPCookie(properties: [.name: "session_id", .value: "bound-a",
-            .domain: "push.invalid", .path: "/base", .secure: "TRUE"]))
-        let policy = try XCTUnwrap(PushSessionCookie(cookie: cookie, responseURL: url))
-        let bound = PushCredential(account: a, password: "", sessionId: "bound-a", sessionCookie: policy)
+        XCTAssertTrue(PushContractURLProtocol.sessionCheckCookies.isEmpty, "no cookie — nothing to prove")
+        let bound = try passwordlessBoundCredential(for: a7, sessionId: "bound-a")
         credentials.savePushCredential(bound)
+        PushContractURLProtocol.sessionInfoReply = .result(["uid": 7, "db": "db-a"])
         let switched = await repository.switchAccount(id: a.id)
         XCTAssertTrue(switched)
         XCTAssertEqual(repository.getActiveAccount()?.id, a.id)
         XCTAssertEqual(credentials.pushCredential(accountId: a.id), bound)
-        XCTAssertTrue(PushContractURLProtocol.calls.isEmpty)
+        XCTAssertEqual(PushContractURLProtocol.sessionCheckCookies, ["session_id=bound-a"],
+                       "the session is proven with ONLY its own cookie before the switch commits")
+        XCTAssertTrue(PushContractURLProtocol.calls.isEmpty, "no authenticate / call_kw")
+    }
+
+    /// pi 1001g (P1): A's user id is unknown and A's passwordless credential carries the session of
+    /// another user (C, uid 99) of the same database. Nothing proves it is A's — fail closed: B stays
+    /// active, the jar is untouched, A is asked to sign in again.
+    func test_apporo_passwordlessSwitch_unknownUserId_otherUsersSessionSameDatabase_doesNotSwitch() async throws {
+        let repository = try switchRepository()
+        try putPreviousJarSession()
+        credentials.savePushCredential(try passwordlessBoundCredential(for: a, sessionId: "sid-c"))
+        let beforeB = credentials.pushCredential(accountId: b.id)
+        PushContractURLProtocol.sessionInfoReply = .result(["uid": 99, "db": "db-a"])
+
+        let switched = await repository.switchAccount(id: a.id)
+
+        XCTAssertFalse(switched)
+        XCTAssertEqual(repository.getActiveAccount()?.id, b.id)
+        XCTAssertEqual(api.getSessionId(for: a.fullServerUrl), "previous-b", "C's session is never published")
+        XCTAssertEqual(credentials.pushCredential(accountId: b.id), beforeB)
+        XCTAssertEqual(ReloginSignal.shared.lastRequestedAccountId, a.id)
+    }
+
+    /// pi 1001g (P1): A's user id is known, but the server says the session belongs to another user.
+    func test_apporo_passwordlessSwitch_knownUserIdButSessionOfAnotherUser_doesNotSwitch() async throws {
+        let repository = try switchRepository(aUserId: 7)
+        try putPreviousJarSession()
+        credentials.savePushCredential(try passwordlessBoundCredential(for: accountA(userId: 7), sessionId: "sid-c"))
+        PushContractURLProtocol.sessionInfoReply = .result(["uid": 99, "db": "db-a"])
+
+        let switched = await repository.switchAccount(id: a.id)
+
+        XCTAssertFalse(switched)
+        XCTAssertEqual(PushContractURLProtocol.sessionCheckCookies, ["session_id=sid-c"])
+        XCTAssertEqual(repository.getActiveAccount()?.id, b.id)
+        XCTAssertEqual(api.getSessionId(for: a.fullServerUrl), "previous-b")
+        XCTAssertEqual(ReloginSignal.shared.lastRequestedAccountId, a.id)
+    }
+
+    /// pi 1001g (P1): no answer from the server is no proof either.
+    func test_apporo_passwordlessSwitch_sessionCheckUnreachable_doesNotSwitch() async throws {
+        let repository = try switchRepository(aUserId: 7)
+        try putPreviousJarSession()
+        credentials.savePushCredential(try passwordlessBoundCredential(for: accountA(userId: 7), sessionId: "sid-a7"))
+        var unreachable = PushContractURLProtocol.Reply.result(["uid": 7, "db": "db-a"])
+        unreachable.transportError = .notConnectedToInternet
+        PushContractURLProtocol.sessionInfoReply = unreachable
+
+        let switched = await repository.switchAccount(id: a.id)
+
+        XCTAssertFalse(switched)
+        XCTAssertEqual(repository.getActiveAccount()?.id, b.id)
+        XCTAssertEqual(api.getSessionId(for: a.fullServerUrl), "previous-b")
+        XCTAssertEqual(ReloginSignal.shared.lastRequestedAccountId, a.id)
+    }
+
+    /// pi 1001g: the proven case — known user id, same uid and database — switches and publishes.
+    func test_apporo_passwordlessSwitch_sessionProvenForThisUserAndDatabase_switches() async throws {
+        let repository = try switchRepository(aUserId: 7)
+        try putPreviousJarSession()
+        let bound = try passwordlessBoundCredential(for: accountA(userId: 7), sessionId: "sid-a7")
+        credentials.savePushCredential(bound)
+        PushContractURLProtocol.sessionInfoReply = .result(["uid": 7, "db": "db-a"])
+
+        let switched = await repository.switchAccount(id: a.id)
+
+        XCTAssertTrue(switched)
+        XCTAssertEqual(PushContractURLProtocol.sessionCheckCookies, ["session_id=sid-a7"])
+        XCTAssertEqual(repository.getActiveAccount()?.id, a.id)
+        XCTAssertEqual(api.getSessionId(for: a.fullServerUrl), "sid-a7")
+        XCTAssertEqual(credentials.pushCredential(accountId: a.id), bound)
     }
 
     func test_apporo_switchHeld_newerManualLoginWinsSelectionCredentialAndCookie() async throws {
