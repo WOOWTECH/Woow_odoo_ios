@@ -30,7 +30,7 @@ struct OfflineView: View {
                     .padding()
             }
             .buttonStyle(.borderedProminent)
-            .tint(WoowTheme.fixedBrandColor)
+            .tint(WoowTheme.fixedBrandButtonColor)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .accessibilityIdentifier("offline-retry")
             .padding(.top, 8)

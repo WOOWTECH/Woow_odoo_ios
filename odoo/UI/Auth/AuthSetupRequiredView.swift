@@ -40,7 +40,7 @@ struct AuthSetupRequiredView: View {
                     .padding()
             }
             .buttonStyle(.borderedProminent)
-            .tint(WoowTheme.fixedBrandColor)
+            .tint(WoowTheme.fixedBrandButtonColor)
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .disabled(prompting)
 

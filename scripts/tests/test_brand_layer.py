@@ -481,6 +481,36 @@ class BrandLayerTests(unittest.TestCase):
         accent = json.loads(text("odoo/Assets.xcassets/ApporoAccentColor.colorset/Contents.json"))
         self.assertEqual(accent["colors"][0]["color"]["components"], {"red": "0x8B", "green": "0x6B", "blue": "0x24", "alpha": "1.000"})
 
+    def test_solid_buttons_use_aa_fill_for_white_text(self):
+        # 2026-10-08 contrast fix: white text on WOOW #6183FC was 3.41:1 (< WCAG AA 4.5:1).
+        def contrast_with_white(hex_):
+            rgb = [int(hex_[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+            linear = [v / 12.92 if v <= .04045 else ((v + .055) / 1.055) ** 2.4 for v in rgb]
+            return 1.05 / (sum(a * b for a, b in zip(linear, [.2126, .7152, .0722])) + .05)
+
+        brand = re.sub(r"//[^\n]*", "", text("odoo/App/AppBrand.swift"))
+        primary = re.search(r'var primaryColorHex: String \{ code == \.apporo \? "(#[0-9A-F]{6})" : "(#[0-9A-F]{6})" \}', brand)
+        fill = re.search(r'var buttonFillHex: String \{ code == \.apporo \? primaryColorHex : "(#[0-9A-F]{6})" \}', brand)
+        self.assertIsNotNone(primary)
+        self.assertIsNotNone(fill)
+        apporo_primary, woow_primary = primary[1], primary[2]
+        self.assertEqual(fill[1], "#4069FB")
+        self.assertLess(contrast_with_white(woow_primary), 4.5)  # why the button fill differs
+        for button_fill in [fill[1], apporo_primary]:
+            self.assertGreaterEqual(contrast_with_white(button_fill), 4.5, button_fill)
+        self.assertIn("static let fixedBrandButtonColor: Color = Color(hex: AppBrand.current.buttonFillHex)",
+                      text("odoo/UI/Theme/WoowTheme.swift"))
+        # Every white-text solid button takes the AA fill; none keeps the raw primary.
+        prominent = 0
+        for path in (ROOT / "odoo/UI").rglob("*.swift"):
+            lines = path.read_text().splitlines()
+            self.assertNotIn(".tint(WoowTheme.fixedBrandColor)", "\n".join(lines), str(path.relative_to(ROOT)))
+            for i, line in enumerate(lines):
+                if ".buttonStyle(.borderedProminent)" in line:
+                    prominent += 1
+                    self.assertEqual(lines[i + 1].strip(), ".tint(WoowTheme.fixedBrandButtonColor)", f"{path.relative_to(ROOT)}:{i + 1}")
+        self.assertEqual(prominent, 5)  # Next, Login, biometric unlock, auth-setup unlock, offline retry
+
     def test_hook_registries_cover_existing_hooks_in_both_audits(self):
         referenced = set()
         for path in (ROOT / "odoo").rglob("*.swift"):

@@ -30,7 +30,7 @@ cd "$(dirname "$0")/.."
 #   WoowColors.<identifier>
 #   Color("<identifier>")
 # Both forms can return a static brand color that bypasses the theme.
-patterns='WoowColors\.[A-Za-z][A-Za-z0-9]*|AppBrand\.current\.primaryColorHex|Color\("[A-Za-z][A-Za-z0-9]*"\)'
+patterns='WoowColors\.[A-Za-z][A-Za-z0-9]*|AppBrand\.current\.(primaryColorHex|buttonFillHex)|Color\("[A-Za-z][A-Za-z0-9]*"\)'
 
 violations=$(git grep -nE "$patterns" -- 'odoo/UI/' \
     | grep -v '^odoo/UI/Theme/WoowColors\.swift:' \

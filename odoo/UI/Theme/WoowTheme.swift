@@ -31,6 +31,20 @@ final class WoowTheme: ObservableObject {
     /// and allows this one named symbol because the intent is explicit.
     static let fixedBrandColor: Color = WoowColors.primaryBlue
 
+    /// Fill of the fixed-brand solid buttons with white text (sign-in "Next"/"Login", biometric
+    /// unlock, auth-setup and the offline retry). Not the same as `fixedBrandColor`: WOOW's primary
+    /// gives white text only 3.41:1, so the button fill is a darker step of the same hue that meets
+    /// WCAG AA 4.5:1 (see `AppBrand.buttonFillHex`). Like `fixedBrandColor`, it ignores the user's
+    /// theme colour because these are pre-authentication / app-shell surfaces.
+    static let fixedBrandButtonColor: Color = Color(hex: AppBrand.current.buttonFillHex)
+
+    /// WCAG 2.1 contrast ratio (1.0–21.0) between two `#RRGGBB` colours, or nil if either is malformed.
+    static func contrastRatio(_ hexA: String, _ hexB: String) -> Double? {
+        guard parseRGB(hex: hexA) != nil, parseRGB(hex: hexB) != nil else { return nil }
+        let a = relativeLuminance(of: hexA), b = relativeLuminance(of: hexB)
+        return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+    }
+
     @Published private(set) var primaryColor: Color = WoowColors.primaryBlue
     @Published var themeMode: ThemeMode = .system
 

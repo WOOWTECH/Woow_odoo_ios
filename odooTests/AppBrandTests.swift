@@ -138,6 +138,56 @@ final class AppBrandTests: XCTestCase {
         XCTAssertEqual(WoowTheme.scheme(for: "#8B6B24"), .dark)
     }
 
+    // MARK: - Solid button fill contrast (2026-10-08)
+
+    @MainActor
+    func test_contrastRatio_givenKnownPairs_returnsWcagValues() throws {
+        XCTAssertEqual(try XCTUnwrap(WoowTheme.contrastRatio("#FFFFFF", "#000000")), 21, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(WoowTheme.contrastRatio("#000000", "#FFFFFF")), 21, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(WoowTheme.contrastRatio("#777777", "#777777")), 1, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(WoowTheme.contrastRatio("#6183FC", "#FFFFFF")), 3.41, accuracy: 0.01)
+        XCTAssertNil(WoowTheme.contrastRatio("#12345", "#FFFFFF"))
+        XCTAssertNil(WoowTheme.contrastRatio("#FFFFFF", "blue"))
+    }
+
+    @MainActor
+    func test_buttonFillHex_givenWoow_returnsDarkerSameHueBlueMeetingAA() throws {
+        let woow = try brand("woowtech", "io.woowtech.odoo", "woowodoo")
+        XCTAssertEqual(woow.buttonFillHex, "#4069FB")
+        XCTAssertEqual(woow.primaryColorHex, "#6183FC", "only the button-fill role changes")
+        XCTAssertLessThan(try XCTUnwrap(WoowTheme.contrastRatio(woow.primaryColorHex, "#FFFFFF")), 4.5)
+        let ratio = try XCTUnwrap(WoowTheme.contrastRatio(woow.buttonFillHex, "#FFFFFF"))
+        XCTAssertGreaterThanOrEqual(ratio, 4.5)
+        XCTAssertEqual(ratio, 4.53, accuracy: 0.01)
+        // Same hue as the brand primary (within 0.5°), i.e. a darker step of the same blue.
+        func hue(_ hex: String) throws -> Double {
+            let (r, g, b) = try XCTUnwrap(WoowTheme.parseRGB(hex: hex))
+            let maxC = max(r, g, b), minC = min(r, g, b), d = maxC - minC
+            XCTAssertEqual(maxC, b, "blue-dominant")
+            return 60 * (4 + (r - g) / d)
+        }
+        XCTAssertEqual(try hue(woow.buttonFillHex), try hue(woow.primaryColorHex), accuracy: 0.5)
+    }
+
+    @MainActor
+    func test_buttonFillHex_givenApporo_returnsUnchangedPrimary() throws {
+        for (bundleID, scheme) in [("com.apporo.odoo", "apporoodoo"), ("com.apporo.odoo.dev", "apporoodoo-dev")] {
+            let apporo = try brand("apporo", bundleID, scheme)
+            XCTAssertEqual(apporo.buttonFillHex, "#8B6B24")
+            XCTAssertEqual(apporo.buttonFillHex, apporo.primaryColorHex)
+            XCTAssertGreaterThanOrEqual(try XCTUnwrap(WoowTheme.contrastRatio(apporo.buttonFillHex, "#FFFFFF")), 4.5)
+        }
+    }
+
+    @MainActor
+    func test_fixedBrandButtonColor_givenSelectedBuild_returnsBrandButtonFill() {
+        let expected = AppBrand.current.code == .apporo ? "#8B6B24" : "#4069FB"
+        XCTAssertEqual(AppBrand.current.buttonFillHex, expected)
+        XCTAssertEqual(WoowTheme.fixedBrandButtonColor, Color(hex: expected))
+        // The theme default and the brand tint stay on the primary.
+        XCTAssertEqual(WoowTheme.fixedBrandColor, Color(hex: AppBrand.current.primaryColorHex))
+    }
+
     func test_settings_givenSavedCustomColor_preservesIt() throws {
         var saved = AppSettings()
         saved.themeColor = "#FF0000"

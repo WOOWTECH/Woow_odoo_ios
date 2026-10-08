@@ -48,6 +48,12 @@ struct AppBrand: Sendable, Equatable {
         }
     }
     var primaryColorHex: String { code == .apporo ? "#8B6B24" : "#6183FC" }
+    /// Fill of the brand's solid (white-label) buttons. White text needs WCAG AA 4.5:1 on it.
+    /// WOOW's #6183FC gives only 3.41:1, so its buttons use #4069FB: the same hue (226.8°) and
+    /// saturation (96.3%) with HSL lightness lowered from 68.4% to 61.9%, the lightest step that
+    /// reaches 4.5:1 (4.53:1). Apporo's #8B6B24 already gives 4.97:1 and is used as is.
+    /// Only the button-fill role changes; tint, icons, PIN dots and the theme default keep the primary.
+    var buttonFillHex: String { code == .apporo ? primaryColorHex : "#4069FB" }
     var logoAsset: String { code == .apporo ? "ApporoLogo" : "WoowLogo" }
     var signature: String { code == .apporo ? "APPORO UNION INC." : "\u{00A9} 2026 WoowTech" }
     var websiteHost: String { code == .apporo ? "www.apporo.ai" : "aiot.woowtech.io" }

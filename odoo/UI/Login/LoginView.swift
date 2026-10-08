@@ -151,7 +151,7 @@ struct LoginView: View {
                     .padding()
             }
             .buttonStyle(.borderedProminent)
-            .tint(WoowTheme.fixedBrandColor)
+            .tint(WoowTheme.fixedBrandButtonColor)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .id(LoginViewModel.ActionButton.next)
         }
@@ -218,7 +218,7 @@ struct LoginView: View {
                     .padding()
             }
             .buttonStyle(.borderedProminent)
-            .tint(WoowTheme.fixedBrandColor)
+            .tint(WoowTheme.fixedBrandButtonColor)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .id(LoginViewModel.ActionButton.login)
 
