@@ -62,6 +62,27 @@ enum ServerUrlInput {
         return .valid(keepPath ? "\(host)/\(path)" : host)
     }
 
+    /// Whether the field should show its fixed `https://` label in front of `raw`.
+    ///
+    /// Once the text carries a scheme of its own (`http://…`, `https://…`, `ftp://…`, any case,
+    /// after the same whitespace trim as `classify`), the label is hidden: showing it produced
+    /// "https://http://host", which reads as if the app would connect over HTTPS when the input is
+    /// in fact rejected (Android W2-4 U4). Display only — `classify` is unchanged.
+    static func showsFixedSchemePrefix(for raw: String) -> Bool {
+        let scalars = Array(raw.trimmingCharacters(in: kotlinWhitespace).unicodeScalars)
+        guard let first = scalars.first, isAsciiLetter(first),
+              let colon = scalars.firstIndex(of: ":") else { return true }
+        let schemeIsWellFormed = scalars[1..<colon].allSatisfy {
+            isAsciiAlphanumeric($0) || $0 == "+" || $0 == "-" || $0 == "."
+        }
+        let rest = scalars[(colon + 1)...]
+        return !(schemeIsWellFormed && rest.starts(with: "//".unicodeScalars))
+    }
+
+    private static func isAsciiLetter(_ s: Unicode.Scalar) -> Bool {
+        ("a"..."z").contains(s) || ("A"..."Z").contains(s)
+    }
+
     // MARK: - Host pattern `^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:\d{1,5})?$`
 
     private static func isValidHost(_ host: String) -> Bool {

@@ -125,6 +125,36 @@ final class ServerUrlInputLoginFormTests: XCTestCase {
     }
 }
 
+// MARK: - Fixed "https://" label (Android W2-4 U4)
+
+/// The field's fixed `https://` label made a typed `http://host` read as `https://http://host`.
+/// The label is hidden once the text carries its own scheme; validation is unchanged.
+final class ServerUrlSchemePrefixTests: XCTestCase {
+
+    func test_showsFixedSchemePrefix_givenBareHostOrEmpty_returnsTrue() {
+        for raw in ["", "   ", "h", "http", "https", "http:", "http:/", "example.invalid",
+                    "example.invalid:8069", "example.invalid/erp/a://b", "https;//example.invalid",
+                    "odoo_prod.example.invalid", "1http://x", "://example.invalid"] {
+            XCTAssertTrue(ServerUrlInput.showsFixedSchemePrefix(for: raw), "label hidden for '\(raw)'")
+        }
+    }
+
+    func test_showsFixedSchemePrefix_givenTextWithScheme_returnsFalse() {
+        for raw in ["http://", "http://insecure.example.invalid", " HTTP://example.invalid",
+                    "https://example.invalid", "HTTPS://https://example.invalid", "ftp://example.invalid",
+                    "\u{3000}http://example.invalid", "git+ssh://example.invalid"] {
+            XCTAssertFalse(ServerUrlInput.showsFixedSchemePrefix(for: raw), "label shown for '\(raw)'")
+        }
+    }
+
+    /// Display-only: the inputs whose label is hidden are still classified exactly as before.
+    func test_showsFixedSchemePrefix_givenHiddenLabel_leavesClassificationUnchanged() {
+        XCTAssertEqual(ServerUrlInput.classify("http://insecure.example.invalid"), .httpsRequired)
+        XCTAssertEqual(ServerUrlInput.classify("https://example.invalid"), .valid("example.invalid"))
+        XCTAssertEqual(ServerUrlInput.classify("ftp://example.invalid"), .invalid)
+    }
+}
+
 // MARK: - Accepted path containing "://" reaches every consumer with one https
 
 /// Review finding (iOS P2): `classify` accepts `https://example.invalid/erp/a://b` and

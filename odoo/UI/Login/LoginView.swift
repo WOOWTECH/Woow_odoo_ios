@@ -112,8 +112,12 @@ struct LoginView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 HStack {
-                    Text("https://")
-                        .foregroundStyle(.secondary)
+                    // Hidden once the text has its own scheme, so "http://…" never reads as
+                    // "https://http://…" (Android W2-4 U4). Validation is unchanged.
+                    if ServerUrlInput.showsFixedSchemePrefix(for: viewModel.serverUrl) {
+                        Text("https://")
+                            .foregroundStyle(.secondary)
+                    }
                     TextField("example.odoo.com", text: $viewModel.serverUrl)
                         .textContentType(.URL)
                         .autocapitalization(.none)
