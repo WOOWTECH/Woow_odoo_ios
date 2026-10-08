@@ -135,6 +135,26 @@ def allow_audited_heal_reload_apply(text):
     return text.replace("sut.apply(serverUrl:", "auditedHealReloadApply(serverUrl:")
 
 
+def allow_audited_offline_retry_apply(text):
+    # W2-4 L1: the offline-screen retry tests drive the coordinator's real apply/rebuild path so a
+    # retry is proven to target the current account's own child WebView. Non-persistent store, no
+    # session cookie, no deep link; base loads are an intercepted closure that only records, and the
+    # network watcher is a fake. The delegate-only coordinator in the same file is never applied.
+    # No request is issued.
+    for required in ["websiteDataStore: { _ in .nonPersistent() },",
+                     "loadBaseRequest: { [weak self] webView, request in self?.loads.append((webView, request.url!)) },",
+                     'loadDeepLinkRequest: { _, _ in XCTFail("No deep link") },',
+                     'openExternalURL: { _ in XCTFail("No Safari") },',
+                     "networkRecovery: recovery",
+                     "brand: .woowtech,"]:
+        assert required in text, required
+    assert text.count("OdooWebViewCoordinator(") == 2
+    assert text.count("sut.apply(serverUrl:") == 4
+    assert text.count(".apply(serverUrl:") == 4
+    assert text.count("sessionId: nil, deepLink: nil)") == 4
+    return text.replace("sut.apply(serverUrl:", "auditedOfflineRetryApply(serverUrl:")
+
+
 AUDITED_SESSION_PROTOCOLS = {
     # Baseline 0930b: ("SwitchURLProtocol",). Current 1001 (demo111 defect 1): a second, equally
     # offline SwitchURLProtocol session for the heal-then-switch reuse test.
@@ -389,6 +409,8 @@ class OfflineUnitHostSourceTests(unittest.TestCase):
                 text = allow_audited_stale_instance_apply(text)
             if path.name == "SelfHealWebViewRecoveryTests.swift":
                 text = allow_audited_heal_reload_apply(text)
+            if path.name == "OfflineScreenTests.swift":
+                text = allow_audited_offline_retry_apply(text)
             self.assertNotRegex(text, r"\.load\(|\.loadHTMLString\(|\.reload\(|\.apply\(serverUrl:|createWebViewWith:")
             self.assertNotRegex(text, r"UIApplication\.shared\.open|Data\(contentsOf:|String\(contentsOf:")
 
@@ -436,6 +458,18 @@ class OfflineUnitHostSourceTests(unittest.TestCase):
                          ("brand: .woowtech,", "brand: .apporo,")]:
             with self.assertRaises(AssertionError):
                 allow_audited_keyboard_restorer_apply(text.replace(old, new))
+
+    def test_offline_retry_exception_requires_isolated_store_intercepted_loads_no_session_no_link(self):
+        text = source("odooTests/OfflineScreenTests.swift")
+        allow_audited_offline_retry_apply(text)
+        for old, new in [("websiteDataStore: { _ in .nonPersistent() },", "websiteDataStore: { _ in .default() },"),
+                         ("loadBaseRequest: { [weak self] webView, request in self?.loads.append((webView, request.url!)) },",
+                          "loadBaseRequest: { webView, request in webView.load(request) },"),
+                         ("sessionId: nil, deepLink: nil)", 'sessionId: "sid", deepLink: nil)'),
+                         ("networkRecovery: recovery", "networkRecovery: NWPathRecoveryMonitor()"),
+                         ("brand: .woowtech,", "brand: .apporo,")]:
+            with self.assertRaises(AssertionError):
+                allow_audited_offline_retry_apply(text.replace(old, new))
 
     def test_runtime_cases_exist_without_skipping_existing_cases(self):
         tests = source("odooTests/OfflineUnitHostTests.swift")

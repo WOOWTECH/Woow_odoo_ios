@@ -21,12 +21,15 @@ struct OdooWebView: UIViewRepresentable {
     let deepLinkUrl: String?
     let onSessionExpired: () -> Void
     @Binding var isLoading: Bool
+    /// Drives MainView's offline screen (W2-4 L1); the coordinator owns its retry action.
+    let offlineState: WebViewOfflineState
 
     func makeCoordinator() -> OdooWebViewCoordinator {
         OdooWebViewCoordinator(
             serverUrl: serverUrl,
             onSessionExpired: onSessionExpired,
-            isLoading: $isLoading
+            isLoading: $isLoading,
+            offlineState: offlineState
         )
     }
 
@@ -123,6 +126,12 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     /// Undoes WebKit's keyboard-avoidance scroll once the keyboard hides (LIVE-0927-1). Bound to
     /// whichever child WebView is current, since account switches swap it.
     private var keyboardScrollRestorer: WebViewKeyboardScrollRestorer?
+    /// W2-4 L1: the app's offline screen, shown when the current account's page fails to load for a
+    /// network reason, and the network watcher that retries once when connectivity returns.
+    let offlineState: WebViewOfflineState
+    private let networkRecovery: NetworkRecoveryMonitoring
+    /// The page whose load failed — retried as-is when it is on the current account's origin.
+    private var failedURL: URL?
 
     init(serverUrl: String, onSessionExpired: @escaping () -> Void, isLoading: Binding<Bool>,
          openExternalURL: @escaping (URL) -> Void = { UIApplication.shared.open($0) },
@@ -132,7 +141,9 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
          loadBaseRequest: @escaping (WKWebView, URLRequest) -> Void = { webView, request in webView.load(request) },
          loadDeepLinkRequest: @escaping (WKWebView, URLRequest) -> Void = { webView, request in webView.load(request) },
          makeWebView: @escaping (WKWebViewConfiguration) -> WKWebView = { WKWebView(frame: .zero, configuration: $0) },
-         keyboardNotifications: NotificationCenter = .default) {
+         keyboardNotifications: NotificationCenter = .default,
+         offlineState: WebViewOfflineState = WebViewOfflineState(),
+         networkRecovery: NetworkRecoveryMonitoring = NWPathRecoveryMonitor()) {
         self.openExternalURL = openExternalURL
         self.brand = brand
         self.pushCredentials = pushCredentials
@@ -140,12 +151,15 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         self.loadBaseRequest = loadBaseRequest
         self.loadDeepLinkRequest = loadDeepLinkRequest
         self.makeWebView = makeWebView
+        self.offlineState = offlineState
+        self.networkRecovery = networkRecovery
         self.onSessionExpired = onSessionExpired
         self._isLoading = isLoading
         self.currentServerUrl = serverUrl
         self.currentServerHost = URL(string: serverUrl)?.host ?? ""
         self.currentServerPort = URL(string: serverUrl)?.port
         super.init()
+        offlineState.retryAction = { [weak self] in self?.retryAfterLoadFailure() }
         keyboardScrollRestorer = WebViewKeyboardScrollRestorer(notificationCenter: keyboardNotifications) { [weak self] in
             self?.webView?.scrollView
         }
@@ -169,6 +183,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     deinit {
         if let retireObserver { NotificationCenter.default.removeObserver(retireObserver) }
         if let healObserver { NotificationCenter.default.removeObserver(healObserver) }
+        networkRecovery.stop()
     }
 
     // MARK: - Container wiring
@@ -228,6 +243,8 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         locationCoordinator.invalidateActiveDocument()
         hasFinishedAccountLoad = false
         awaitingHealedSession = false
+        // A failure belonged to the outgoing account's WebView; the new one starts clean.
+        clearLoadFailure()
         let config = makeConfiguration(accountId: accountId)
         let newWebView = makeWebView(config)
         newWebView.navigationDelegate = self
@@ -310,6 +327,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         hasFinishedAccountLoad = false
         awaitingHealedSession = false
         pendingDeepLink = nil
+        clearLoadFailure()
         #if DEBUG
         testProxy?.webView = nil
         #endif
@@ -520,6 +538,8 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         guard isCurrentInstance(webView) else { return }
+        // A document arrived, so the connection works again: drop any offline screen.
+        clearLoadFailure()
         // The URL is committed here (before the page fully finishes). Publish it to the XCUITest
         // probe now so the test can read the landed host even if `didFinish` is delayed by
         // Odoo's long-lived bus/longpolling connection.
@@ -573,19 +593,20 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     /// to retry.
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         guard isCurrentInstance(webView) else { return }
-        finishLoad(after: error)
+        finishLoad(after: error, in: webView)
     }
 
     /// A load that never got far enough to commit a document: offline, DNS failure, a rejected
     /// TLS handshake, or a navigation this app itself cancelled. Same missing-teardown problem
     /// as `didFail`, and the far more common one in practice.
     ///
-    /// This only stops the spinner. It deliberately does NOT retry, does not queue the request,
-    /// and does not touch certificate handling — a rejected TLS handshake stays rejected.
+    /// This stops the spinner and, for a network failure, shows the app's offline screen (W2-4 L1).
+    /// It never retries on its own except once when the network comes back, and does not touch
+    /// certificate handling — a rejected TLS handshake stays rejected.
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
                  withError error: Error) {
         guard isCurrentInstance(webView) else { return }
-        finishLoad(after: error)
+        finishLoad(after: error, in: webView)
     }
 
     /// Shared teardown for both failure delegates.
@@ -594,7 +615,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     /// `.cancel` for session expiry and for links handed off to Safari. Those paths still need
     /// the spinner stopped — `didFinish` never arrives for a cancelled navigation either — but
     /// they must not be logged as errors.
-    private func finishLoad(after error: Error) {
+    private func finishLoad(after error: Error, in webView: WKWebView) {
         isLoading = false
 
         let nsError = error as NSError
@@ -607,6 +628,52 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
                 "WebView navigation failed: \(nsError.domain, privacy: .public) \(nsError.code, privacy: .public)"
             )
         }
+
+        guard Self.showsOfflineScreen(for: error) else { return }
+        failedURL = (nsError.userInfo[NSURLErrorFailingURLErrorKey] as? URL) ?? webView.url
+        offlineState.setShowing(true)
+        networkRecovery.start { [weak self] in self?.retryAfterLoadFailure() }
+    }
+
+    // MARK: - Offline screen (W2-4 L1)
+
+    /// Network-level load failures get the offline screen. A cancellation is app control flow
+    /// (session expiry, Safari hand-off) and WebKit-domain errors (e.g. a frame load interrupted by
+    /// a policy change) are not connectivity problems.
+    static func showsOfflineScreen(for error: Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == NSURLErrorDomain && nsError.code != NSURLErrorCancelled
+    }
+
+    /// What a retry loads: the failed page when it is on the account's own origin (scheme, host and
+    /// port) and not the login redirect; otherwise the account's base page.
+    static func retryURL(failedURL: URL?, serverUrl: String, database: String) -> URL? {
+        let server = URL(string: serverUrl)
+        if let failedURL, let host = failedURL.host, let serverHost = server?.host,
+           host.caseInsensitiveCompare(serverHost) == .orderedSame,
+           failedURL.scheme?.lowercased() == server?.scheme?.lowercased(),
+           failedURL.port == server?.port,
+           !failedURL.absoluteString.contains("/web/login") {
+            return failedURL
+        }
+        return baseURL(serverUrl: serverUrl, database: database)
+    }
+
+    /// The offline screen's retry, and the one automatic retry when the network comes back. Reloads
+    /// the current account's own WebView only; after a switch or logout there is nothing to retry.
+    func retryAfterLoadFailure() {
+        let target = Self.retryURL(failedURL: failedURL, serverUrl: currentServerUrl, database: currentDatabase)
+        clearLoadFailure()
+        guard let webView, let accountId = currentAccountId,
+              !retiredAccountIds.contains(accountId), let target else { return }
+        hasFinishedAccountLoad = false
+        loadBaseRequest(webView, URLRequest(url: target))
+    }
+
+    private func clearLoadFailure() {
+        networkRecovery.stop()
+        failedURL = nil
+        offlineState.setShowing(false)
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,

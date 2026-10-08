@@ -161,3 +161,8 @@
 "switch_sign_in_required_title" = "需要重新登录";
 "switch_sign_in_required_message" = "「%@」需要重新登录才能切换过去。";
 "switch_sign_in_action" = "登录";
+
+/* W2-4 L1: the app's own offline screen over the WebView (no server address or error code) */
+"offline_title" = "无法连接";
+"offline_message" = "请检查网络连接后再试一次。";
+"offline_retry" = "重试";

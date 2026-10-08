@@ -14,6 +14,8 @@ struct MainView: View {
     let onSessionExpired: () -> Void
 
     @State private var isLoading = true
+    /// W2-4 L1: the app's own offline screen over the WebView, driven by its coordinator.
+    @StateObject private var offlineState = WebViewOfflineState()
     /// Controls the one-shot location-denied snackbar. Dismissed after the user taps
     /// "Open Settings" or the banner auto-hides. Posted by LocationCoordinator via
     /// Notification.Name.locationPermanentlyDenied.
@@ -33,12 +35,18 @@ struct MainView: View {
                         sessionId: viewModel.sessionId,
                         deepLinkUrl: viewModel.pendingDeepLink,
                         onSessionExpired: onSessionExpired,
-                        isLoading: $isLoading
+                        isLoading: $isLoading,
+                        offlineState: offlineState
                     )
                     // Default regions include `.keyboard`: WebKit does its own keyboard avoidance,
                     // and a SwiftUI resize on top would double-adjust and re-layout Odoo on every
                     // focus. WebKit's scroll is undone on hide by WebViewKeyboardScrollRestorer.
                     .ignoresSafeArea(edges: .bottom)
+                }
+
+                if offlineState.isShowingOfflineScreen {
+                    // Covers the blank / partial page; no server address or error code (W2-4 L1).
+                    OfflineView(onRetry: { offlineState.retry() })
                 }
 
                 if isLoading {
