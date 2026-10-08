@@ -94,6 +94,32 @@ final class SettingsGapTests: XCTestCase {
         )
     }
 
+    /// G5-U3 (W2-4 L3): the About row shows the build number too — "1.0 (3)" — taken from the
+    /// running bundle, for both brands (each scheme runs this against its own app host).
+    func test_appVersion_givenBundle_returnsShortVersionWithBuildNumber() throws {
+        let info = try XCTUnwrap(Bundle.main.infoDictionary)
+        let short = try XCTUnwrap(info["CFBundleShortVersionString"] as? String)
+        let build = try XCTUnwrap(info["CFBundleVersion"] as? String)
+        XCTAssertFalse(build.isEmpty, "CFBundleVersion must be set by CURRENT_PROJECT_VERSION")
+
+        XCTAssertEqual(SettingsViewModel().appVersion, "\(short) (\(build))")
+    }
+
+    func test_displayVersion_givenShortAndBuild_returnsBothWithBuildInParentheses() {
+        XCTAssertEqual(SettingsViewModel.displayVersion(shortVersion: "1.0", build: "3"), "1.0 (3)")
+        XCTAssertEqual(SettingsViewModel.displayVersion(shortVersion: " 1.2.1 ", build: " 17 "), "1.2.1 (17)")
+    }
+
+    func test_displayVersion_givenMissingOrBlankBuild_returnsShortVersionOnly() {
+        XCTAssertEqual(SettingsViewModel.displayVersion(shortVersion: "1.0", build: nil), "1.0")
+        XCTAssertEqual(SettingsViewModel.displayVersion(shortVersion: "1.0", build: "  "), "1.0")
+    }
+
+    func test_displayVersion_givenMissingShortVersion_returnsDefaultWithBuild() {
+        XCTAssertEqual(SettingsViewModel.displayVersion(shortVersion: nil, build: "3"), "1.0 (3)")
+        XCTAssertEqual(SettingsViewModel.displayVersion(shortVersion: "", build: nil), "1.0")
+    }
+
     /// G5-U2: SettingsConstants must declare valid HTTPS URLs for the website and every
     /// Help & Support page, in both language variants.
     func test_settingsConstants_urlsAreValid() {

@@ -96,9 +96,23 @@ final class SettingsViewModel: ObservableObject {
         }
     }
 
-    // G5: App version from bundle
+    // G5: App version from bundle, with the build number — "1.0 (3)" — so a tester or support
+    // can tell two uploads of the same marketing version apart (Android W2-4 L3 parity).
     var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let info = Bundle.main.infoDictionary
+        return Self.displayVersion(
+            shortVersion: info?["CFBundleShortVersionString"] as? String,
+            build: info?["CFBundleVersion"] as? String
+        )
+    }
+
+    /// `"<short> (<build>)"`; the short version alone when the build number is missing or blank,
+    /// and `"1.0"` when the short version itself is missing (the previous fallback).
+    nonisolated static func displayVersion(shortVersion: String?, build: String?) -> String {
+        let short = shortVersion?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let version = short.isEmpty ? "1.0" : short
+        let buildNumber = build?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return buildNumber.isEmpty ? version : "\(version) (\(buildNumber))"
     }
 
     /// Set by a successful `authorizePinChange(verifyingCurrentPin:)`, consumed by the next `setPin`.
