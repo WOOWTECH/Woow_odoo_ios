@@ -3,21 +3,20 @@ import XCTest
 @testable import odoo
 
 /// 全面實測 I16（I16-05-login-dark.png）：深色模式登入頁的 Apporo logo 是一塊不透明白色方框。
-/// `ApporoLogo` 沿用 App 圖示那張「白底合成、無 alpha」的 PNG，也沒有深色版本。深色外觀改用
-/// 透明底、淺色鳥形的變體；淺色外觀維持原本白底圖（與白色背景一致）。兩個品牌的登入 logo
-/// 都在同一個資產目錄裡，所以兩個品牌的建置都驗兩張。
+/// 2026-10-08 擁有者要求「Logo都要是圓型外框」，取代 I16 當時的透明底淺色標誌方案：`ApporoLogo`
+/// 改成和 `WoowLogo` 一樣的單一圓形徽章（白色圓盤、#D9D9D9 內緣外框、原色 #4D4D4D 標誌，圓外透明），
+/// 淺色、深色外觀共用同一張。兩個品牌的登入 logo 都在同一個資產目錄裡，所以兩個品牌的建置都驗兩張。
 final class BrandLogoAppearanceTests: XCTestCase {
 
     private static let logoAssets = ["ApporoLogo", "WoowLogo"]
     private static let side = 64
 
     /// RGBA8 pixels of the asset's variant for `style`, drawn at `side`×`side`.
-    private func pixels(_ name: String, _ style: UIUserInterfaceStyle) throws -> [UInt8] {
+    private func pixels(_ name: String, _ style: UIUserInterfaceStyle, side: Int = BrandLogoAppearanceTests.side) throws -> [UInt8] {
         let traits = UITraitCollection(userInterfaceStyle: style)
         let image = try XCTUnwrap(UIImage(named: name, in: Bundle(for: SettingsViewModel.self), compatibleWith: traits),
                                   "\(name) missing from the asset catalog")
         let cgImage = try XCTUnwrap(image.cgImage)
-        let side = Self.side
         var buffer = [UInt8](repeating: 0, count: side * side * 4)
         try buffer.withUnsafeMutableBytes { raw in
             let context = try XCTUnwrap(CGContext(
@@ -44,21 +43,34 @@ final class BrandLogoAppearanceTests: XCTestCase {
         }
     }
 
-    /// The Apporo mark is #4D4D4D grey (≈2.5:1 on black). Its dark variant must stay readable on a
-    /// dark background: every clearly opaque pixel ≥ 3:1 against black (WCAG 1.4.11 graphics).
-    func test_apporoLogo_givenDarkAppearance_markIsLightEnoughOnBlack() throws {
-        let px = try pixels("ApporoLogo", .dark)
-        var opaque = 0
-        for i in stride(from: 0, to: px.count, by: 4) where px[i + 3] == 255 {
-            opaque += 1
-            let luminance = [px[i], px[i + 1], px[i + 2]].map { c -> Double in
-                let v = Double(c) / 255
-                return v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
-            }
-            let l = 0.2126 * luminance[0] + 0.7152 * luminance[1] + 0.0722 * luminance[2]
-            XCTAssertGreaterThanOrEqual((l + 0.05) / 0.05, 3, "像素 \(i / 4) 在黑底上對比不足")
-            if (l + 0.05) / 0.05 < 3 { return }
+    /// Relative luminance of an sRGB8 pixel (WCAG 2.x).
+    private func luminance(_ px: [UInt8], _ i: Int) -> Double {
+        let linear = [px[i], px[i + 1], px[i + 2]].map { c -> Double in
+            let v = Double(c) / 255
+            return v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
         }
-        XCTAssertGreaterThan(opaque, 0, "深色變體必須真的有鳥形")
+        return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+    }
+
+    /// 2026-10-08 圓形徽章：深色外觀下 logo 仍是不透明白色圓盤（不再是 I16 的透明底淺色標誌），
+    /// 標誌維持原色深灰，與圓盤的對比 ≥ 3:1（WCAG 1.4.11 graphics）；圓盤本身在深色背景上自然醒目。
+    func test_apporoLogo_givenDarkAppearance_isOpaqueWhiteDiscWithDarkMark() throws {
+        // 256 pt keeps the mark's strokes several pixels wide, so their true colour survives downsampling.
+        let side = 256
+        let px = try pixels("ApporoLogo", .dark, side: side)
+        let centreRow = side / 2
+        // Opaque white disc fill between the ring and the mark (left of centre on the middle row).
+        let fill = (centreRow * side + side / 8) * 4
+        XCTAssertEqual(px[fill + 3], 255, "深色外觀圓盤必須不透明")
+        XCTAssertGreaterThanOrEqual(min(px[fill], px[fill + 1], px[fill + 2]), 250, "深色外觀圓盤必須是白色")
+        let disc = luminance(px, fill)
+        var dark = 0
+        for i in stride(from: 0, to: px.count, by: 4) where px[i + 3] == 255 {
+            let l = luminance(px, i)
+            if (disc + 0.05) / (l + 0.05) >= 3 { dark += 1 }
+        }
+        XCTAssertGreaterThan(dark, 500, "白色圓盤上必須有對比足夠的深色標誌")
+        // Same single image for both appearances (no dark variant any more).
+        XCTAssertEqual(try pixels("ApporoLogo", .light, side: side), px, "淺色、深色外觀應共用同一張圓形徽章")
     }
 }

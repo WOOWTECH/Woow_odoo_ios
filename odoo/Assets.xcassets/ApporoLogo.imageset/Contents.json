@@ -3,16 +3,6 @@
     {
       "idiom": "universal",
       "filename": "ApporoLogo.png"
-    },
-    {
-      "idiom": "universal",
-      "filename": "ApporoLogo-dark.png",
-      "appearances": [
-        {
-          "appearance": "luminosity",
-          "value": "dark"
-        }
-      ]
     }
   ],
   "info": {

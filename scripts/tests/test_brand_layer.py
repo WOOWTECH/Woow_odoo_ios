@@ -413,37 +413,57 @@ class BrandLayerTests(unittest.TestCase):
         for output in manifest["outputs"]:
             data = (ROOT / output["path"]).read_bytes()
             self.assertEqual(hashlib.sha256(data).hexdigest(), output["sha256"])
-            width, height, channels, rows = read_png(data)
-            self.assertEqual((width, height, channels), (1024, 1024, 3))
-            for corner in [rows[0][:3], rows[0][-3:], rows[-1][:3], rows[-1][-3:]]:
-                self.assertEqual(corner, b"\xff\xff\xff")
-            self.assertTrue(any(pixel != 255 for row in rows for pixel in row))
+        icon = [output for output in manifest["outputs"] if output["path"].endswith("ApporoAppIcon.png")]
+        self.assertEqual(len(icon), 1)
+        data = (ROOT / icon[0]["path"]).read_bytes()
+        # The app icon is the approved opaque white mark; the 2026-10-08 round login badge must not
+        # change it (iOS masks the icon shape itself).
+        self.assertEqual(hashlib.sha256(data).hexdigest(), "20814047ff0c3c51792158d3e0f24c1d24ffb8f2bf4cc4a9274a614476257f73")
+        width, height, channels, rows = read_png(data)
+        self.assertEqual((width, height, channels), (1024, 1024, 3))
+        for corner in [rows[0][:3], rows[0][-3:], rows[-1][:3], rows[-1][-3:]]:
+            self.assertEqual(corner, b"\xff\xff\xff")
+        self.assertTrue(any(pixel != 255 for row in rows for pixel in row))
 
-    def test_login_logo_dark_variant_is_transparent_light_mark(self):
-        # Full-run I16: in dark mode the opaque white ApporoLogo was a white square on the login
-        # page. The light appearance keeps the opaque white output above; dark gets its own variant.
+    def test_login_logo_is_round_badge(self):
+        # Owner 2026-10-08: "Logo都要是圓型外框，這個通盤都去改". Supersedes the I16 dark variant
+        # (transparent, #E6E6E6 mark): one universal image for both appearances, like WoowLogo — a
+        # white disc with a #D9D9D9 inner-edge ring and the original #4D4D4D mark, transparent outside.
         manifest = json.loads(text("BrandResources/asset-manifest.json"))
-        self.assertEqual(len(manifest["appearance_variants"]), 1)
-        variant = manifest["appearance_variants"][0]
-        self.assertEqual(variant["appearances"], [{"appearance": "luminosity", "value": "dark"}])
-        data = (ROOT / variant["path"]).read_bytes()
-        self.assertEqual(hashlib.sha256(data).hexdigest(), variant["sha256"])
+        self.assertNotIn("appearance_variants", manifest)
+        logo = [output for output in manifest["outputs"] if output["path"] == "odoo/Assets.xcassets/ApporoLogo.imageset/ApporoLogo.png"]
+        self.assertEqual(len(logo), 1)
+        data = (ROOT / logo[0]["path"]).read_bytes()
+        self.assertEqual(hashlib.sha256(data).hexdigest(), logo[0]["sha256"])
+        contents = json.loads(text("odoo/Assets.xcassets/ApporoLogo.imageset/Contents.json"))
+        self.assertEqual(contents["images"], [{"idiom": "universal", "filename": "ApporoLogo.png"}])
+        self.assertEqual(sorted(p.name for p in (ROOT / "odoo/Assets.xcassets/ApporoLogo.imageset").iterdir()), ["ApporoLogo.png", "Contents.json"])
         width, height, channels, rows = read_png(data)
         self.assertEqual((width, height, channels), (1024, 1024, 4))
-        for corner in [rows[0][:4], rows[0][-4:], rows[-1][:4], rows[-1][-4:]]:
-            self.assertEqual(corner[3], 0)
-        mark = {bytes(row[i:i + 3]) for row in rows for i in range(0, len(row), 4) if row[i + 3]}
-        self.assertEqual(mark, {bytes.fromhex(variant["mark_rgb"])})
-        rgb = [int(variant["mark_rgb"][i:i + 2], 16) / 255 for i in (0, 2, 4)]
-        linear = [v / 12.92 if v <= .04045 else ((v + .055) / 1.055) ** 2.4 for v in rgb]
-        luminance = sum(a * b for a, b in zip(linear, [.2126, .7152, .0722]))
-        self.assertGreaterEqual((luminance + .05) / .05, 3)  # WCAG 1.4.11 graphics on black
-        contents = json.loads(text("odoo/Assets.xcassets/ApporoLogo.imageset/Contents.json"))
-        light = [image["filename"] for image in contents["images"] if "appearances" not in image]
-        dark = [image["filename"] for image in contents["images"] if image.get("appearances") == variant["appearances"]]
-        self.assertEqual(light, ["ApporoLogo.png"])
-        self.assertEqual(dark, [Path(variant["path"]).name])
-        self.assertEqual(len(contents["images"]), 2)
+
+        def px(x, y):
+            return tuple(rows[y][x * 4:x * 4 + 4])
+
+        last = width - 1
+        for x, y in [(0, 0), (last, 0), (0, last), (last, last), (100, 100), (last - 100, last - 100)]:
+            self.assertEqual(px(x, y)[3], 0, (x, y))  # outside the disc
+        self.assertEqual(px(512, 512), (255, 255, 255, 255))  # opaque white centre (mark has a hole there)
+        ring = int(width * .03)
+        for x, y in [(ring // 2, 512), (last - ring // 2, 512), (512, ring // 2), (512, last - ring // 2)]:
+            r, g, b, a = px(x, y)
+            self.assertEqual(a, 255, (x, y))
+            for channel in (r, g, b):
+                self.assertLessEqual(abs(channel - 0xD9), 2, (x, y))
+        for x, y in [(ring + 20, 512), (512, ring + 20), (300, 512 - 150)]:
+            self.assertEqual(px(x, y), (255, 255, 255, 255), (x, y))  # disc fill between ring and mark
+        # Anti-aliased rim: partial alpha exists just at the disc edge.
+        self.assertTrue(any(0 < row[3] < 255 for row in [px(x, 512) for x in range(0, 4)] + [px(x, 0) for x in range(400, 624)]))
+        # The mark keeps its original #4D4D4D and stays inside the centred 60 % square.
+        mark = round(width * .6)
+        origin = (width - mark) // 2
+        grey = [(x, y) for y in range(0, height, 2) for x in range(0, width, 2) if px(x, y) == (0x4D, 0x4D, 0x4D, 255)]
+        self.assertGreater(len(grey), 1000)
+        self.assertTrue(all(origin <= x < origin + mark and origin <= y < origin + mark for x, y in grey))
 
     def test_asset_source_provenance_when_explicitly_supplied(self):
         # Historical manifest source is provenance, never a required machine path.

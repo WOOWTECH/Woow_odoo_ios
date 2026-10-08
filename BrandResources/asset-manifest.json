@@ -1,35 +1,20 @@
 {
   "source": "/Users/elmolin/WOOW-mobile-app-analysis/sources/Woow_apporo_ha_app/tools/brand/assets/apporo-mark.png",
   "source_sha256": "9db14c6e5e3a84c4b7600a330ad3ad084875f4cffa2785f778cff2493539fdfa",
-  "operation": "RGBA alpha-composite over #FFFFFF; RGB opaque PNG; no resizing or cropping",
   "outputs": [
     {
       "path": "odoo/Assets.xcassets/ApporoAppIcon.appiconset/ApporoAppIcon.png",
       "width": 1024,
       "height": 1024,
+      "operation": "RGBA alpha-composite over #FFFFFF; RGB opaque PNG; no resizing or cropping",
       "sha256": "20814047ff0c3c51792158d3e0f24c1d24ffb8f2bf4cc4a9274a614476257f73"
     },
     {
       "path": "odoo/Assets.xcassets/ApporoLogo.imageset/ApporoLogo.png",
       "width": 1024,
       "height": 1024,
-      "sha256": "20814047ff0c3c51792158d3e0f24c1d24ffb8f2bf4cc4a9274a614476257f73"
-    }
-  ],
-  "appearance_variants": [
-    {
-      "path": "odoo/Assets.xcassets/ApporoLogo.imageset/ApporoLogo-dark.png",
-      "appearances": [
-        {
-          "appearance": "luminosity",
-          "value": "dark"
-        }
-      ],
-      "width": 1024,
-      "height": 1024,
-      "operation": "source alpha kept, transparent background; mark pixels recoloured; RGBA PNG; no resizing or cropping",
-      "mark_rgb": "E6E6E6",
-      "sha256": "283f12ac3c8449e4f8a6368e2b3c178f01bec9e53e65a6e1052a191cc641baab"
+      "operation": "round badge, one image for light and dark: RGBA PNG; disc diameter = side, fill #FFFFFF, alpha 0 outside; inner-edge ring 3% of side, #D9D9D9; source alpha-composited over #FFFFFF then bilinearly scaled to 60% of side, centred, not cropped or recoloured; disc/ring edges anti-aliased with 4\u00d74 supersampling",
+      "sha256": "0476eef7c602bd3f8ca00be4a77fb79ebcc96b3a384358904cbdebda7098f79d"
     }
   ]
 }
