@@ -511,6 +511,17 @@ class BrandLayerTests(unittest.TestCase):
                     self.assertEqual(lines[i + 1].strip(), ".tint(WoowTheme.fixedBrandButtonColor)", f"{path.relative_to(ROOT)}:{i + 1}")
         self.assertEqual(prominent, 5)  # Next, Login, biometric unlock, auth-setup unlock, offline retry
 
+    def test_error_banner_is_opaque_and_meets_aa(self):
+        # 2026-10-08 contrast fix: white on Color.red.opacity(0.85) was about 3.1:1 in light mode.
+        source = re.sub(r"//[^\n]*", "", text("odoo/UI/Common/ErrorBannerView.swift"))
+        self.assertNotIn("opacity", source)
+        self.assertNotIn("Color.red", source)
+        self.assertIn(".background(Self.background)", source)
+        fill = re.search(r'static let backgroundHex = "(#[0-9A-F]{6})"', source)[1]
+        rgb = [int(fill[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+        linear = [v / 12.92 if v <= .04045 else ((v + .055) / 1.055) ** 2.4 for v in rgb]
+        self.assertGreaterEqual(1.05 / (sum(a * b for a, b in zip(linear, [.2126, .7152, .0722])) + .05), 4.5)
+
     def test_hook_registries_cover_existing_hooks_in_both_audits(self):
         referenced = set()
         for path in (ROOT / "odoo").rglob("*.swift"):
