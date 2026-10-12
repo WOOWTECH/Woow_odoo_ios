@@ -15,7 +15,8 @@ final class MainViewModel: ObservableObject {
     @Published var sessionId: String?
     /// The pending deep link for the active account, or nil. Passed to `OdooWebView`, which
     /// applies it once the target page finishes loading.
-    @Published var pendingDeepLink: String?
+    @Published private(set) var pendingDeepLinkEvent: PendingDeepLink?
+    var pendingDeepLink: String? { pendingDeepLinkEvent?.url }
 
     private let accountRepository: AccountRepositoryProtocol
     private let deepLinkManager: DeepLinkManager
@@ -69,14 +70,14 @@ final class MainViewModel: ObservableObject {
     /// Recomputes the exposed deep link so it only ever targets the active account.
     private func updatePendingDeepLink() {
         guard let account = activeAccount, let pending = deepLinkManager.pending else {
-            pendingDeepLink = nil
+            pendingDeepLinkEvent = nil
             return
         }
         // Unbound (legacy single-account) links may apply to whoever is active.
         if pending.accountId.isEmpty || pending.accountId == account.id {
-            pendingDeepLink = pending.url
+            pendingDeepLinkEvent = pending
         } else {
-            pendingDeepLink = nil
+            pendingDeepLinkEvent = nil
         }
     }
 

@@ -17,6 +17,9 @@ private let pendingDeepLinkTTL: TimeInterval = 5 * 60
 /// Binding is the cross-tenant safety mechanism: the link is only ever applied to the
 /// account whose notification produced it. `createdAt` drives the TTL.
 struct PendingDeepLink: Equatable {
+    /// Identifies this intake, not its destination: two notifications can share one URL.
+    /// Restoration starts a new coordinator, so this identity need not survive a launch.
+    let id: UUID = UUID()
     let url: String
     let accountId: String
     let createdAt: Date
@@ -94,8 +97,10 @@ final class DeepLinkManager: ObservableObject {
     /// stored unbound, i.e. legacy single-account) and has not expired. Returns `nil`
     /// otherwise, leaving any foreign-bound link untouched so it can still reach its own
     /// account. This is the load-gated, single-consume entry point.
-    func consume(for accountId: String) -> String? {
+    func consume(for accountId: String, eventId: UUID? = nil) -> String? {
         guard let link = pending else { return nil }
+        // A delayed WebView consume must never remove a newer notification.
+        guard eventId == nil || eventId == link.id else { return nil }
         if link.isExpired() {
             clear()
             return nil

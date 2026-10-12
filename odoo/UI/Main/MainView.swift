@@ -34,6 +34,7 @@ struct MainView: View {
                         accountId: account.id,
                         sessionId: viewModel.sessionId,
                         deepLinkUrl: viewModel.pendingDeepLink,
+                        deepLinkEventId: viewModel.pendingDeepLinkEvent?.id,
                         onSessionExpired: onSessionExpired,
                         isLoading: $isLoading,
                         offlineState: offlineState

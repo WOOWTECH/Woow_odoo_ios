@@ -84,4 +84,55 @@ final class ColdStartDeepLinkOrderTests: XCTestCase {
 
         XCTAssertEqual(events, ["base", "deeplink:action=contacts.action_contacts"])
     }
+
+    func test_sameURL_afterConsumedUpdate_navigatesAgain() async {
+        let sut = makeCoordinator()
+        let id = UUID().uuidString
+        let link = "/web#action=mail.action_discuss&active_id=discuss.channel_42"
+        sut.apply(serverUrl: serverUrl, database: "db", accountId: id, sessionId: "sess", deepLink: nil)
+        await waitUntil(self.events == ["base"])
+        sut.accountPageDidFinish(loadedHost: "cold.example.com")
+        sut.apply(serverUrl: serverUrl, database: "db", accountId: id, sessionId: "sess", deepLink: link)
+        // Manager consumption publishes nil. The user can then navigate back to Inbox
+        // without rebuilding the coordinator, before tapping the next room notification.
+        sut.apply(serverUrl: serverUrl, database: "db", accountId: id, sessionId: "sess", deepLink: nil)
+        sut.apply(serverUrl: serverUrl, database: "db", accountId: id, sessionId: "sess", deepLink: link)
+        XCTAssertEqual(events.filter { $0.hasPrefix("deeplink:") }.count, 2)
+    }
+
+    func test_sameURL_newEvents_withoutIntermediateNil_navigateOnceEach() async {
+        let sut = makeCoordinator()
+        let id = UUID().uuidString
+        let link = "/web#action=mail.action_discuss&active_id=discuss.channel_42"
+        let first = UUID(), second = UUID()
+        sut.apply(serverUrl: serverUrl, database: "db", accountId: id, sessionId: nil, deepLink: nil)
+        sut.accountPageDidFinish(loadedHost: "cold.example.com")
+        for event in [first, first, second, second] {
+            sut.apply(serverUrl: serverUrl, database: "db", accountId: id, sessionId: nil,
+                      deepLink: link, deepLinkEventId: event)
+        }
+        XCTAssertEqual(events.filter { $0.hasPrefix("deeplink:") }.count, 2)
+        sut.apply(serverUrl: serverUrl, database: "db", accountId: id, sessionId: nil, deepLink: nil)
+        sut.apply(serverUrl: serverUrl, database: "db", accountId: id, sessionId: nil,
+                  deepLink: link, deepLinkEventId: second)
+        XCTAssertEqual(events.filter { $0.hasPrefix("deeplink:") }.count, 2,
+                       "A consumed event must not replay after a nil view update")
+    }
+
+    func test_newEvent_beforeInitialLoad_appliesLatestOnceAfterLoad() {
+        let sut = makeCoordinator()
+        let id = UUID().uuidString
+        let first = UUID(), second = UUID()
+        let link = "/web#active_id=discuss.channel_42"
+        sut.apply(serverUrl: serverUrl, database: "db", accountId: id, sessionId: nil,
+                  deepLink: link, deepLinkEventId: first)
+        sut.apply(serverUrl: serverUrl, database: "db", accountId: id, sessionId: nil,
+                  deepLink: link, deepLinkEventId: second)
+        XCTAssertEqual(events, ["base"])
+        sut.accountPageDidFinish(loadedHost: "cold.example.com")
+        sut.accountPageDidFinish(loadedHost: "cold.example.com")
+        sut.apply(serverUrl: serverUrl, database: "db", accountId: id, sessionId: nil,
+                  deepLink: link, deepLinkEventId: second)
+        XCTAssertEqual(events.filter { $0.hasPrefix("deeplink:") }.count, 1)
+    }
 }

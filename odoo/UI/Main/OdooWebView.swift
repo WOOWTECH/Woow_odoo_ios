@@ -19,6 +19,7 @@ struct OdooWebView: UIViewRepresentable {
     let accountId: String
     let sessionId: String?
     let deepLinkUrl: String?
+    let deepLinkEventId: UUID?
     let onSessionExpired: () -> Void
     @Binding var isLoading: Bool
     /// Drives MainView's offline screen (W2-4 L1); the coordinator owns its retry action.
@@ -41,7 +42,8 @@ struct OdooWebView: UIViewRepresentable {
             database: database,
             accountId: accountId,
             sessionId: sessionId,
-            deepLink: deepLinkUrl
+            deepLink: deepLinkUrl,
+            deepLinkEventId: deepLinkEventId
         )
         return container
     }
@@ -54,7 +56,8 @@ struct OdooWebView: UIViewRepresentable {
             database: database,
             accountId: accountId,
             sessionId: sessionId,
-            deepLink: deepLinkUrl
+            deepLink: deepLinkUrl,
+            deepLinkEventId: deepLinkEventId
         )
     }
 }
@@ -92,8 +95,10 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     /// A deep link captured on account switch, applied once in `didFinish` when the loaded
     /// host matches the target (load-gated). Cleared on apply so it fires exactly once.
     private var pendingDeepLink: String?
-    /// The last deep link seen, to detect a NEW warm same-account link.
+    private var pendingDeepLinkEventId: UUID?
+    /// Suppress repeated view updates of an event, not later taps on the same room.
     private var lastDeepLink: String?
+    private var lastDeepLinkEventId: UUID?
     /// Accounts whose data was removed while this coordinator lived (pi 0930, P2). Their WebView is
     /// never rebuilt — a rebuild would recreate the store that was just deleted.
     private var retiredAccountIds: Set<String> = []
@@ -204,7 +209,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     ///   directly with a full `load()` of the `/web#…` URL. Odoo 18's path router ignores
     ///   `location.hash`, so a full load is required for the deep link to take effect (see
     ///   `deepLinkApplyPlan`).
-    func apply(serverUrl: String, database: String, accountId: String, sessionId: String?, deepLink: String?) {
+    func apply(serverUrl: String, database: String, accountId: String, sessionId: String?, deepLink: String?, deepLinkEventId: UUID? = nil) {
         // pi 0930 (P2): a SwiftUI update can still carry an account whose data was just removed.
         guard !retiredAccountIds.contains(accountId) else { return }
         let switched = webView == nil
@@ -218,20 +223,29 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
             currentServerPort = URL(string: serverUrl)?.port
             currentDatabase = database
             lastDeepLink = deepLink
+            lastDeepLinkEventId = deepLinkEventId
             pendingDeepLink = (deepLink?.isEmpty == false) ? deepLink : nil
+            pendingDeepLinkEventId = deepLinkEventId
             rebuildWebView(accountId: accountId, serverUrl: serverUrl, database: database, sessionId: sessionId)
-        } else if let deepLink, !deepLink.isEmpty, deepLink != lastDeepLink {
+        } else if let deepLink, !deepLink.isEmpty,
+                  deepLinkEventId.map({ $0 != lastDeepLinkEventId }) ?? (deepLink != lastDeepLink) {
             lastDeepLink = deepLink
+            lastDeepLinkEventId = deepLinkEventId
             if hasFinishedAccountLoad {
                 applyDeepLink(deepLink)
-                consumePending(for: accountId)
+                consumePending(for: accountId, eventId: deepLinkEventId)
             } else {
                 // D4 (demo111 2026-09-29): on cold start the WebView is built before the URL is
                 // delivered and its base page is loaded only in the cookie-store completion.
                 // Applying (and consuming) the link now let that later base load replace it, so
                 // the link was lost. Queue it; `accountPageDidFinish` applies it load-gated.
                 pendingDeepLink = deepLink
+                pendingDeepLinkEventId = deepLinkEventId
             }
+        } else if deepLink == nil {
+            // URL-only callers delimit events by clearing their pending value. Keep the
+            // explicit event identity so an old event cannot replay after a nil update.
+            lastDeepLink = nil
         }
     }
 
@@ -327,6 +341,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         hasFinishedAccountLoad = false
         awaitingHealedSession = false
         pendingDeepLink = nil
+        pendingDeepLinkEventId = nil
         clearLoadFailure()
         #if DEBUG
         testProxy?.webView = nil
@@ -413,9 +428,9 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     }
 
     /// Clears the pending link from the shared manager on the main actor (single-consume).
-    private func consumePending(for accountId: String) {
+    private func consumePending(for accountId: String, eventId: UUID?) {
         Task { @MainActor in
-            _ = DeepLinkManager.shared.consume(for: accountId)
+            _ = DeepLinkManager.shared.consume(for: accountId, eventId: eventId)
         }
     }
 
@@ -580,9 +595,11 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
               host.caseInsensitiveCompare(currentServerHost) == .orderedSame else { return }
         hasFinishedAccountLoad = true
         if let pending = pendingDeepLink {
+            let eventId = pendingDeepLinkEventId
             pendingDeepLink = nil
+            pendingDeepLinkEventId = nil
             applyDeepLink(pending)
-            consumePending(for: currentAccountId ?? "")
+            consumePending(for: currentAccountId ?? "", eventId: eventId)
         }
     }
 
