@@ -190,6 +190,21 @@ final class LogoutRevokesAccountWebDataTests: XCTestCase {
         XCTAssertEqual(HTTPCookieStorage.shared.cookies?.count ?? 0, jarBefore)
     }
 
+    func test_destroySession_afterPrimarySessionInvalidated_usesIndependentTransport() async throws {
+        DestroyCaptureURLProtocol.succeed = true
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [DestroyCaptureURLProtocol.self]
+        let primarySession = URLSession(configuration: config)
+        let client = OdooAPIClient(session: primarySession)
+        primarySession.invalidateAndCancel()
+
+        await client.destroySession(serverUrl: "https://\(host)", sessionId: "sess-a")
+
+        let request = try XCTUnwrap(DestroyCaptureURLProtocol.requests.last)
+        XCTAssertEqual(request.url?.absoluteString, "https://\(host)/web/session/destroy")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Cookie"), "session_id=sess-a")
+    }
+
     func test_destroySession_unreachableServer_returnsWithoutThrowing() async {
         DestroyCaptureURLProtocol.succeed = false
         await makeClient().destroySession(serverUrl: "https://\(host)", sessionId: "sess-a")

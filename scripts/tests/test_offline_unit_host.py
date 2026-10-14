@@ -37,7 +37,24 @@ def assert_transport_contract(api):
         r"config.protocolClasses = \[OfflineUnitHostURLProtocol.self\]\s+#endif", default_init
     )
     assert default_init.index("config.protocolClasses") < default_init.index("URLSession(configuration: config)")
-    assert "init(session: URLSession) {\n        self.session = session\n    }" in api
+    assert (
+        "init(session: URLSession) {\n"
+        "        self.session = session\n"
+        "        self.isolatedRequestConfiguration = session.configuration\n"
+        "    }"
+    ) in api
+    destroy = api.split("    func destroySession(serverUrl: String, sessionId: String) async {", 1)[1]
+    destroy = destroy.split("    /// What the server says about one stored session", 1)[0]
+    for required in [
+        "isolatedRequestConfiguration.copy() as! URLSessionConfiguration",
+        "config.httpShouldSetCookies = false",
+        "config.httpCookieStorage = nil",
+        "let revokeSession = URLSession(configuration: config)",
+        "defer { revokeSession.invalidateAndCancel() }",
+        "try await revokeSession.data(for: request, delegate: PushNoRedirectDelegate())",
+    ]:
+        assert required in destroy
+    assert "session.data(for: request" not in destroy
 
 
 def allow_audited_cookie_consumer_apply(text):
@@ -164,7 +181,7 @@ AUDITED_SESSION_PROTOCOLS = {
     "ApporoSwitchSessionReuseTests.swift": ("SwitchURLProtocol", "SwitchURLProtocol"),
     "HonestLogoutS4Tests.swift": ("LogoutURLProtocol",),
     "LoginAccessDeniedMessageTests.swift": ("JsonRpcErrorURLProtocol",),
-    "LogoutRevokesAccountWebDataTests.swift": ("DestroyCaptureURLProtocol",),
+    "LogoutRevokesAccountWebDataTests.swift": ("DestroyCaptureURLProtocol", "DestroyCaptureURLProtocol"),
     "LoginServerErrorMessageTests.swift": ("CloudflareOriginDownURLProtocol",),
     "LoginUnexpectedResponseMessageTests.swift": ("HTMLPageURLProtocol",),
     "LogoutUnregisterURLTests.swift": ("RecordingURLProtocol",),

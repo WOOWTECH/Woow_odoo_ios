@@ -12,6 +12,9 @@ import os
 actor OdooAPIClient {
 
     private let session: URLSession
+    /// Detached best-effort revocations must not borrow the main session's lifetime. Tests and
+    /// future app lifecycle code may invalidate that session while a revoke is still queued.
+    private let isolatedRequestConfiguration: URLSessionConfiguration
     private let logger = Logger(subsystem: "io.woowtech.odoo", category: "API")
     private var requestId: Int = 0
 
@@ -28,11 +31,13 @@ actor OdooAPIClient {
         config.protocolClasses = [OfflineUnitHostURLProtocol.self]
         #endif
         self.session = URLSession(configuration: config)
+        self.isolatedRequestConfiguration = config.copy() as! URLSessionConfiguration
     }
 
     /// Testable init — inject custom URLSession with MockURLProtocol.
     init(session: URLSession) {
         self.session = session
+        self.isolatedRequestConfiguration = session.configuration
     }
 
     // MARK: - Request ID Generation
@@ -305,8 +310,16 @@ actor OdooAPIClient {
         request.httpShouldHandleCookies = false
         request.setValue("session_id=\(sessionId)", forHTTPHeaderField: "Cookie")
         request.httpBody = try? JSONEncoder().encode(JsonRpcRequest(id: nextRequestId(), params: EmptyRpcParams()))
+        let config = isolatedRequestConfiguration.copy() as! URLSessionConfiguration
+        config.httpShouldSetCookies = false
+        config.httpCookieStorage = nil
+        let revokeSession = URLSession(configuration: config)
+        // `data(for:)` has completed before this runs, so no useful task remains to drain. Immediate
+        // invalidation also prevents one-shot sessions from keeping the test host alive for the
+        // Foundation idle timeout after a large revoke suite.
+        defer { revokeSession.invalidateAndCancel() }
         do {
-            _ = try await session.data(for: request, delegate: PushNoRedirectDelegate())
+            _ = try await revokeSession.data(for: request, delegate: PushNoRedirectDelegate())
         } catch {
             logger.info("session destroy skipped: \(String(describing: type(of: error)), privacy: .public)")
         }
