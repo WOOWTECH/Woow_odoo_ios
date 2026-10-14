@@ -57,6 +57,9 @@ struct PinView: View {
                         )
                 }
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(String(localized: "enter_pin_title")))
+            .accessibilityValue(Text(verbatim: "\(pin.count)/\(pinLength)"))
             .offset(x: isShaking ? 10 : 0)
             .animation(.default.repeatCount(3, autoreverses: true).speed(6), value: isShaking)
             .padding(.top, 40)
@@ -64,14 +67,14 @@ struct PinView: View {
             // Error / lockout message
             if let error {
                 Text(error)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(WoowTheme.accessibleErrorTextColor)
                     .font(.caption)
                     .padding(.top, 16)
             }
 
             if let countdown = lockout.message() {
                 Text(countdown)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(WoowTheme.accessibleErrorTextColor)
                     .font(.caption)
                     .padding(.top, 8)
             }

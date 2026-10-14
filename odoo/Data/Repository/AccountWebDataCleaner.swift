@@ -18,17 +18,50 @@ protocol AccountWebDataCleaning: AnyObject {
     /// `session_id` values the account's WebKit store holds for `host` (the WebView may have been
     /// handed a newer session than the one in the Keychain).
     func sessionIds(forAccountId id: String, host: String) async -> [String]
-    /// Removes the account's website data. On a per-account store: everything. On the shared
-    /// default store (below iOS 17 / non-UUID ids): the `session_id` cookies for `host` whose value is
-    /// in `sessionIds`; and, when no remaining account uses the same site, ALL of that site's data
-    /// (pi 0930). While another account on the site remains, the rest of the site's data is shared
-    /// with it and stays — a documented limitation of the shared store, not a full cleanup.
-    /// `otherAccountHosts`: the server hosts of every account that remains after this removal.
+    /// Removes the account's entire isolated website data store. iOS 17 UUID accounts use a
+    /// persistent identified store; iOS 16 and non-UUID accounts use an account-keyed in-memory
+    /// store. The default store is never an account WebView fallback.
+    /// `host`, `sessionIds`, and `otherAccountHosts` remain in the seam so cleanup callers and test
+    /// doubles can audit ownership while older implementations are upgraded.
     func removeWebData(forAccountId id: String, host: String, sessionIds: Set<String>,
                        otherAccountHosts: [String]) async
     /// Removes per-account stores whose identifier matches no account (left by an earlier build,
     /// or still in use by a live WebView when its account was removed).
     func pruneOrphanStores(keeping accountIds: Set<String>) async
+}
+
+/// Owns the fallback stores used where persistent identified stores are unavailable (iOS 16), and
+/// for legacy/non-UUID account identifiers. The registry is main-actor confined because WebKit
+/// objects are UI process state. Keeping one store per account makes repeated WebView rebuilds reuse
+/// that account's cookies while keeping every other account isolated.
+@MainActor
+enum AccountWebsiteDataStoreRegistry {
+    private static var transientStores: [String: WKWebsiteDataStore] = [:]
+
+    static func store(forAccountId id: String) -> WKWebsiteDataStore {
+        if #available(iOS 17.0, *), let uuid = UUID(uuidString: id) {
+            return WKWebsiteDataStore(forIdentifier: uuid)
+        }
+        if let existing = transientStores[id] { return existing }
+        let created = WKWebsiteDataStore.nonPersistent()
+        transientStores[id] = created
+        return created
+    }
+
+    static func removeTransientStore(forAccountId id: String) async {
+        guard let store = transientStores[id] else { return }
+        await store.removeData(
+            ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(),
+            modifiedSince: .distantPast
+        )
+        transientStores.removeValue(forKey: id)
+    }
+
+    static func pruneTransientStores(keeping accountIds: Set<String>) async {
+        for id in transientStores.keys.filter({ !accountIds.contains($0) }) {
+            await removeTransientStore(forAccountId: id)
+        }
+    }
 }
 
 @MainActor
@@ -63,30 +96,11 @@ final class AccountWebDataCleaner: AccountWebDataCleaning {
             await Self.deleteStore(uuid)
             return
         }
-        let store = WKWebsiteDataStore.default()
-        for cookie in await allCookies(in: store)
-        where cookie.name == "session_id" && Self.matches(cookie, host: host) && sessionIds.contains(cookie.value) {
-            await withCheckedContinuation { cont in store.httpCookieStore.delete(cookie) { cont.resume() } }
-        }
-        // pi 0930 (P2): WebKit groups data by site (registrable domain). A site no remaining account
-        // uses is not shared any more — remove all of its data (storage, caches, other cookies).
-        let types = WKWebsiteDataStore.allWebsiteDataTypes()
-        let unshared = await store.dataRecords(ofTypes: types).filter { record in
-            Self.site(record.displayName, covers: host)
-                && !otherAccountHosts.contains { Self.site(record.displayName, covers: $0) }
-        }
-        if !unshared.isEmpty {
-            await store.removeData(ofTypes: types, for: unshared)
-        }
-    }
-
-    /// Whether `host` belongs to the site WebKit names `displayName` (the site itself or a subdomain).
-    private static func site(_ displayName: String, covers host: String) -> Bool {
-        let d = displayName.lowercased(), h = host.lowercased()
-        return !d.isEmpty && (h == d || h.hasSuffix("." + d))
+        await AccountWebsiteDataStoreRegistry.removeTransientStore(forAccountId: id)
     }
 
     func pruneOrphanStores(keeping accountIds: Set<String>) async {
+        await AccountWebsiteDataStoreRegistry.pruneTransientStores(keeping: accountIds)
         guard #available(iOS 17.0, *) else { return }
         // The class-level identifier fetch crashes (SIGSEGV in WTF::RunLoop::dispatch) when it is
         // the first WebKit call in the process — at launch no WebView exists yet. Instantiating a

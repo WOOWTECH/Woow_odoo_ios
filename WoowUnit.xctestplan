@@ -1,0 +1,20 @@
+{
+  "configurations" : [
+    {
+      "id" : "A6B7C8D9-E0F1-4234-8567-89ABCDEF0123",
+      "name" : "Default",
+      "options" : {}
+    }
+  ],
+  "defaultOptions" : {},
+  "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:odoo.xcodeproj",
+        "identifier" : "0435CDDF2F74B70200751CCD",
+        "name" : "odooTests"
+      }
+    }
+  ],
+  "version" : 1
+}

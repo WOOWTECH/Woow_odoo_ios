@@ -60,7 +60,9 @@ final class MainViewModel: ObservableObject {
     func loadActiveAccount() {
         activeAccount = accountRepository.getActiveAccount()
         if let account = activeAccount {
-            sessionId = accountRepository.getSessionId(for: account.fullServerUrl)
+            // A host can serve multiple accounts/databases. The shared URLSession cookie jar only
+            // represents whichever account wrote last, so the selected WebView must use its own SID.
+            sessionId = accountRepository.getSessionId(forAccountId: account.id)
         } else {
             sessionId = nil
         }

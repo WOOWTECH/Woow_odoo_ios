@@ -1312,6 +1312,9 @@ final class MainViewModelTests: XCTestCase {
     private final class FakeAccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         var activeAccount: OdooAccount?
         var sessionId: String?
+        var scopedSessionIds: [String: String] = [:]
+        var hostWideSessionId: String?
+        private(set) var hostWideLookupCount = 0
 
         func authenticate(serverUrl: String, database: String, username: String, password: String) async -> AuthResult {
             .error("stub", .unknown)
@@ -1325,7 +1328,13 @@ final class MainViewModelTests: XCTestCase {
         func switchAccount(id: String) async -> Bool { false }
         func logout(accountId: String?) async {}
         func removeAccount(id: String) async {}
-        func getSessionId(for serverUrl: String) -> String? { sessionId }
+        func getSessionId(forAccountId accountId: String) -> String? {
+            scopedSessionIds[accountId] ?? sessionId
+        }
+        func getSessionId(for serverUrl: String) -> String? {
+            hostWideLookupCount += 1
+            return hostWideSessionId
+        }
     }
 
     // loadActiveAccount with an active account must populate activeAccount and sessionId.
@@ -1352,6 +1361,25 @@ final class MainViewModelTests: XCTestCase {
 
         XCTAssertNil(vm.activeAccount)
         XCTAssertNil(vm.sessionId)
+    }
+
+    func test_loadActiveAccount_sameHostAccounts_usesSelectedAccountsScopedSession() {
+        let repo = FakeAccountRepository()
+        let a = OdooAccount(id: "same-host-a", serverUrl: "https://same.example.com",
+                            database: "db-a", username: "a", displayName: "A", isActive: true)
+        let b = OdooAccount(id: "same-host-b", serverUrl: "https://same.example.com",
+                            database: "db-b", username: "b", displayName: "B", isActive: true)
+        repo.scopedSessionIds = [a.id: "sid-a", b.id: "sid-b"]
+        repo.hostWideSessionId = "wrong-shared-sid"
+        repo.activeAccount = a
+        let vm = MainViewModel(accountRepository: repo, deepLinkManager: DeepLinkManager())
+        XCTAssertEqual(vm.sessionId, "sid-a")
+
+        repo.activeAccount = b
+        vm.loadActiveAccount()
+
+        XCTAssertEqual(vm.sessionId, "sid-b")
+        XCTAssertEqual(repo.hostWideLookupCount, 0, "selected account must never read the host-wide jar")
     }
 
     // consumePendingDeepLink delegates to DeepLinkManager.consume().

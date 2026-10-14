@@ -175,6 +175,33 @@ final class NotificationDeepLinkRouterTests: XCTestCase {
         )
     }
 
+    func test_oldPayload_noActiveAccount_dropsInsteadOfLeavingUnboundLink() {
+        let decision = NotificationDeepLinkRouter.decide(
+            userInfo: ["odoo_action_url": "/web#active_id=mail.channel_5"],
+            resolveTenant: { _ in nil },
+            activeAccount: nil
+        )
+
+        XCTAssertEqual(decision, .drop(.noActiveAccount))
+    }
+
+    func test_resolvedTenant_sameHostDifferentPort_drops() {
+        let target = OdooAccount(
+            id: "port-account", serverUrl: "https://port.example.com:8069",
+            database: "db", username: "user", displayName: "User", tenantId: "tenant-port"
+        )
+        let decision = NotificationDeepLinkRouter.decide(
+            userInfo: [
+                "odoo_action_url": "https://port.example.com:8070/web#action=1",
+                "odoo_tenant_id": "tenant-port",
+            ],
+            resolveTenant: { $0 == "tenant-port" ? target : nil },
+            activeAccount: nil
+        )
+
+        XCTAssertEqual(decision, .drop(.invalidUrl))
+    }
+
     /// Missing action url → drop (nothing to navigate to).
     func test_missingActionUrl_drops() {
         let repo = RoutingFakeRepository(accounts: [Fixtures.accountA])

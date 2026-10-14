@@ -91,8 +91,11 @@ def allow_audited_cold_start_deeplink_apply(text):
                      "brand: .woowtech,"]:
         assert required in text, required
     assert text.count("OdooWebViewCoordinator(") == 1
-    assert text.count("sut.apply(serverUrl:") == 4
-    assert text.count(".apply(serverUrl:") == 4
+    # D4 originally had four applies. Repeated-push event identity added eleven
+    # more calls in the same intercepted coordinator fixture (454a2bd); all
+    # fifteen still use a non-persistent store and local load closures only.
+    assert text.count("sut.apply(serverUrl:") == 15
+    assert text.count(".apply(serverUrl:") == 15
     return text.replace("sut.apply(serverUrl:", "auditedColdStartApply(serverUrl:")
 
 

@@ -22,7 +22,17 @@ protocol AccountRepositoryProtocol: Sendable {
     func setTenantId(_ tenantId: String, forAccountId accountId: String)
     func logout(accountId: String?) async
     func removeAccount(id: String) async
+    /// Returns the session owned by one persisted account. This is the only safe lookup when
+    /// multiple accounts can share an Odoo host.
+    func getSessionId(forAccountId accountId: String) -> String?
+    /// Legacy host-wide lookup retained for callers that explicitly need the shared cookie jar.
     func getSessionId(for serverUrl: String) -> String?
+}
+
+extension AccountRepositoryProtocol {
+    /// Test doubles and restricted repositories fail closed until they provide account-scoped
+    /// session storage; production `AccountRepository` supplies the Keychain-backed value.
+    func getSessionId(forAccountId accountId: String) -> String? { nil }
 }
 
 final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
@@ -82,6 +92,9 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         let cleaner = webDataCleaner
         let fromStore = await cleaner.sessionIds(forAccountId: accountId, host: host)
         let all = Set((knownSessionIds.compactMap { $0 } + fromStore).filter { !$0.isEmpty })
+        // The URLSession jar is process-wide, so remove only session values proven to belong to
+        // this account. Never clear a whole host: a same-host sibling may own the current cookie.
+        await apiClient.clearSessionCookies(for: serverUrl, values: all)
         let otherHosts = await MainActor.run { getAllAccounts().filter { $0.id != accountId }.map(\.serverHost) }
         await cleaner.removeWebData(forAccountId: accountId, host: host, sessionIds: all, otherAccountHosts: otherHosts)
         await MainActor.run { DeepLinkManager.shared.drop(boundTo: accountId) }
@@ -592,18 +605,6 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
         await unregisterFcmToken(account: account.toDomainModel())
         let keychainSessionId = secureStorage.getSessionId(accountId: removed.id)
 
-        // F4 (0930): the WOOW brand shares one cookie jar across accounts. While another account on
-        // the same host remains, remove only THIS account's session cookie — not the host's cookies,
-        // which would sign the sibling out. The host's last account clears them all, as before.
-        let siblingOnHost = ((try? context.fetch(OdooAccountEntity.fetchAllRequest())) ?? []).contains {
-            $0.id != account.id
-                && $0.toDomainModel().serverHost.caseInsensitiveCompare(removed.serverHost) == .orderedSame
-        }
-        if siblingOnHost {
-            await apiClient.clearSessionCookies(for: account.serverUrl, values: Set([keychainSessionId].compactMap { $0 }))
-        } else {
-            await apiClient.clearCookies(for: account.serverUrl)
-        }
         secureStorage.deletePassword(accountId: removed.id)
         // Delete the Keychain session_id copy so the session cannot be reused after logout.
         secureStorage.deleteSessionId(accountId: removed.id)
@@ -684,14 +685,6 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
             PushRegistrationStatusStore.shared.remove(accountId: account.id)
             secureStorage.deletePassword(accountId: account.id)
             secureStorage.deleteSessionId(accountId: account.id)
-            if logout, let cookie = credential?.sessionCookie?.cookie() {
-                // Never clear another account's same-host jar cookie.
-                for existing in HTTPCookieStorage.shared.cookies ?? [] where
-                    existing.name == cookie.name && existing.domain == cookie.domain &&
-                    existing.path == cookie.path && existing.value == cookie.value {
-                    HTTPCookieStorage.shared.deleteCookie(existing)
-                }
-            }
             context.delete(entity)
             try? context.save()
             let remaining = (try? context.fetch(OdooAccountEntity.fetchAllRequest())) ?? []
@@ -746,6 +739,10 @@ final class AccountRepository: AccountRepositoryProtocol, @unchecked Sendable {
     func getSessionId(for serverUrl: String) -> String? {
         // Direct synchronous read from HTTPCookieStorage — no async needed (H1 fix)
         apiClient.getSessionId(for: serverUrl)
+    }
+
+    func getSessionId(forAccountId accountId: String) -> String? {
+        secureStorage.getSessionId(accountId: accountId)
     }
 
     // MARK: - DEBUG Test Helpers

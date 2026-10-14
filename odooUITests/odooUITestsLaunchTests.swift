@@ -20,13 +20,17 @@ final class odooUITestsLaunchTests: XCTestCase {
     @MainActor
     func testLaunch() throws {
         let app = XCUIApplication()
+        app.launchArguments += ["-AppleLanguages", "(en)"]
         app.launch()
 
-        // Insert steps here to perform after app launch but before taking a screenshot,
-        // such as logging into a test account or navigating somewhere in the app
+        let brandName = app.staticTexts[SharedTestConfig.appDisplayName]
+        XCTAssertTrue(
+            brandName.waitForExistence(timeout: 15),
+            "The selected brand did not reach its login UI after launch",
+        )
 
         let attachment = XCTAttachment(screenshot: app.screenshot())
-        attachment.name = "Launch Screen"
+        attachment.name = "\(SharedTestConfig.appDisplayName) Launch Screen"
         attachment.lifetime = .keepAlways
         add(attachment)
     }

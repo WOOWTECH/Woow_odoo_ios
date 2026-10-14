@@ -1,9 +1,9 @@
 import Foundation
 import CoreFoundation
 
-/// One adapter for every registration/rotation/logout/remove write. Apporo pins
-/// capability and write to the same account-owned SID and replays the WHOLE pair
-/// once after expiry; WOOW deliberately retains its legacy wire contract.
+/// One adapter for every registration/rotation/logout/remove write. Both brands pin writes to an
+/// account-owned SID. Apporo additionally pins its capability check and replays that WHOLE pair
+/// once after expiry; WOOW deliberately retains its legacy wire payload.
 struct PushDeviceRegistrar: Sendable {
     enum Failure: Error, Sendable { case notConfigured, invalidResponse, signInRequired, accountRemoved, superseded, temporarilyUnavailable }
 
@@ -34,7 +34,7 @@ struct PushDeviceRegistrar: Sendable {
     @MainActor private func begin(account: OdooAccount, captured: PushCredential? = nil) throws -> Operation {
         let identityIsCurrent = accounts.getAllAccounts().contains(where: { sameIdentity($0, account) })
         // Reject stale callers BEFORE they can supersede a live operation's revision.
-        if brand == .apporo && captured == nil && !identityIsCurrent { throw Failure.superseded }
+        if captured == nil && !identityIsCurrent { throw Failure.superseded }
         let current = credentials.pushCredential(accountId: account.id)
         if let captured, captured.generation != current?.generation || !identityIsCurrent {
             // Cleanup captured before removal must not even supersede a newer operation.
@@ -77,13 +77,6 @@ struct PushDeviceRegistrar: Sendable {
         }
     }
 
-    /// Retains the legacy URL-only API; Apporo must always resolve an account.
-    func unregisterLegacyURL(_ serverURL: String, token: String) async throws {
-        guard brand == .woowtech else { throw Failure.signInRequired }
-        _ = try await api.callKw(serverUrl: serverURL, model: "woow.fcm.device",
-                                 method: "unregister_device", kwargs: ["fcm_token": token])
-    }
-
     func unregister(account: OdooAccount, token: String, capturedCredential: PushCredential? = nil) async throws {
         let operation = try await begin(account: account, captured: capturedCredential)
         do {
@@ -99,13 +92,27 @@ struct PushDeviceRegistrar: Sendable {
 
     private func perform(account: OdooAccount, credential: PushCredential?, method: String, kwargs: [String: Any]) async throws -> Any? {
         if brand == .woowtech {
-            if method == "register_device" {
-                return try await SessionHealingRegistrar(apiClient: api,
-                    reauthenticator: legacyReauthenticator ?? .shared).callKwHealing(
-                        account: account, model: "woow.fcm.device", method: method, kwargs: kwargs)
+            // SessionHealingRegistrar's legacy path read the process-wide cookie jar. Keep the
+            // legacy woow.fcm.device payload, but pin both register and unregister to this account.
+            guard let sessionId = accounts.getSessionId(forAccountId: account.id),
+                  !sessionId.isEmpty else { throw Failure.signInRequired }
+            do {
+                return try await api.callKwWithPushSession(
+                    serverUrl: account.fullServerUrl, sessionId: sessionId,
+                    method: method, kwargs: kwargs)
+            } catch let error {
+                guard case OdooAPIError.sessionExpired = error else { throw error }
+                // Structural one-retry cap: one exact-account heal and one replay. An expiry from
+                // the replay propagates; this block cannot recurse or authenticate a second time.
+                let healed = await (legacyReauthenticator ?? .shared)
+                    .reauthenticateForHost(account.serverHost, accountId: account.id)
+                guard healed,
+                      let refreshed = accounts.getSessionId(forAccountId: account.id),
+                      !refreshed.isEmpty else { throw OdooAPIError.sessionExpired }
+                return try await api.callKwWithPushSession(
+                    serverUrl: account.fullServerUrl, sessionId: refreshed,
+                    method: method, kwargs: kwargs)
             }
-            return try await api.callKw(serverUrl: account.fullServerUrl, model: "woow.fcm.device",
-                                        method: method, kwargs: kwargs)
         }
         guard let credential,
               credential.matches(account), !credential.sessionId.isEmpty else { throw Failure.signInRequired }

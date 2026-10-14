@@ -21,6 +21,8 @@ enum NotificationDeepLinkRouter {
         case invalidUrl
         /// A tenant id was present but matched no local account. NEVER fall back to A.
         case unresolvedTenant
+        /// A legacy payload had no tenant id and there is no signed-in account to own it.
+        case noActiveAccount
     }
 
     /// The outcome of evaluating a notification tap.
@@ -28,8 +30,6 @@ enum NotificationDeepLinkRouter {
         /// A tenant id resolved to `accountId`: switch to it, then apply `url` bound to it.
         case switchAndRoute(accountId: String, url: String)
         /// No tenant id (old plugin): keep the active account and apply `url` bound to it.
-        /// `accountId` is the active account's id, or empty when no account is active
-        /// (preserves legacy behaviour for relative `/web` links).
         case useActive(accountId: String, url: String)
         /// Do nothing — the active account must be left untouched.
         case drop(DropReason)
@@ -65,18 +65,18 @@ enum NotificationDeepLinkRouter {
             guard let target = resolveTenant(tenantId) else {
                 return .drop(.unresolvedTenant)
             }
-            guard DeepLinkValidator.isValid(url: actionUrl, serverHost: target.serverHost) else {
+            guard DeepLinkValidator.isValid(url: actionUrl, serverURL: target.fullServerUrl) else {
                 return .drop(.invalidUrl)
             }
             return .switchAndRoute(accountId: target.id, url: actionUrl)
         }
 
-        // Old-plugin fallback: validate against the active account (host may be empty for
-        // relative /web paths, which the validator accepts regardless of host).
-        let serverHost = activeAccount?.serverHost ?? ""
-        guard DeepLinkValidator.isValid(url: actionUrl, serverHost: serverHost) else {
+        // A legacy relative path still needs an account binding. Never leave it unbound for a
+        // future login to consume.
+        guard let activeAccount else { return .drop(.noActiveAccount) }
+        guard DeepLinkValidator.isValid(url: actionUrl, serverURL: activeAccount.fullServerUrl) else {
             return .drop(.invalidUrl)
         }
-        return .useActive(accountId: activeAccount?.id ?? "", url: actionUrl)
+        return .useActive(accountId: activeAccount.id, url: actionUrl)
     }
 }

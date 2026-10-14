@@ -51,7 +51,7 @@ struct CurrentPinPromptView: View {
 
                 if let message = lockout.message() ?? error {
                     Text(message)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(WoowTheme.accessibleErrorTextColor)
                         .font(.caption)
                 }
 

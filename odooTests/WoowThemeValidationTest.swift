@@ -46,14 +46,19 @@ final class WoowThemeValidationTest: XCTestCase {
         XCTAssertEqual(WoowTheme.scheme(for: "#F5DEB3"), .light) // wheat / cream
     }
 
-    func test_toolbarTextScheme_returnsLightSchemeForDarkColors() {
-        // Dark colors → use WHITE text (`.dark` color scheme means
-        // dark environment → white text).
+    func test_toolbarTextScheme_picksTheHigherContrastBlackOrWhiteForeground() throws {
+        // Very dark colors use white. Mid-tone WOOW blue/red/green use black because white would
+        // miss 4.5:1 even though the old empirical threshold classified them as "dark".
         XCTAssertEqual(WoowTheme.scheme(for: "#000000"), .dark) // pure black
-        XCTAssertEqual(WoowTheme.scheme(for: "#6183FC"), .dark) // brand blue
-        XCTAssertEqual(WoowTheme.scheme(for: "#FF0000"), .dark) // red
-        XCTAssertEqual(WoowTheme.scheme(for: "#00C853"), .dark) // green
+        XCTAssertEqual(WoowTheme.scheme(for: "#6183FC"), .light) // brand blue
+        XCTAssertEqual(WoowTheme.scheme(for: "#FF0000"), .light) // red
+        XCTAssertEqual(WoowTheme.scheme(for: "#00C853"), .light) // green
         XCTAssertEqual(WoowTheme.scheme(for: "#003399"), .dark) // navy
+
+        for hex in ["#000000", "#6183FC", "#FF0000", "#00C853", "#003399", "#FFFFFF"] {
+            let foreground = WoowTheme.scheme(for: hex) == .light ? "#000000" : "#FFFFFF"
+            XCTAssertGreaterThanOrEqual(try XCTUnwrap(WoowTheme.contrastRatio(hex, foreground)), 4.5)
+        }
     }
 
     func test_toolbarTextScheme_isStableNearThreshold() {

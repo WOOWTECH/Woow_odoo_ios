@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 /// Observable theme manager — persists primary color via SettingsRepository.
 /// Ported from Android: ThemeManager + Theme.kt
@@ -38,6 +39,16 @@ final class WoowTheme: ObservableObject {
     /// theme colour because these are pre-authentication / app-shell surfaces.
     static let fixedBrandButtonColor: Color = Color(hex: AppBrand.current.buttonFillHex)
 
+    /// Dynamic error text color that keeps small caption text above WCAG AA contrast in both
+    /// appearances. SwiftUI's plain `.red` is only about 3.6:1 on white and is therefore too light
+    /// for the PIN validation/countdown captions.
+    static let accessibleErrorTextColor = Color(uiColor: UIColor { traits in
+        if traits.userInterfaceStyle == .dark {
+            return UIColor(red: 1.0, green: 0.71, blue: 0.68, alpha: 1.0) // #FFB5AD on black
+        }
+        return UIColor(red: 0.70, green: 0.0, blue: 0.08, alpha: 1.0) // #B30014 on white
+    })
+
     /// WCAG 2.1 contrast ratio (1.0–21.0) between two `#RRGGBB` colours, or nil if either is malformed.
     static func contrastRatio(_ hexA: String, _ hexB: String) -> Double? {
         guard parseRGB(hex: hexA) != nil, parseRGB(hex: hexB) != nil else { return nil }
@@ -74,14 +85,15 @@ final class WoowTheme: ObservableObject {
         Self.scheme(for: primaryColorHex)
     }
 
-    /// Pure helper used by `toolbarTextScheme` and validated by unit tests.
-    /// Threshold of 0.55 chosen empirically: matches Material's
-    /// `colorContrastRatio` heuristic and gives `.dark` (white text) for
-    /// brand blue (#6183FC luminance ≈ 0.31) while flipping to `.light`
-    /// (black text) for yellows / pastels.
+    /// Pure helper used by `toolbarTextScheme` and validated by unit tests. It compares the actual
+    /// WCAG contrast of black and white instead of relying on an empirical luminance threshold.
+    /// This matters for mid-tone colors such as WOOW blue: white is only 3.41:1 while black easily
+    /// passes AA. `.light` asks SwiftUI for dark toolbar foreground content; `.dark` asks for white.
     static func scheme(for hex: String) -> ColorScheme {
         let lum = relativeLuminance(of: hex)
-        return lum > 0.55 ? .light : .dark
+        let blackContrast = (lum + 0.05) / 0.05
+        let whiteContrast = 1.05 / (lum + 0.05)
+        return blackContrast >= whiteContrast ? .light : .dark
     }
 
     /// WCAG 2.1 relative luminance formula. Returns 0.0 (black) – 1.0 (white).

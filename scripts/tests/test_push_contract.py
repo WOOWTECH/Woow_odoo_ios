@@ -119,7 +119,7 @@ def assert_switch_commit(account):
 def assert_begin_identity(registrar):
     begin = registrar.split("@MainActor private func begin", 1)[1].split("/// Identity, generation", 1)[0]
     assert "sameIdentity($0, account)" in begin
-    reject = "if brand == .apporo && captured == nil && !identityIsCurrent { throw Failure.superseded }"
+    reject = "if captured == nil && !identityIsCurrent { throw Failure.superseded }"
     assert reject in begin
     assert begin.index(reject) < begin.index("PushRegistrationStatusStore.shared.begin(")
     assert "captured.generation != current?.generation || !identityIsCurrent" in begin

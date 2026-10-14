@@ -21,7 +21,7 @@ enum ExternalLinkIntake {
         }
         // F3 (0930, Android `ExternalLinkIntake` parity): nobody signed in → nothing to apply it to.
         guard let active = activeAccount else { return false }
-        guard DeepLinkValidator.isValid(url: urlParam, serverHost: active.serverHost) else { return false }
+        guard DeepLinkValidator.isValid(url: urlParam, serverURL: active.fullServerUrl) else { return false }
         // Bound to the account active on arrival, so a later switch can never apply it elsewhere.
         manager.setPending(urlParam, accountId: active.id)
         return true

@@ -37,6 +37,9 @@
          <TestPlanReference
             reference = "container:ApporoUI.xctestplan">
          </TestPlanReference>
+         <TestPlanReference
+            reference = "container:BrandLaunchSmoke.xctestplan">
+         </TestPlanReference>
       </TestPlans>
       <Testables>
          <TestableReference

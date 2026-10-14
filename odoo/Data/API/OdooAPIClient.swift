@@ -165,7 +165,8 @@ actor OdooAPIClient {
                                 args: args, kwargs: kwargs, pushSessionId: nil)
     }
 
-    /// Only the Apporo compound registrar uses this pinned, account-owned SID.
+    /// Push registration for both brands uses this pinned, account-owned SID so a shared cookie
+    /// jar can never authorize a write for a same-host sibling account.
     func callKwWithPushSession(
         serverUrl: String, sessionId: String, method: String, kwargs: [String: Any] = [:]
     ) async throws -> Any? {
@@ -272,10 +273,18 @@ actor OdooAPIClient {
     /// (F4, 0930): the WOOW brand keeps every account's session in the shared jar, so logging out one
     /// account must not delete a same-host sibling's session.
     func clearSessionCookies(for serverUrl: String, values: Set<String>) {
-        guard !values.isEmpty, let url = URL(string: serverUrl),
-              let cookies = HTTPCookieStorage.shared.cookies(for: url) else { return }
-        cookies.filter { $0.name == "session_id" && values.contains($0.value) }
+        guard !values.isEmpty, let host = URL(string: serverUrl)?.host else { return }
+        // Inspect every path for the host. `cookies(for:)` only returns cookies matching the URL's
+        // current path and could leave an account's rotated `/web` cookie behind.
+        (HTTPCookieStorage.shared.cookies ?? [])
+            .filter { $0.name == "session_id" && values.contains($0.value) && Self.cookie($0, matchesHost: host) }
             .forEach { HTTPCookieStorage.shared.deleteCookie($0) }
+    }
+
+    private nonisolated static func cookie(_ cookie: HTTPCookie, matchesHost host: String) -> Bool {
+        let domain = cookie.domain.hasPrefix(".") ? String(cookie.domain.dropFirst()) : cookie.domain
+        let normalizedHost = host.lowercased(), normalizedDomain = domain.lowercased()
+        return normalizedHost == normalizedDomain || normalizedHost.hasSuffix("." + normalizedDomain)
     }
 
     /// Best-effort server-side logout of ONE account's session (demo111 2026-09-29, D1): before

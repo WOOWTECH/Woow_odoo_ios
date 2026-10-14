@@ -161,6 +161,18 @@ final class DeepLinkValidatorTests: XCTestCase {
     func testRejectFile() {
         XCTAssertFalse(DeepLinkValidator.isValid(url: "file:///etc/passwd", serverHost: serverHost))
     }
+
+    func testAbsoluteURL_requiresExactEffectiveHTTPSPort() {
+        XCTAssertTrue(DeepLinkValidator.isValid(
+            url: "https://example.com:443/web", serverURL: "https://EXAMPLE.com"
+        ))
+        XCTAssertFalse(DeepLinkValidator.isValid(
+            url: "https://example.com:8443/web", serverURL: "https://example.com"
+        ))
+        XCTAssertFalse(DeepLinkValidator.isValid(
+            url: "http://example.com/web", serverURL: "https://example.com"
+        ))
+    }
 }
 
 // MARK: - M2: PinHasher Tests

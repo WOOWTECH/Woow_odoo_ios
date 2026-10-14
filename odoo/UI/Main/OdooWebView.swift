@@ -374,7 +374,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
 
         // Per-account isolated cookie/data store — account A's cookies can never load under
         // account B (P0 cross-tenant isolation). iOS 17+ gets a durable per-identifier store;
-        // older OSes and legacy/empty account ids fall back to the shared default store.
+        // older OSes and legacy/non-UUID ids get an account-keyed in-memory store.
         config.websiteDataStore = websiteDataStore(accountId)
 
         // Install the geolocation shim so it runs before any page JavaScript.
@@ -476,19 +476,15 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     /// parses the legacy `#action=…&active_id=discuss.channel_<id>` hash at boot (web router
     /// `parseHash`/`sanitizeHash`) and migrates it to the correct `/odoo/...` path route.
     static func deepLinkApplyPlan(currentURL: URL?, targetServerUrl: String, deepLink: String) -> DeepLinkApplyPlan? {
-        let targetHost = URL(string: targetServerUrl)?.host ?? ""
-        guard DeepLinkValidator.isValid(url: deepLink, serverHost: targetHost) else { return nil }
+        guard DeepLinkValidator.isValid(url: deepLink, serverURL: targetServerUrl) else { return nil }
         guard let target = resolveDeepLinkURL(serverUrl: targetServerUrl, deepLink: deepLink) else { return nil }
         return .load(target)
     }
 
-    /// The data store for an account. iOS 17+ real (UUID) account ids get an isolated
-    /// per-identifier store; otherwise the shared default store is used.
+    /// The isolated data store for an account. iOS 17+ UUID ids use persistent identified stores;
+    /// iOS 16 and non-UUID ids use cached per-account non-persistent stores, never `.default()`.
     static func dataStore(forAccountId id: String) -> WKWebsiteDataStore {
-        if #available(iOS 17.0, *), let uuid = UUID(uuidString: id) {
-            return WKWebsiteDataStore(forIdentifier: uuid)
-        }
-        return .default()
+        AccountWebsiteDataStoreRegistry.store(forAccountId: id)
     }
 
     // MARK: - Navigation Decision (extracted for testability)
@@ -504,29 +500,35 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     /// Pure function that decides what to do with a navigation URL. No side effects.
     func decideNavigation(for url: URL?) -> NavigationDecision {
         guard let url else { return .cancel }
+        let scheme = url.scheme?.lowercased()
 
-        // Session expiry detection
-        if url.absoluteString.contains("/web/login") {
-            return .sessionExpired
-        }
-
-        // Same-host: allow
-        if let host = url.host, host.caseInsensitiveCompare(currentServerHost) == .orderedSame {
+        // Only this account's exact HTTPS origin can drive its WebView or expiry state.
+        if DeepLinkValidator.isSameHTTPSOrigin(url, serverURL: currentServerUrl) {
+            if Self.isLoginPath(url.path, serverUrl: currentServerUrl) {
+                return .sessionExpired
+            }
             return .allow
         }
 
-        // Relative URLs (no host): allow
-        if url.host == nil {
-            return .allow
+        // A truly relative canonical Odoo route is safe; hostless executable/data/file schemes
+        // are not relative and are never handed to WebKit.
+        if scheme == nil, url.host == nil {
+            return DeepLinkValidator.isValid(url: url.relativeString, serverURL: currentServerUrl)
+                ? .allow : .cancel
         }
 
-        // Blob URLs: allow (OWL framework downloads)
-        if url.scheme == "blob" {
-            return .allow
+        // OWL download blobs inherit an origin. Accept only a blob created by this account origin.
+        if scheme == "blob" {
+            return DeepLinkValidator.isSameOriginBlobURL(url, serverURL: currentServerUrl) ? .allow : .cancel
         }
 
-        // Everything else: open in Safari (UX-27)
-        return .openInSafari(url)
+        // Ordinary external web links and explicit safe system links leave the WebView. Every
+        // other scheme (javascript, data, file, custom/opaque hostless URLs) is blocked.
+        if ["https", "http", "mailto", "tel"].contains(scheme ?? "") {
+            return .openInSafari(url)
+        }
+
+        return .cancel
     }
 
     // MARK: - WKNavigationDelegate
@@ -584,15 +586,15 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         TestNotificationTapInjector.shared.fireOnceAfterActiveLoad()
         #endif
 
-        accountPageDidFinish(loadedHost: webView.url?.host)
+        accountPageDidFinish(loadedURL: webView.url)
     }
 
     /// Load-gated deep-link apply: only when the finished page is on the TARGET host.
     /// This closes the async race and guarantees a link never applies to account A.
     /// Split out of `didFinish` so the gate is unit-testable without a WebKit load.
-    func accountPageDidFinish(loadedHost: String?) {
-        guard let host = loadedHost,
-              host.caseInsensitiveCompare(currentServerHost) == .orderedSame else { return }
+    func accountPageDidFinish(loadedURL: URL?) {
+        guard let loadedURL,
+              DeepLinkValidator.isSameHTTPSOrigin(loadedURL, serverURL: currentServerUrl) else { return }
         hasFinishedAccountLoad = true
         if let pending = pendingDeepLink {
             let eventId = pendingDeepLinkEventId
@@ -601,6 +603,16 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
             applyDeepLink(pending)
             consumePending(for: currentAccountId ?? "", eventId: eventId)
         }
+    }
+
+    /// Compatibility helper for older unit callers. Production uses `loadedURL:` so port and
+    /// scheme are always part of the gate.
+    func accountPageDidFinish(loadedHost: String?) {
+        guard let loadedHost else { return }
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = loadedHost
+        accountPageDidFinish(loadedURL: components.url)
     }
 
     /// A load that had already committed a document then died (connection dropped mid-transfer).
@@ -665,15 +677,23 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     /// What a retry loads: the failed page when it is on the account's own origin (scheme, host and
     /// port) and not the login redirect; otherwise the account's base page.
     static func retryURL(failedURL: URL?, serverUrl: String, database: String) -> URL? {
-        let server = URL(string: serverUrl)
-        if let failedURL, let host = failedURL.host, let serverHost = server?.host,
-           host.caseInsensitiveCompare(serverHost) == .orderedSame,
-           failedURL.scheme?.lowercased() == server?.scheme?.lowercased(),
-           failedURL.port == server?.port,
-           !failedURL.absoluteString.contains("/web/login") {
+        if let failedURL,
+           DeepLinkValidator.isSameHTTPSOrigin(failedURL, serverURL: serverUrl),
+           !isLoginPath(failedURL.path, serverUrl: serverUrl) {
             return failedURL
         }
         return baseURL(serverUrl: serverUrl, database: database)
+    }
+
+    /// Odoo may be hosted below an origin path (for example `https://host/odoo`). Match the login
+    /// route relative to that configured base, without treating lookalikes such as `/web/login2`
+    /// as an expired session.
+    private static func isLoginPath(_ candidatePath: String, serverUrl: String) -> Bool {
+        var basePath = URL(string: serverUrl)?.path ?? ""
+        while basePath.count > 1, basePath.hasSuffix("/") { basePath.removeLast() }
+        if basePath == "/" { basePath = "" }
+        let loginPath = basePath + "/web/login"
+        return candidatePath == loginPath || candidatePath.hasPrefix(loginPath + "/")
     }
 
     /// The offline screen's retry, and the one automatic retry when the network comes back. Reloads

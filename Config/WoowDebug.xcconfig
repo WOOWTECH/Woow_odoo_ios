@@ -3,7 +3,10 @@ APP_BRAND = woowtech
 APP_DISPLAY_NAME = woowtech platform
 PRODUCT_BUNDLE_IDENTIFIER = io.woowtech.odoo
 APP_URL_SCHEME = woowodoo
-CURRENT_PROJECT_VERSION = 3
+// WOOW 1.0 (4) is already published. The parity release must use a new
+// marketing/build pair so an archive can never overwrite or reuse a store build.
+MARKETING_VERSION = 1.0.1
+CURRENT_PROJECT_VERSION = 5
 ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
 ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor
 CODE_SIGN_ENTITLEMENTS = odoo/odoo.entitlements

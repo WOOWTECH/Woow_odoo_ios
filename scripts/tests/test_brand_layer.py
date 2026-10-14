@@ -127,14 +127,15 @@ class BrandLayerTests(unittest.TestCase):
 
     def test_four_configuration_identities(self):
         matrix = [
-            ("WoowDebug", "woowtech", "io.woowtech.odoo", "woowodoo", "3", "AppIcon"),
-            ("WoowRelease", "woowtech", "io.woowtech.odoo", "woowodoo", "3", "AppIcon"),
+            # WOOW 1.0 (4) is already published; the parity release starts at 1.0.1 (5).
+            ("WoowDebug", "woowtech", "io.woowtech.odoo", "woowodoo", "5", "AppIcon"),
+            ("WoowRelease", "woowtech", "io.woowtech.odoo", "woowodoo", "5", "AppIcon"),
             ("ApporoDebug", "apporo", "com.apporo.odoo.dev", "apporoodoo-dev", "1", "ApporoAppIcon"),
             # ApporoRelease build 1 = App Store Connect 2026-09-27 (b902ff47), build 2 = 8c03e44
             # (TestFlight 2026-09-29), build 3 = b80fa88 (TestFlight 2026-10-03), build 4 = the
             # 2026-10-08 W2-4 + contrast bump; build 5 carries repeated-push event identity.
             # Uploaded numbers can never be reused.
-            ("ApporoRelease", "apporo", "com.apporo.odoo", "apporoodoo", "5", "ApporoAppIcon"),
+            ("ApporoRelease", "apporo", "com.apporo.odoo", "apporoodoo", "6", "ApporoAppIcon"),
         ]
         for name, brand, bundle, scheme, version, icon in matrix:
             with self.subTest(name=name):
@@ -143,8 +144,12 @@ class BrandLayerTests(unittest.TestCase):
                     self.assertEqual(c[key], expected)
                 self.assertEqual(c["APP_DISPLAY_NAME"], "Apporo platform" if brand == "apporo" else "woowtech platform")
         self.assertIn("MARKETING_VERSION = 1.0", text("Config/Shared.xcconfig"))
+        for name in ("WoowDebug", "WoowRelease"):
+            self.assertEqual(config(name)["MARKETING_VERSION"], "1.0.1")
+        # Guard against re-using the already-published WOOW build 4.
+        self.assertGreaterEqual(int(config("WoowRelease")["CURRENT_PROJECT_VERSION"]), 5)
         # Guard against re-using an uploaded ApporoRelease build number.
-        self.assertGreaterEqual(int(config("ApporoRelease")["CURRENT_PROJECT_VERSION"]), 5)
+        self.assertGreaterEqual(int(config("ApporoRelease")["CURRENT_PROJECT_VERSION"]), 6)
 
     def test_project_and_three_targets_have_matching_configurations(self):
         lists = [v for v in self.objects.values() if v.get("isa") == "XCConfigurationList"]
@@ -202,9 +207,11 @@ class BrandLayerTests(unittest.TestCase):
                 for key in keys:
                     self.assertNotIn(key, c["buildSettings"], "project/target level would override xcconfig")
 
-    def test_schemes_preserve_woow_and_select_apporo(self):
-        original = subprocess.run(["git", "show", "a50c4df:odoo.xcodeproj/xcshareddata/xcschemes/odoo.xcscheme"], cwd=ROOT, capture_output=True, check=True).stdout
-        self.assertEqual(original, (ROOT / "odoo.xcodeproj/xcshareddata/xcschemes/odoo.xcscheme").read_bytes())
+    def test_schemes_select_brand_unit_plans_without_live_e2e_by_default(self):
+        woow_scheme = ET.fromstring(text("odoo.xcodeproj/xcshareddata/xcschemes/odoo.xcscheme"))
+        woow_plans = {p.get("reference"): p.get("default") for p in woow_scheme.findall("TestAction/TestPlans/TestPlanReference")}
+        self.assertEqual(woow_plans, {"container:WoowUnit.xctestplan": "YES", "container:LocationE2E.xctestplan": None,
+                                      "container:BrandLaunchSmoke.xctestplan": None})
         scheme = ET.fromstring(text("odoo.xcodeproj/xcshareddata/xcschemes/apporoodoo.xcscheme"))
         for action in ["TestAction", "LaunchAction", "AnalyzeAction"]:
             self.assertEqual(scheme.find(action).get("buildConfiguration"), "ApporoDebug")
@@ -213,9 +220,11 @@ class BrandLayerTests(unittest.TestCase):
         # Default plan stays unit-only (no live location E2E); UI tests are
         # reachable only by explicitly choosing -testPlan ApporoUI.
         plans = {p.get("reference"): p.get("default") for p in scheme.findall("TestAction/TestPlans/TestPlanReference")}
-        self.assertEqual(plans, {"container:ApporoUnit.xctestplan": "YES", "container:ApporoUI.xctestplan": None})
+        self.assertEqual(plans, {"container:ApporoUnit.xctestplan": "YES", "container:ApporoUI.xctestplan": None,
+                                 "container:BrandLaunchSmoke.xctestplan": None})
         self.assertEqual([e.get("BlueprintName") for e in scheme.findall("TestAction/Testables/TestableReference/BuildableReference")], ["odooTests", "odooUITests"])
-        for plan_name, target in [("ApporoUnit", "odooTests"), ("ApporoUI", "odooUITests")]:
+        for plan_name, target in [("WoowUnit", "odooTests"), ("ApporoUnit", "odooTests"),
+                                  ("ApporoUI", "odooUITests"), ("BrandLaunchSmoke", "odooUITests")]:
             plan = json.loads(text(f"{plan_name}.xctestplan"))
             self.assertEqual([t["target"]["name"] for t in plan["testTargets"]], [target])
             self.assertTrue(all(t.get("enabled", True) for t in plan["testTargets"]))
@@ -384,9 +393,20 @@ class BrandLayerTests(unittest.TestCase):
         self.assertIn('AppBrand.current.localized("biometric_reason")', text("odoo/UI/Auth/AuthViewModel.swift"))
 
     def test_scheme_branding_preserves_validator_privacy_and_ordinary_root(self):
-        for file in ["odoo/Data/Push/DeepLinkValidator.swift", "odoo/App/TestHookGate.swift", "odoo/PrivacyInfo.xcprivacy"]:
+        # Test hooks and the privacy manifest remain byte-for-byte protected. Deep-link validation
+        # intentionally moved beyond the old host-only baseline; pin its new origin contract here.
+        for file in ["odoo/App/TestHookGate.swift", "odoo/PrivacyInfo.xcprivacy"]:
             result = subprocess.run(["git", "diff", "a50c4df", "--", file], cwd=ROOT, capture_output=True, check=True)
             self.assertEqual(result.stdout, b"", file)
+        validator = text("odoo/Data/Push/DeepLinkValidator.swift")
+        for required in [
+            "static func isValid(url: String, serverURL: String)",
+            "guard !trimmed.isEmpty, trimmed == url else { return false }",
+            "return candidateOrigin == expectedOrigin",
+            "port = url.port ?? 443",
+            "static func isSameOriginBlobURL(_ candidate: URL, serverURL: String)",
+        ]:
+            self.assertIn(required, validator)
         original = subprocess.run(["git", "show", "a50c4df:odoo/odooApp.swift"], cwd=ROOT, capture_output=True, check=True).stdout.decode()
         expected = original.replace('guard url.scheme == "woowodoo"', 'guard AppBrand.current.acceptsScheme(url.scheme)')
         # The only additional root delta is the compile-only offline host. Keep

@@ -58,10 +58,13 @@ struct PinSetupView: View {
                             .frame(width: 14, height: 14)
                     }
                 }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text(titleText))
+                .accessibilityValue(Text(verbatim: "\(pin.count)/\(pinLength)"))
 
                 if let message = lockout.message() ?? error {
                     Text(message)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(WoowTheme.accessibleErrorTextColor)
                         .font(.caption)
                 }
 

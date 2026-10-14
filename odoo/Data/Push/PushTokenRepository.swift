@@ -134,12 +134,8 @@ final class PushTokenRepository: PushTokenRepositoryProtocol {
     func unregisterToken(for serverUrl: String) async {
         guard let token = getToken() else { return }
 
-        if registrar.brand == .woowtech {
-            do { try await registrar.unregisterLegacyURL(serverUrl, token: token) }
-            catch { AppLogger.push.error("Legacy push cleanup failed") }
-            return
-        }
-        // A URL-only caller cannot select an arbitrary same-host database/account.
+        // A URL-only caller cannot select an arbitrary same-host database/account. Resolve one
+        // exact account for both brands so WOOW cleanup also carries an account-owned SID.
         let matches = await MainActor.run { accountRepository.getAllAccounts() } // viewContext is main-queue
             .filter { $0.fullServerUrl == serverUrl.ensureHTTPS }
         guard matches.count == 1, let account = matches.first else {

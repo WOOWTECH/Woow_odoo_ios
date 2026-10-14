@@ -31,8 +31,14 @@
       shouldAutocreateTestPlan = "NO">
       <TestPlans>
          <TestPlanReference
-            reference = "container:LocationE2E.xctestplan"
+            reference = "container:WoowUnit.xctestplan"
             default = "YES">
+         </TestPlanReference>
+         <TestPlanReference
+            reference = "container:LocationE2E.xctestplan">
+         </TestPlanReference>
+         <TestPlanReference
+            reference = "container:BrandLaunchSmoke.xctestplan">
          </TestPlanReference>
       </TestPlans>
       <Testables>

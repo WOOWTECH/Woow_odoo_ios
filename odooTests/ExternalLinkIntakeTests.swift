@@ -61,6 +61,15 @@ final class ExternalLinkIntakeTests: XCTestCase {
         XCTAssertNil(manager.pending)
     }
 
+    func test_accept_absoluteLinkOnSameHostDifferentPort_isRejected() {
+        let active = account("tester", server: "https://same.example.com:8069")
+        let queued = ExternalLinkIntake.accept(
+            link("https://same.example.com:8070/web"), activeAccount: active, manager: manager
+        )
+        XCTAssertFalse(queued)
+        XCTAssertNil(manager.pending)
+    }
+
     /// A→B switch: a link bound to A never reaches B and is dropped.
     func test_switchToAnotherAccount_dropsLinkBoundToThePreviousAccount() async {
         let a = account("tester"), b = account("mate")

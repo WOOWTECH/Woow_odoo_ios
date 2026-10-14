@@ -300,65 +300,98 @@ final class LogoutRevokesAccountWebDataTests: XCTestCase {
         await cleaner.removeWebData(forAccountId: kept.uuidString, host: host, sessionIds: [], otherAccountHosts: [])
     }
 
-    /// Below iOS 17 / non-UUID ids every account shares `.default()`. While a same-host sibling
-    /// remains, only the removed account's own session cookie may be deleted there, never the
-    /// sibling's — the documented limitation: other same-origin data stays (it is shared).
-    func test_realCleaner_sharedDefaultStore_deletesOnlyGivenSessionCookies() async {
-        let store = WKWebsiteDataStore.default()
-        // Distinct paths so both cookies really coexist (same name+domain+path would overwrite).
-        await setCookie(cookie("legacy-a", host: host, path: "/"), in: store)
-        await setCookie(cookie("legacy-b", host: host, path: "/web"), in: store)
-        let seeded = await cookies(in: store).filter { $0.domain.contains(host) }.map(\.value)
-        XCTAssertEqual(Set(seeded), ["legacy-a", "legacy-b"], "precondition: both cookies present")
+    /// iOS 16 and legacy non-UUID ids use the fallback path even on a newer test runtime. The same
+    /// account reuses one store, different accounts never share it, and neither is `.default()`.
+    func test_nonUUIDDataStores_areCachedAndIsolatedPerAccount() async {
+        let idA = "legacy-account-a-\(UUID().uuidString)"
+        let idB = "legacy-account-b-\(UUID().uuidString)"
+        let storeA = OdooWebViewCoordinator.dataStore(forAccountId: idA)
+        let storeAAgain = OdooWebViewCoordinator.dataStore(forAccountId: idA)
+        let storeB = OdooWebViewCoordinator.dataStore(forAccountId: idB)
+        XCTAssertTrue(storeA === storeAAgain)
+        XCTAssertFalse(storeA === storeB)
+        XCTAssertFalse(storeA === WKWebsiteDataStore.default())
+
+        await setCookie(cookie("legacy-a", host: host), in: storeA)
+        await setCookie(cookie("legacy-b", host: host), in: storeB)
         let cleaner = AccountWebDataCleaner()
+        let idsA = await cleaner.sessionIds(forAccountId: idA, host: host)
+        let idsB = await cleaner.sessionIds(forAccountId: idB, host: host)
+        XCTAssertEqual(idsA, ["legacy-a"])
+        XCTAssertEqual(idsB, ["legacy-b"])
 
-        await cleaner.removeWebData(forAccountId: "not-a-uuid", host: host, sessionIds: ["legacy-a"], otherAccountHosts: [host])
-
-        let values = await cookies(in: store).filter { $0.domain.contains(host) }.map(\.value)
-        XCTAssertFalse(values.contains("legacy-a"))
-        XCTAssertTrue(values.contains("legacy-b"))
-        await cleaner.removeWebData(forAccountId: "not-a-uuid", host: host, sessionIds: ["legacy-b"], otherAccountHosts: [])
+        await cleaner.removeWebData(forAccountId: idA, host: host, sessionIds: ["legacy-a"], otherAccountHosts: [host])
+        let cookiesA = await cookies(in: storeA)
+        let cookiesB = await cookies(in: storeB)
+        XCTAssertTrue(cookiesA.isEmpty)
+        XCTAssertEqual(cookiesB.map(\.value), ["legacy-b"])
+        XCTAssertFalse(OdooWebViewCoordinator.dataStore(forAccountId: idA) === storeA,
+                       "cleanup must drop the cached fallback store")
+        await cleaner.removeWebData(forAccountId: idB, host: host, sessionIds: ["legacy-b"], otherAccountHosts: [])
     }
-
-    // MARK: - pi 0930 P2 (D1): shared default store without a same-host sibling
 
     private func plainCookie(_ name: String, host: String) -> HTTPCookie {
         HTTPCookie(properties: [.name: name, .value: "x", .domain: host, .path: "/", .secure: "TRUE",
                                 .expires: Date().addingTimeInterval(7 * 24 * 3600)])!
     }
 
-    /// The last account on a host: nothing is shared any more, so all of that site's data goes —
-    /// not just the `session_id` cookie (below iOS 17 every account shares `.default()`).
-    func test_realCleaner_sharedDefaultStore_withoutSameHostSibling_removesAllOfThatSitesData() async {
+    /// A fallback store belongs to one account, so cleanup removes all of it, not just session ids.
+    func test_nonUUIDCleaner_removesAllOfTheAccountsStore() async {
         let soloHost = "solo-host.example.net"
-        let store = WKWebsiteDataStore.default()
+        let accountId = "legacy-solo-\(UUID().uuidString)"
+        let store = OdooWebViewCoordinator.dataStore(forAccountId: accountId)
         await setCookie(cookie("legacy-solo", host: soloHost), in: store)
         await setCookie(plainCookie("frontend_lang", host: soloHost), in: store)
         let cleaner = AccountWebDataCleaner()
 
-        await cleaner.removeWebData(forAccountId: "not-a-uuid", host: soloHost, sessionIds: ["legacy-solo"],
+        await cleaner.removeWebData(forAccountId: accountId, host: soloHost, sessionIds: ["legacy-solo"],
                                     otherAccountHosts: [])
 
         let left = await cookies(in: store).filter { $0.domain.contains(soloHost) }.map(\.name)
         XCTAssertEqual(left, [], "no same-host sibling: the removed account's site data must all be gone")
     }
 
-    /// Another account on a DIFFERENT host of the same site (registrable domain) keeps its data.
-    func test_realCleaner_sharedDefaultStore_keepsSiteDataOfAnotherAccountsSubdomain() async {
+    /// Removing one fallback store never touches another account, even on the same registrable site.
+    func test_nonUUIDCleaner_keepsAnotherAccountsStore() async {
         let removedHost = "a.shared-site.example.org", otherHost = "b.shared-site.example.org"
-        let store = WKWebsiteDataStore.default()
-        await setCookie(cookie("legacy-a", host: removedHost), in: store)
-        await setCookie(cookie("legacy-other", host: otherHost), in: store)
+        let removedId = "legacy-removed-\(UUID().uuidString)"
+        let otherId = "legacy-other-\(UUID().uuidString)"
+        let removedStore = OdooWebViewCoordinator.dataStore(forAccountId: removedId)
+        let otherStore = OdooWebViewCoordinator.dataStore(forAccountId: otherId)
+        await setCookie(cookie("legacy-a", host: removedHost), in: removedStore)
+        await setCookie(cookie("legacy-other", host: otherHost), in: otherStore)
         let cleaner = AccountWebDataCleaner()
 
-        await cleaner.removeWebData(forAccountId: "not-a-uuid", host: removedHost, sessionIds: ["legacy-a"],
+        await cleaner.removeWebData(forAccountId: removedId, host: removedHost, sessionIds: ["legacy-a"],
                                     otherAccountHosts: [otherHost])
 
-        let values = await cookies(in: store).filter { $0.domain.contains("shared-site.example.org") }.map(\.value)
-        XCTAssertFalse(values.contains("legacy-a"))
-        XCTAssertTrue(values.contains("legacy-other"), "another account's host on the same site is untouched")
-        await cleaner.removeWebData(forAccountId: "not-a-uuid", host: otherHost, sessionIds: ["legacy-other"],
+        let removedCookies = await cookies(in: removedStore)
+        let otherCookies = await cookies(in: otherStore)
+        XCTAssertTrue(removedCookies.isEmpty)
+        XCTAssertEqual(otherCookies.map(\.value), ["legacy-other"])
+        await cleaner.removeWebData(forAccountId: otherId, host: otherHost, sessionIds: ["legacy-other"],
                                     otherAccountHosts: [])
+    }
+
+    func test_nonUUIDPrune_removesOrphanAndKeepsLiveAccountStore() async {
+        let orphanId = "legacy-orphan-\(UUID().uuidString)"
+        let keptId = "legacy-kept-\(UUID().uuidString)"
+        let orphanStore = OdooWebViewCoordinator.dataStore(forAccountId: orphanId)
+        let keptStore = OdooWebViewCoordinator.dataStore(forAccountId: keptId)
+        await setCookie(cookie("orphan", host: host), in: orphanStore)
+        await setCookie(cookie("kept", host: host), in: keptStore)
+        let cleaner = AccountWebDataCleaner()
+
+        await cleaner.pruneOrphanStores(keeping: [keptId])
+
+        let orphanCookies = await cookies(in: orphanStore)
+        let keptCookies = await cookies(in: keptStore)
+        XCTAssertTrue(orphanCookies.isEmpty)
+        XCTAssertFalse(OdooWebViewCoordinator.dataStore(forAccountId: orphanId) === orphanStore)
+        XCTAssertTrue(OdooWebViewCoordinator.dataStore(forAccountId: keptId) === keptStore)
+        XCTAssertEqual(keptCookies.map(\.value), ["kept"])
+        await cleaner.removeWebData(forAccountId: keptId, host: host, sessionIds: ["kept"], otherAccountHosts: [])
+        await cleaner.removeWebData(forAccountId: orphanId, host: host, sessionIds: [], otherAccountHosts: [])
     }
 
     /// The repository hands the cleaner the hosts of the accounts that remain.
@@ -404,15 +437,36 @@ final class LogoutRevokesAccountWebDataTests: XCTestCase {
         await repo.logout(accountId: try account(repo, "mate").id)
     }
 
-    func test_woowLogout_lastAccountOnHost_clearsThatHostsJarCookies() async throws {
+    func test_woowLogout_lastAccountOnHost_removesOnlyOwnedSessionValues() async throws {
         let repo = makeRepo(brand: .woowtech, cleaner: RecordingWebDataCleaner(), revoker: RevokeRecorder())
-        HTTPCookieStorage.shared.setCookie(plainCookie("frontend_lang", host: host))
+        let language = plainCookie("frontend_lang", host: host)
+        HTTPCookieStorage.shared.setCookie(language)
 
         await repo.logout(accountId: try account(repo, "tester").id)
         await repo.logout(accountId: try account(repo, "mate").id)
 
         let left = (HTTPCookieStorage.shared.cookies ?? []).filter { $0.domain.contains(host) }
-        XCTAssertEqual(left.map(\.name), [], "the host's last account signs out: its jar cookies go")
+        XCTAssertFalse(left.contains { $0.name == "session_id" })
+        XCTAssertTrue(left.contains { $0.name == "frontend_lang" },
+                      "logout must not broad-delete unrelated host cookies")
+        HTTPCookieStorage.shared.deleteCookie(language)
+    }
+
+    func test_removeAccount_valueScopesSharedSessionDeletionForBothBrands() async throws {
+        for brand in [AppBrand.Code.woowtech, .apporo] {
+            let repo = makeRepo(brand: brand, cleaner: RecordingWebDataCleaner(), revoker: RevokeRecorder())
+            let a = try account(repo, "tester"), b = try account(repo, "mate")
+            let cookieA = cookie("sess-a", host: host, path: "/")
+            let cookieB = cookie("sess-b", host: host, path: "/web")
+            HTTPCookieStorage.shared.setCookie(cookieA)
+            HTTPCookieStorage.shared.setCookie(cookieB)
+
+            await repo.removeAccount(id: a.id)
+
+            XCTAssertFalse(jarSessionValues().contains("sess-a"), "\(brand): removed account cookie")
+            XCTAssertTrue(jarSessionValues().contains("sess-b"), "\(brand): same-host sibling survives")
+            await repo.removeAccount(id: b.id)
+        }
     }
 
     func test_rootLaunch_prunesOrphanStoresKeepingEveryAccount() async throws {

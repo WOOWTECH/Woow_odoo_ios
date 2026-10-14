@@ -1,0 +1,132 @@
+name: Brand simulator tests (no publishing)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brand-simulator-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  simulator-tests:
+    name: ${{ matrix.brand }} unit tests on iOS Simulator
+    runs-on: macos-15
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - brand: woowtech
+            scheme: odoo
+            test_plan: WoowUnit
+            bundle_id: io.woowtech.odoo
+          - brand: apporo
+            scheme: apporoodoo
+            test_plan: ApporoUnit
+            bundle_id: com.apporo.odoo.dev
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify offline source and brand contracts
+        run: python3 -B -m unittest discover -s scripts/tests -p 'test_*.py' -v
+
+      - name: Create non-production Apporo CI Firebase fixture
+        if: matrix.brand == 'apporo'
+        run: |
+          python3 - <<'PY'
+          import plistlib
+          from pathlib import Path
+
+          project = "apporo-odoo-ci"
+          output = Path("BrandResources/Firebase/ApporoDebug/GoogleService-Info.plist")
+          output.parent.mkdir(parents=True, exist_ok=True)
+          payload = {
+              "API_KEY": "ci-only-not-a-real-firebase-api-key",
+              "BUNDLE_ID": "com.apporo.odoo.dev",
+              "GCM_SENDER_ID": "1234567890",
+              "GOOGLE_APP_ID": "1:1234567890:ios:0123456789abcdef",
+              "IS_GCM_ENABLED": True,
+              "PLIST_VERSION": "1",
+              "PROJECT_ID": project,
+          }
+          output.write_bytes(plistlib.dumps(payload, fmt=plistlib.FMT_XML))
+          Path("Config/ApporoFirebase.local.xcconfig").write_text(
+              f"FIREBASE_EXPECTED_PROJECT_ID = {project}\n"
+          )
+          PY
+
+      - name: Select an available iPhone simulator
+        id: simulator
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import subprocess
+
+          devices = json.loads(
+              subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"])
+          )["devices"]
+          for runtime in sorted(devices, reverse=True):
+              for device in devices[runtime]:
+                  if device["name"].startswith("iPhone"):
+                      print(f"udid={device['udid']}")
+                      print(f"name={device['name']}")
+                      raise SystemExit(0)
+          raise SystemExit("No available iPhone simulator")
+          PY
+
+      - name: Run complete unit suite in simulator
+        env:
+          SCHEME: ${{ matrix.scheme }}
+          TEST_PLAN: ${{ matrix.test_plan }}
+          SIMULATOR_UDID: ${{ steps.simulator.outputs.udid }}
+        run: |
+          mkdir -p TestResults
+          xcodebuild test \
+            -project odoo.xcodeproj \
+            -scheme "$SCHEME" \
+            -testPlan "$TEST_PLAN" \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -only-testing:odooTests \
+            -parallel-testing-enabled NO \
+            -onlyUsePackageVersionsFromResolvedFile \
+            -resultBundlePath "TestResults/${{ matrix.brand }}.xcresult" \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Launch the real branded app with XCUITest
+        env:
+          SCHEME: ${{ matrix.scheme }}
+          SIMULATOR_UDID: ${{ steps.simulator.outputs.udid }}
+          BUNDLE_ID: ${{ matrix.bundle_id }}
+        run: |
+          if ! xcrun simctl uninstall "$SIMULATOR_UDID" "$BUNDLE_ID"; then
+            echo "No prior app installation to remove"
+          fi
+          xcodebuild test \
+            -project odoo.xcodeproj \
+            -scheme "$SCHEME" \
+            -testPlan BrandLaunchSmoke \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -only-testing:odooUITests/odooUITestsLaunchTests/testLaunch \
+            -parallel-testing-enabled NO \
+            -onlyUsePackageVersionsFromResolvedFile \
+            -resultBundlePath "TestResults/${{ matrix.brand }}-launch-smoke.xcresult" \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Upload simulator result bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-${{ matrix.brand }}-simulator-results
+          path: TestResults
+          if-no-files-found: warn
+          retention-days: 14

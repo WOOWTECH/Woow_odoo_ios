@@ -12,6 +12,7 @@ final class PushDeviceRegistrarTests: XCTestCase {
     private var accounts: PushAccounts!
     private var credentials: PushCredentials!
     private var healer: PushSessionHealer!
+    private var sessionStorage: MockSecureStorage!
     private let a = OdooAccount(id: "push-a", serverUrl: "https://push.invalid:8443/base",
                                 database: "db-a", username: "same", displayName: "Fixture A")
     private let b = OdooAccount(id: "push-b", serverUrl: "https://push.invalid:8443/base",
@@ -28,7 +29,11 @@ final class PushDeviceRegistrarTests: XCTestCase {
         config.httpCookieStorage = .shared
         session = URLSession(configuration: config)
         api = OdooAPIClient(session: session)
-        accounts = PushAccounts([a, b])
+        let storage = MockSecureStorage()
+        storage.saveSessionId(accountId: a.id, sessionId: "sid-a")
+        storage.saveSessionId(accountId: b.id, sessionId: "sid-b")
+        sessionStorage = storage
+        accounts = PushAccounts([a, b]) { storage.getSessionId(accountId: $0) }
         credentials = PushCredentials()
         credentials.savePushCredential(PushCredential(account: a, password: "fixture-password-a", sessionId: "sid-a"))
         credentials.savePushCredential(PushCredential(account: b, password: "fixture-password-b", sessionId: "sid-b"))
@@ -58,9 +63,12 @@ final class PushDeviceRegistrarTests: XCTestCase {
         }
     }
 
-    private func registrar(_ brand: AppBrand.Code = .apporo, repository: AccountRepositoryProtocol? = nil) -> PushDeviceRegistrar {
+    private func registrar(_ brand: AppBrand.Code = .apporo,
+                           repository: AccountRepositoryProtocol? = nil,
+                           legacyReauthenticator: SessionReauthenticator? = nil) -> PushDeviceRegistrar {
         PushDeviceRegistrar(brand: brand, api: api, accounts: repository ?? accounts,
-                            credentials: credentials, healer: healer)
+                            credentials: credentials, healer: healer,
+                            legacyReauthenticator: legacyReauthenticator)
     }
 
     private func register(_ account: OdooAccount? = nil) async throws -> Any? {
@@ -79,8 +87,64 @@ final class PushDeviceRegistrarTests: XCTestCase {
             try await registrar(.woowtech).unregister(account: a, token: "fixture")
             XCTAssertEqual(PushContractURLProtocol.calls.map(\.method), ["register_device", "unregister_device"])
             XCTAssertTrue(PushContractURLProtocol.calls.allSatisfy { $0.kwargs["app_brand"] == nil })
+            XCTAssertTrue(PushContractURLProtocol.calls.allSatisfy {
+                $0.cookie == "session_id=sid-a" && !$0.handlesCookies
+            })
         }
         XCTAssertEqual(PushTokenRepository.parseTenantId(from: Self.ack), "fixture-tenant")
+    }
+
+    func test_woow_registerAndUnregister_ignoreAmbientSameHostCookie() async throws {
+        let ambient = try XCTUnwrap(HTTPCookie(properties: [
+            .name: "session_id", .value: "wrong-ambient-sid", .domain: "push.invalid",
+            .path: "/", .secure: "TRUE",
+        ]))
+        HTTPCookieStorage.shared.setCookie(ambient)
+        PushContractURLProtocol.reset([.result(true), .result(true)])
+
+        _ = try await registrar(.woowtech).register(account: a, token: "fixture", deviceName: "Fixture")
+        try await registrar(.woowtech).unregister(account: a, token: "fixture")
+
+        XCTAssertEqual(PushContractURLProtocol.calls.map(\.cookie), ["session_id=sid-a", "session_id=sid-a"])
+        XCTAssertTrue(PushContractURLProtocol.calls.allSatisfy { !$0.handlesCookies })
+        XCTAssertEqual(api.getSessionId(for: a.fullServerUrl), "wrong-ambient-sid")
+    }
+
+    func test_woow_staleAccountSnapshot_isRejectedBeforeNetwork() async {
+        accounts.rows = [b]
+        PushContractURLProtocol.reset([.result(true)])
+
+        do {
+            _ = try await registrar(.woowtech)
+                .register(account: a, token: "fixture", deviceName: "Fixture")
+            XCTFail("A removed WOOW account must not authorize a push write")
+        } catch PushDeviceRegistrar.Failure.superseded { }
+        catch { XCTFail("Unexpected failure: \(type(of: error))") }
+
+        XCTAssertTrue(PushContractURLProtocol.calls.isEmpty)
+    }
+
+    func test_woow_expiry_reauthenticatesExactAccountAndReplaysExactlyOnce() async throws {
+        sessionStorage.savePassword(accountId: a.id, password: "fixture-password-a")
+        let reauthenticator = SessionReauthenticator(
+            accountRepository: accounts,
+            secureStorage: sessionStorage,
+            authenticator: api,
+            reloginSignal: ReloginSignal.shared,
+            cookieJar: .shared,
+            pushCredentials: credentials
+        )
+        PushContractURLProtocol.reset([.expired, .auth("sid-a-healed"), .result(true)])
+
+        _ = try await registrar(.woowtech, legacyReauthenticator: reauthenticator)
+            .register(account: a, token: "fixture", deviceName: "Fixture")
+
+        XCTAssertEqual(PushContractURLProtocol.calls.map(\.method),
+                       ["register_device", "authenticate", "register_device"])
+        XCTAssertEqual(PushContractURLProtocol.calls.map(\.cookie),
+                       ["session_id=sid-a", nil, "session_id=sid-a-healed"])
+        XCTAssertEqual(PushContractURLProtocol.calls.filter { $0.method == "authenticate" }.count, 1)
+        XCTAssertEqual(sessionStorage.getSessionId(accountId: a.id), "sid-a-healed")
     }
 
     func test_apporo_validServer_capabilityBeforeEveryWrite_andEcho() async throws {
@@ -1209,7 +1273,11 @@ private final class PushCredentials: PushCredentialStorage, Sendable {
 private final class PushAccounts: AccountRepositoryProtocol, @unchecked Sendable {
     var rows: [OdooAccount]
     var tenantWrites: [String: String] = [:]
-    init(_ rows: [OdooAccount]) { self.rows = rows }
+    private let sessionIdLookup: @Sendable (String) -> String?
+    init(_ rows: [OdooAccount], sessionIdLookup: @escaping @Sendable (String) -> String? = { _ in nil }) {
+        self.rows = rows
+        self.sessionIdLookup = sessionIdLookup
+    }
     func getAllAccounts() -> [OdooAccount] { rows }
     func getActiveAccount() -> OdooAccount? { rows.first }
     func getAccount(byTenantId tenantId: String) -> OdooAccount? { rows.first { $0.tenantId == tenantId } }
@@ -1220,6 +1288,9 @@ private final class PushAccounts: AccountRepositoryProtocol, @unchecked Sendable
     func setTenantId(_ tenantId: String, forAccountId accountId: String) { tenantWrites[accountId] = tenantId }
     func logout(accountId: String?) async { }
     func removeAccount(id: String) async { }
+    func getSessionId(forAccountId accountId: String) -> String? {
+        sessionIdLookup(accountId)
+    }
     func getSessionId(for serverUrl: String) -> String? { nil }
 }
 

@@ -44,6 +44,21 @@ final class OdooWebViewNavigationTests: XCTestCase {
         XCTAssertEqual(coordWithPort.decideNavigation(for: url), .allow)
     }
 
+    func test_sameHost_differentPort_opensInSafari() {
+        let coordWithPort = OdooWebViewCoordinator(
+            serverUrl: "https://odoo.example.com:8069",
+            onSessionExpired: {},
+            isLoading: .constant(false)
+        )
+        let url = URL(string: "https://odoo.example.com:8070/web")!
+        XCTAssertEqual(coordWithPort.decideNavigation(for: url), .openInSafari(url))
+    }
+
+    func test_implicitAndExplicitDefaultHTTPSPort_areSameOrigin() {
+        let url = URL(string: "https://odoo.example.com:443/web")!
+        XCTAssertEqual(coordinator.decideNavigation(for: url), .allow)
+    }
+
     // MARK: - Relative URLs → Allow
 
     func test_relativeURL_isAllowed() {
@@ -58,6 +73,11 @@ final class OdooWebViewNavigationTests: XCTestCase {
         XCTAssertEqual(coordinator.decideNavigation(for: url), .allow)
     }
 
+    func test_crossOriginBlob_isCancelled() {
+        let url = URL(string: "blob:https://evil.example.com/abc-123")!
+        XCTAssertEqual(coordinator.decideNavigation(for: url), .cancel)
+    }
+
     // MARK: - Session expiry → sessionExpired
 
     func test_webLoginPath_triggersSessionExpired() {
@@ -68,6 +88,22 @@ final class OdooWebViewNavigationTests: XCTestCase {
     func test_webLoginWithQuery_triggersSessionExpired() {
         let url = URL(string: "https://odoo.example.com/web/login?redirect=/web")!
         XCTAssertEqual(coordinator.decideNavigation(for: url), .sessionExpired)
+    }
+
+    func test_webLoginBelowConfiguredBasePath_triggersSessionExpired() {
+        let based = OdooWebViewCoordinator(
+            serverUrl: "https://odoo.example.com/tenant/",
+            onSessionExpired: {},
+            isLoading: .constant(false)
+        )
+        XCTAssertEqual(
+            based.decideNavigation(for: URL(string: "https://odoo.example.com/tenant/web/login")!),
+            .sessionExpired
+        )
+        XCTAssertEqual(
+            based.decideNavigation(for: URL(string: "https://odoo.example.com/tenant/web/login2")!),
+            .allow
+        )
     }
 
     // MARK: - External host URLs → openInSafari (UX-27)
@@ -118,26 +154,39 @@ final class OdooWebViewNavigationTests: XCTestCase {
 
     // MARK: - Edge cases
 
-    func test_javascriptScheme_opensInSafari() {
-        // javascript: URLs have a host of nil but scheme is not nil and not blob
-        // URL(string:) returns nil for most javascript: URLs, so this tests the
-        // case where one somehow gets through
+    func test_javascriptScheme_isCancelled() {
         let url = URL(string: "javascript:void(0)")
-        // URL(string: "javascript:void(0)") may return nil on some iOS versions
         if let url {
-            let decision = coordinator.decideNavigation(for: url)
-            // javascript: URLs have no host → allowed by relative URL rule
-            // This is acceptable because WKWebView's own security blocks javascript: navigation
-            XCTAssertEqual(decision, .allow)
+            XCTAssertEqual(coordinator.decideNavigation(for: url), .cancel)
         }
     }
 
-    func test_dataScheme_opensInSafari() {
+    func test_dataScheme_isCancelled() {
         let url = URL(string: "data:text/html,<h1>Injected</h1>")
         if let url {
-            // data: URLs have no host → treated as relative
-            // WKWebView's own CSP blocks data: content injection
-            XCTAssertEqual(coordinator.decideNavigation(for: url), .allow)
+            XCTAssertEqual(coordinator.decideNavigation(for: url), .cancel)
         }
+    }
+
+    func test_fileScheme_isCancelled() {
+        XCTAssertEqual(coordinator.decideNavigation(for: URL(fileURLWithPath: "/etc/passwd")), .cancel)
+    }
+
+    func test_nonCanonicalHostlessPath_isCancelled() {
+        XCTAssertEqual(coordinator.decideNavigation(for: URL(string: "/website/shop")!), .cancel)
+    }
+
+    func test_didFinishGate_requiresFullOriginIncludingPort() {
+        let sut = OdooWebViewCoordinator(
+            serverUrl: "https://odoo.example.com:8069",
+            onSessionExpired: {},
+            isLoading: .constant(false)
+        )
+
+        sut.accountPageDidFinish(loadedURL: URL(string: "https://odoo.example.com:8070/web")!)
+        XCTAssertFalse(sut.hasFinishedAccountLoad)
+
+        sut.accountPageDidFinish(loadedURL: URL(string: "https://ODOO.EXAMPLE.COM:8069/web")!)
+        XCTAssertTrue(sut.hasFinishedAccountLoad)
     }
 }
