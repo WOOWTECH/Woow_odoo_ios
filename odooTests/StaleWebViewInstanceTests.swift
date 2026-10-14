@@ -39,7 +39,11 @@ final class StaleWebViewInstanceTests: XCTestCase {
     private var expired = 0
     private let loading = LoadingFlag()
 
-    private func makeCoordinator() -> OdooWebViewCoordinator {
+    private func makeCoordinator(
+        setCookie: @escaping (WKHTTPCookieStore, HTTPCookie, @escaping () -> Void) -> Void = {
+            store, cookie, completion in store.setCookie(cookie, completionHandler: completion)
+        }
+    ) -> OdooWebViewCoordinator {
         let flag = loading
         return OdooWebViewCoordinator(
             serverUrl: serverUrl,
@@ -48,6 +52,7 @@ final class StaleWebViewInstanceTests: XCTestCase {
             openExternalURL: { _ in XCTFail("No Safari") },
             brand: .woowtech,
             websiteDataStore: { _ in .nonPersistent() },
+            setCookie: setCookie,
             loadBaseRequest: { [weak self] webView, _ in
                 self?.events.append("base")
                 self?.baseLoads.append(ObjectIdentifier(webView))
@@ -61,13 +66,6 @@ final class StaleWebViewInstanceTests: XCTestCase {
 
     private func current(_ sut: OdooWebViewCoordinator) throws -> PinnedURLWebView {
         try XCTUnwrap(sut.webView as? PinnedURLWebView)
-    }
-
-    private func waitUntil(_ condition: @autoclosure () -> Bool, timeout: TimeInterval = 5) async {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition() && Date() < deadline {
-            try? await Task.sleep(nanoseconds: 20_000_000)
-        }
     }
 
     /// A→B on the same host: A's late `didFinish` must not apply B's link or open B's load gate.
@@ -158,14 +156,19 @@ final class StaleWebViewInstanceTests: XCTestCase {
 
     /// Rapid A→B: A's cookie-store completion arrives after B was built — it must not load A's
     /// (replaced) WebView; only B's instance gets a base load.
-    func test_rapidSwitch_supersededCookieCompletion_doesNotLoadReplacedWebView() async throws {
-        let sut = makeCoordinator()
+    func test_rapidSwitch_supersededCookieCompletion_doesNotLoadReplacedWebView() throws {
+        var cookieCompletions: [() -> Void] = []
+        let sut = makeCoordinator { _, _, completion in cookieCompletions.append(completion) }
         sut.apply(serverUrl: serverUrl, database: "db", accountId: UUID().uuidString, sessionId: "sess-a", deepLink: nil)
         sut.apply(serverUrl: serverUrl, database: "db", accountId: UUID().uuidString, sessionId: "sess-b", deepLink: nil)
         let newB = try current(sut)
 
-        await waitUntil(self.baseLoads.contains(ObjectIdentifier(newB)))
-        try? await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(cookieCompletions.count, 2, "both accounts must schedule a cookie write")
+        let oldAccountCompletion = cookieCompletions.removeFirst()
+        oldAccountCompletion()
+        XCTAssertTrue(baseLoads.isEmpty, "the replaced account's completion must be ignored")
+        let currentAccountCompletion = cookieCompletions.removeFirst()
+        currentAccountCompletion()
 
         XCTAssertEqual(baseLoads, [ObjectIdentifier(newB)],
                        "only the current account's WebView may be loaded: \(events)")

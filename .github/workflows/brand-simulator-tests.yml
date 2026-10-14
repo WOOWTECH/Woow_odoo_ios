@@ -51,7 +51,9 @@ jobs:
           output = Path("BrandResources/Firebase/ApporoDebug/GoogleService-Info.plist")
           output.parent.mkdir(parents=True, exist_ok=True)
           payload = {
-              "API_KEY": "ci-only-not-a-real-firebase-api-key",
+              # Firebase validates API-key shape synchronously during simulator launch.
+              # Keep this syntactically valid but deliberately non-production and unusable.
+              "API_KEY": "AIzaSy" + ("0" * 33),
               "BUNDLE_ID": "com.apporo.odoo.dev",
               "GCM_SENDER_ID": "1234567890",
               "GOOGLE_APP_ID": "1:1234567890:ios:0123456789abcdef",
@@ -99,8 +101,7 @@ jobs:
             -only-testing:odooTests \
             -parallel-testing-enabled NO \
             -onlyUsePackageVersionsFromResolvedFile \
-            -resultBundlePath "TestResults/${{ matrix.brand }}.xcresult" \
-            CODE_SIGNING_ALLOWED=NO
+            -resultBundlePath "TestResults/${{ matrix.brand }}.xcresult"
 
       - name: Launch the real branded app with XCUITest
         env:
@@ -119,8 +120,7 @@ jobs:
             -only-testing:odooUITests/odooUITestsLaunchTests/testLaunch \
             -parallel-testing-enabled NO \
             -onlyUsePackageVersionsFromResolvedFile \
-            -resultBundlePath "TestResults/${{ matrix.brand }}-launch-smoke.xcresult" \
-            CODE_SIGNING_ALLOWED=NO
+            -resultBundlePath "TestResults/${{ matrix.brand }}-launch-smoke.xcresult"
 
       - name: Upload simulator result bundle
         if: always()

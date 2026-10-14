@@ -372,6 +372,12 @@ final class SecureStorageTests: XCTestCase {
 @MainActor
 final class LoginViewModelTests: XCTestCase {
 
+    private func englishLocalizationBundle() throws -> Bundle {
+        let appBundle = Bundle(for: LoginViewModel.self)
+        let path = appBundle.bundleURL.appendingPathComponent("en.lproj", isDirectory: true).path
+        return try XCTUnwrap(Bundle(path: path))
+    }
+
     func test_initialState_startsOnServerInfo() {
         let vm = LoginViewModel()
         XCTAssertEqual(vm.step, .serverInfo)
@@ -398,8 +404,8 @@ final class LoginViewModelTests: XCTestCase {
         XCTAssertEqual(vm.step, .serverInfo)
     }
 
-    func test_goToNextStep_givenHttpUrl_showsHttpsError() {
-        let vm = LoginViewModel()
+    func test_goToNextStep_givenHttpUrl_showsHttpsError() throws {
+        let vm = LoginViewModel(localizationBundle: try englishLocalizationBundle())
         vm.serverUrl = "http://odoo.example.com"
         vm.database = "mydb"
         vm.goToNextStep()
@@ -428,16 +434,16 @@ final class LoginViewModelTests: XCTestCase {
         XCTAssertNil(vm.error)
     }
 
-    func test_login_givenBlankUsername_showsError() {
-        let vm = LoginViewModel()
+    func test_login_givenBlankUsername_showsError() throws {
+        let vm = LoginViewModel(localizationBundle: try englishLocalizationBundle())
         vm.username = ""
         vm.password = "pass"
         vm.login(onSuccess: {})
         XCTAssertEqual(vm.error, "Username is required")
     }
 
-    func test_login_givenBlankPassword_showsError() {
-        let vm = LoginViewModel()
+    func test_login_givenBlankPassword_showsError() throws {
+        let vm = LoginViewModel(localizationBundle: try englishLocalizationBundle())
         vm.username = "admin"
         vm.password = ""
         vm.login(onSuccess: {})
@@ -982,17 +988,30 @@ final class OdooAPIClientHTTPTests: XCTestCase {
 @MainActor
 final class AppDelegateHandleNotificationTapTests: XCTestCase {
 
+    private func activeRepository() -> MockAccountRepository {
+        let repository = MockAccountRepository()
+        repository.stubbedActiveAccount = OdooAccount(
+            id: "notification-owner",
+            serverUrl: "https://odoo.example.com",
+            database: "db",
+            username: "tester",
+            displayName: "Tester",
+            isActive: true
+        )
+        return repository
+    }
+
     func test_handleNotificationTap_givenValidWebPath_storesPendingDeepLink() {
         let delegate = AppDelegate()
         let userInfo: [AnyHashable: Any] = ["odoo_action_url": "/web#id=42&model=sale.order"]
 
-        delegate.handleNotificationTap(userInfo: userInfo)
+        delegate.handleNotificationTap(userInfo: userInfo, accountRepository: activeRepository())
         XCTAssertEqual(DeepLinkManager.shared.consume(), "/web#id=42&model=sale.order")
     }
 
     func test_handleNotificationTap_givenNoActionUrl_doesNothing() {
         let delegate = AppDelegate()
-        delegate.handleNotificationTap(userInfo: [:])
+        delegate.handleNotificationTap(userInfo: [:], accountRepository: activeRepository())
         XCTAssertNil(DeepLinkManager.shared.consume())
     }
 
@@ -1000,7 +1019,7 @@ final class AppDelegateHandleNotificationTapTests: XCTestCase {
         let delegate = AppDelegate()
         let userInfo: [AnyHashable: Any] = ["odoo_action_url": "https://evil.com/phish"]
 
-        delegate.handleNotificationTap(userInfo: userInfo)
+        delegate.handleNotificationTap(userInfo: userInfo, accountRepository: activeRepository())
         // External URL should not be stored (validator rejects non-/web without matching host)
         XCTAssertNil(DeepLinkManager.shared.consume())
     }
@@ -1009,7 +1028,7 @@ final class AppDelegateHandleNotificationTapTests: XCTestCase {
         let delegate = AppDelegate()
         let userInfo: [AnyHashable: Any] = ["odoo_action_url": "javascript:alert(1)"]
 
-        delegate.handleNotificationTap(userInfo: userInfo)
+        delegate.handleNotificationTap(userInfo: userInfo, accountRepository: activeRepository())
         XCTAssertNil(DeepLinkManager.shared.consume())
     }
 }

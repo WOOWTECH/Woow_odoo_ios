@@ -9,11 +9,21 @@ import Foundation
 /// `.strings` entry, which stays as the plain fallback).
 /// Ported from Android: PinScreen.kt (`<plurals name="wrong_pin_attempts_remaining">`).
 ///
-/// `localizedStringWithFormat` on the bundle's looked-up format is what applies the plural rule;
-/// the previous `String(format:)` over the plain `.strings` entry always produced "attempts".
+/// The locale must follow the resource bundle, not the process locale. This matters for app-language
+/// overrides and for tests that load one `.lproj` directly while the simulator uses another language.
 func wrongPinMessage(remainingAttempts: Int, bundle: Bundle = .main) -> String {
-    String.localizedStringWithFormat(
-        NSLocalizedString("wrong_pin_%lld", bundle: bundle, comment: "Wrong PIN, attempts remaining"),
-        remainingAttempts
+    let format = NSLocalizedString(
+        "wrong_pin_%lld",
+        bundle: bundle,
+        comment: "Wrong PIN, attempts remaining"
     )
+    let bundleDirectory = bundle.bundleURL.lastPathComponent
+    let languageIdentifier: String?
+    if bundleDirectory.hasSuffix(".lproj") {
+        languageIdentifier = String(bundleDirectory.dropLast(".lproj".count))
+    } else {
+        languageIdentifier = bundle.preferredLocalizations.first ?? bundle.developmentLocalization
+    }
+    let locale = languageIdentifier.map(Locale.init(identifier:)) ?? .current
+    return String(format: format, locale: locale, arguments: [remainingAttempts])
 }

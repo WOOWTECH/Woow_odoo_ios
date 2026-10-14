@@ -51,7 +51,8 @@ class WrongPinPluralTests(unittest.TestCase):
         self.assertIn("wrongPinMessage(remainingAttempts: remaining)", view)
         self.assertNotIn(f'"{KEY}"', view)
         helper = (ROOT / "odoo/UI/Auth/WrongPinMessage.swift").read_text()
-        self.assertIn("String.localizedStringWithFormat(", helper)
+        self.assertIn("String(format: format, locale: locale", helper)
+        self.assertIn('bundleDirectory.hasSuffix(".lproj")', helper)
 
 
 if __name__ == "__main__":

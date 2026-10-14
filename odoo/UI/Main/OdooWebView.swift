@@ -120,6 +120,8 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     private let brand: AppBrand.Code
     private let pushCredentials: PushCredentialStorage
     private let websiteDataStore: (String) -> WKWebsiteDataStore
+    /// Injectable so cookie-completion ordering tests can drive account switches deterministically.
+    private let setCookie: (WKHTTPCookieStore, HTTPCookie, @escaping () -> Void) -> Void
     /// Injection keeps consumer-chain unit tests off the network, including WebKit.
     private let loadBaseRequest: (WKWebView, URLRequest) -> Void
     /// Loads a resolved deep-link URL. Injectable so ordering tests can observe it without WebKit I/O.
@@ -143,6 +145,9 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
          brand: AppBrand.Code = AppBrand.current.code,
          pushCredentials: PushCredentialStorage = SecureStorage.shared,
          websiteDataStore: @escaping (String) -> WKWebsiteDataStore = { OdooWebViewCoordinator.dataStore(forAccountId: $0) },
+         setCookie: @escaping (WKHTTPCookieStore, HTTPCookie, @escaping () -> Void) -> Void = {
+             store, cookie, completion in store.setCookie(cookie, completionHandler: completion)
+         },
          loadBaseRequest: @escaping (WKWebView, URLRequest) -> Void = { webView, request in webView.load(request) },
          loadDeepLinkRequest: @escaping (WKWebView, URLRequest) -> Void = { webView, request in webView.load(request) },
          makeWebView: @escaping (WKWebViewConfiguration) -> WKWebView = { WKWebView(frame: .zero, configuration: $0) },
@@ -153,6 +158,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         self.brand = brand
         self.pushCredentials = pushCredentials
         self.websiteDataStore = websiteDataStore
+        self.setCookie = setCookie
         self.loadBaseRequest = loadBaseRequest
         self.loadDeepLinkRequest = loadDeepLinkRequest
         self.makeWebView = makeWebView
@@ -304,7 +310,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
             sessionCookie = nil
         }
         if let cookie = sessionCookie {
-            store.httpCookieStore.setCookie(cookie) { [weak self, weak newWebView] in
+            setCookie(store.httpCookieStore, cookie) { [weak self, weak newWebView] in
                 // F1 (0930): a later switch replaced this instance before its cookie landed — never
                 // load a replaced WebView.
                 guard let self, let newWebView, self.webView === newWebView else { return }
@@ -357,7 +363,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
         guard accountId == currentAccountId, !retiredAccountIds.contains(accountId), let live = webView else { return }
         let reload = awaitingHealedSession
         awaitingHealedSession = false
-        live.configuration.websiteDataStore.httpCookieStore.setCookie(cookie) { [weak self, weak live] in
+        setCookie(live.configuration.websiteDataStore.httpCookieStore, cookie) { [weak self, weak live] in
             guard let self, let live, self.webView === live, reload else { return }
             self.hasFinishedAccountLoad = false
             self.loadBase(into: live, serverUrl: self.currentServerUrl, database: self.currentDatabase)

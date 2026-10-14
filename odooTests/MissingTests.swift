@@ -465,6 +465,12 @@ final class AccountRepositoryTests: XCTestCase {
 @MainActor
 final class LoginViewModelAsyncTests: XCTestCase {
 
+    private func englishLocalizationBundle() throws -> Bundle {
+        let appBundle = Bundle(for: LoginViewModel.self)
+        let path = appBundle.bundleURL.appendingPathComponent("en.lproj", isDirectory: true).path
+        return try XCTUnwrap(Bundle(path: path))
+    }
+
     // The existing ErrorMappingTests is the single worst test in the entire suite.
     // It does: XCTAssertNotNil(errorType) on each enum case — i.e., it checks that
     // the enum is not nil after being assigned. This tests nothing. Replace it.
@@ -494,8 +500,8 @@ final class LoginViewModelAsyncTests: XCTestCase {
     }
 
     // Login with both fields blank must show username error first (field ordering matters for UX).
-    func test_login_givenBothFieldsBlank_showsUsernameErrorFirst() {
-        let vm = LoginViewModel()
+    func test_login_givenBothFieldsBlank_showsUsernameErrorFirst() throws {
+        let vm = LoginViewModel(localizationBundle: try englishLocalizationBundle())
         vm.username = ""
         vm.password = ""
         vm.login(onSuccess: {})
@@ -907,18 +913,29 @@ final class AppDelegateNotificationTests: XCTestCase {
 
     private var delegate: AppDelegate!
     private var deepLinkManager: DeepLinkManager!
+    private var accountRepository: MockAccountRepository!
 
     @MainActor
     override func setUp() async throws {
         try await super.setUp()
         delegate = AppDelegate()
         deepLinkManager = DeepLinkManager.shared
+        accountRepository = MockAccountRepository()
+        accountRepository.stubbedActiveAccount = OdooAccount(
+            id: "notification-owner",
+            serverUrl: "https://odoo.example.com",
+            database: "db",
+            username: "tester",
+            displayName: "Tester",
+            isActive: true
+        )
         deepLinkManager.setPending(nil) // clear any leftover
     }
 
     @MainActor
     override func tearDown() async throws {
         deepLinkManager.setPending(nil)
+        accountRepository = nil
         try await super.tearDown()
     }
 
@@ -929,7 +946,7 @@ final class AppDelegateNotificationTests: XCTestCase {
         let userInfo: [AnyHashable: Any] = [
             "odoo_action_url": "/web#id=42&model=sale.order&view_type=form"
         ]
-        delegate.handleNotificationTap(userInfo: userInfo)
+        delegate.handleNotificationTap(userInfo: userInfo, accountRepository: accountRepository)
         XCTAssertEqual(
             deepLinkManager.consume(),
             "/web#id=42&model=sale.order&view_type=form",
@@ -943,7 +960,7 @@ final class AppDelegateNotificationTests: XCTestCase {
         let userInfo: [AnyHashable: Any] = [
             "odoo_action_url": "https://evil.com/phish"
         ]
-        delegate.handleNotificationTap(userInfo: userInfo)
+        delegate.handleNotificationTap(userInfo: userInfo, accountRepository: accountRepository)
         XCTAssertNil(
             deepLinkManager.consume(),
             "An external URL must not be stored as a pending deep link"
@@ -978,14 +995,14 @@ final class AppDelegateNotificationTests: XCTestCase {
         let userInfo: [AnyHashable: Any] = [
             "odoo_action_url": "javascript:alert(1)"
         ]
-        delegate.handleNotificationTap(userInfo: userInfo)
+        delegate.handleNotificationTap(userInfo: userInfo, accountRepository: accountRepository)
         XCTAssertNil(deepLinkManager.consume(), "javascript: URLs must never be stored as pending deep links")
     }
 
     // Notification without odoo_action_url key must not crash and must store nothing.
     @MainActor
     func test_notificationTap_givenNoActionUrlKey_doesNothing() {
-        delegate.handleNotificationTap(userInfo: [:])
+        delegate.handleNotificationTap(userInfo: [:], accountRepository: accountRepository)
         XCTAssertNil(deepLinkManager.consume(), "Missing odoo_action_url must leave DeepLinkManager unchanged")
     }
 }

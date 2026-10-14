@@ -21,16 +21,27 @@ import XCTest
 final class AppDelegateDeepLinkTests: XCTestCase {
 
     private var sut: AppDelegate!
+    private var accountRepository: MockAccountRepository!
 
     override func setUp() async throws {
         try await super.setUp()
         sut = AppDelegate()
+        accountRepository = MockAccountRepository()
+        accountRepository.stubbedActiveAccount = OdooAccount(
+            id: "notification-owner",
+            serverUrl: "https://odoo.example.com",
+            database: "db",
+            username: "tester",
+            displayName: "Tester",
+            isActive: true
+        )
         // Clear any pending URL left by a previous test to prevent pollution.
         _ = DeepLinkManager.shared.consume()
     }
 
     override func tearDown() async throws {
         _ = DeepLinkManager.shared.consume()
+        accountRepository = nil
         sut = nil
         try await super.tearDown()
     }
@@ -42,7 +53,7 @@ final class AppDelegateDeepLinkTests: XCTestCase {
     func test_handleNotificationTap_givenUserInfoWithOdooActionUrl_setsDeepLinkManagerPendingUrl() {
         let userInfo: [AnyHashable: Any] = ["odoo_action_url": "/web#id=7&model=sale.order"]
 
-        sut.handleNotificationTap(userInfo: userInfo)
+        sut.handleNotificationTap(userInfo: userInfo, accountRepository: accountRepository)
 
         XCTAssertEqual(DeepLinkManager.shared.pendingUrl, "/web#id=7&model=sale.order",
                        "handleNotificationTap must forward valid odoo_action_url to DeepLinkManager")
@@ -55,7 +66,7 @@ final class AppDelegateDeepLinkTests: XCTestCase {
     func test_handleNotificationTap_givenUserInfoWithNoOdooActionUrl_doesNotSetPendingUrl() {
         let userInfo: [AnyHashable: Any] = ["aps": ["alert": "Hello"]]
 
-        sut.handleNotificationTap(userInfo: userInfo)
+        sut.handleNotificationTap(userInfo: userInfo, accountRepository: accountRepository)
 
         XCTAssertNil(DeepLinkManager.shared.pendingUrl,
                      "handleNotificationTap must not set pendingUrl when odoo_action_url key is absent")
@@ -69,7 +80,7 @@ final class AppDelegateDeepLinkTests: XCTestCase {
     func test_handleNotificationTap_givenMalformedActionUrl_doesNotSetDeepLink_emptyString() {
         let userInfo: [AnyHashable: Any] = ["odoo_action_url": ""]
 
-        sut.handleNotificationTap(userInfo: userInfo)
+        sut.handleNotificationTap(userInfo: userInfo, accountRepository: accountRepository)
 
         XCTAssertNil(DeepLinkManager.shared.pendingUrl,
                      "An empty odoo_action_url must not produce a pending deep link")
@@ -78,7 +89,7 @@ final class AppDelegateDeepLinkTests: XCTestCase {
     func test_handleNotificationTap_givenMalformedActionUrl_doesNotSetDeepLink_literalNull() {
         let userInfo: [AnyHashable: Any] = ["odoo_action_url": "null"]
 
-        sut.handleNotificationTap(userInfo: userInfo)
+        sut.handleNotificationTap(userInfo: userInfo, accountRepository: accountRepository)
 
         XCTAssertNil(DeepLinkManager.shared.pendingUrl,
                      "The literal string 'null' as odoo_action_url must not produce a pending deep link")
@@ -87,7 +98,7 @@ final class AppDelegateDeepLinkTests: XCTestCase {
     func test_handleNotificationTap_givenMalformedActionUrl_doesNotSetDeepLink_externalUrl() {
         let userInfo: [AnyHashable: Any] = ["odoo_action_url": "https://evil.com/phish"]
 
-        sut.handleNotificationTap(userInfo: userInfo)
+        sut.handleNotificationTap(userInfo: userInfo, accountRepository: accountRepository)
 
         XCTAssertNil(DeepLinkManager.shared.pendingUrl,
                      "An external URL as odoo_action_url must be rejected and not set as pending deep link")
@@ -96,7 +107,7 @@ final class AppDelegateDeepLinkTests: XCTestCase {
     func test_handleNotificationTap_givenMalformedActionUrl_doesNotSetDeepLink_nonWebPath() {
         let userInfo: [AnyHashable: Any] = ["odoo_action_url": "/api/v2/data"]
 
-        sut.handleNotificationTap(userInfo: userInfo)
+        sut.handleNotificationTap(userInfo: userInfo, accountRepository: accountRepository)
 
         XCTAssertNil(DeepLinkManager.shared.pendingUrl,
                      "A path not starting with /web must be rejected as odoo_action_url")

@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import odoo
 
@@ -15,16 +16,19 @@ final class PermissionUsageDescriptionTests: XCTestCase {
 
     private var appBundle: Bundle { Bundle(for: SettingsViewModel.self) }
 
-    private func lproj(_ lang: String) throws -> Bundle {
-        let path = try XCTUnwrap(appBundle.path(forResource: lang, ofType: "lproj"))
-        return try XCTUnwrap(Bundle(path: path))
+    private func localizedInfoPlist(_ lang: String) throws -> [String: String] {
+        let url = appBundle.bundleURL
+            .appendingPathComponent("\(lang).lproj", isDirectory: true)
+            .appendingPathComponent("InfoPlist.strings")
+        let data = try XCTUnwrap(FileManager.default.contents(atPath: url.path))
+        let plist = try PropertyListSerialization.propertyList(from: data, options: [], format: nil)
+        return try XCTUnwrap(plist as? [String: String], "Invalid InfoPlist.strings for \(lang)")
     }
 
     /// The prompt text iOS shows for `lang`: the lproj InfoPlist.strings value, else the Info.plist default.
     private func prompt(_ key: String, _ lang: String) throws -> String {
-        let localized = try lproj(lang).localizedString(forKey: key, value: nil, table: "InfoPlist")
-        if localized != key { return localized }
-        return try XCTUnwrap(appBundle.object(forInfoDictionaryKey: key) as? String, "\(key) missing from Info.plist")
+        if let localized = try localizedInfoPlist(lang)[key] { return localized }
+        return try XCTUnwrap(appBundle.infoDictionary?[key] as? String, "\(key) missing from Info.plist")
     }
 
     /// Words that must appear, per key and language: a concrete purpose and an example.
@@ -48,7 +52,7 @@ final class PermissionUsageDescriptionTests: XCTestCase {
 
     func test_infoPlist_givenBuiltApp_declaresMicrophoneCameraAndPhotoKeys() {
         for key in keys {
-            let value = appBundle.object(forInfoDictionaryKey: key) as? String
+            let value = appBundle.infoDictionary?[key] as? String
             XCTAssertFalse((value ?? "").isEmpty, "\(key) must be in Info.plist or iOS terminates the app on use")
         }
     }
