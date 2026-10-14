@@ -579,7 +579,17 @@ class BrandLayerTests(unittest.TestCase):
         for c in configs:
             apporo = c["name"].startswith("Apporo")
             self.assertEqual(c["buildSettings"]["INFOPLIST_KEY_TestAppDisplayName"], "Apporo platform" if apporo else "woowtech platform")
-        self.assertIn('object(forInfoDictionaryKey: "TestAppDisplayName")', text("odooUITests/SharedTestConfig.swift"))
+        shared = text("odooUITests/SharedTestConfig.swift")
+        self.assertIn("bundle.bundleIdentifier", shared)
+        self.assertIn('object(forInfoDictionaryKey: "TestAppDisplayName")', shared)
+
+    def test_simulator_workflow_reuses_build_and_bounds_launch_smoke(self):
+        workflow = text(".github/workflows/brand-simulator-tests.yml")
+        self.assertIn("xcodebuild test-without-building", workflow)
+        launch = workflow.split("- name: Launch the real branded app with XCUITest", 1)[1]
+        self.assertIn("timeout-minutes: 10", launch.split("- name: Upload simulator result bundle", 1)[0])
+        launch_test = text("odooUITests/odooUITestsLaunchTests.swift")
+        self.assertNotIn("runsForEachTargetApplicationUIConfiguration", launch_test)
 
 
 if __name__ == "__main__":

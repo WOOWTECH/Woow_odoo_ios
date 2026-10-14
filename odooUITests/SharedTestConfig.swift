@@ -14,34 +14,46 @@ enum SharedTestConfig {
         return dict
     }()
 
-    /// Identity comes from this test target's matching build configuration, not
-    /// a saved TestConfig.plist from a different brand or environment.
-    static let appDisplayName: String = {
-        guard let name = Bundle(for: BundleToken.self).object(forInfoDictionaryKey: "TestAppDisplayName") as? String,
-              !name.isEmpty else { fatalError("Missing test target brand configuration") }
-        return name
-    }()
-
-    static let appBundleID: String = {
-        guard let bundleID = Bundle(for: BundleToken.self).object(forInfoDictionaryKey: "TestAppBundleID") as? String,
-              !bundleID.isEmpty else { fatalError("Missing test target bundle configuration") }
-        return bundleID
-    }()
-
-    /// No plist/env fallback: an old test fixture must never launch another brand.
-    static let appURLScheme: String = {
-        guard let scheme = Bundle(for: BundleToken.self).object(forInfoDictionaryKey: "TestAppURLScheme") as? String else {
-            fatalError("Missing test target URL scheme configuration")
+    /// Identity comes from the selected UI-test target's bundle identifier. Xcode does not copy
+    /// arbitrary `INFOPLIST_KEY_*` values into generated UI-test bundle plists, so treating those
+    /// optional values as required made the runner crash and relaunch indefinitely in CI.
+    /// There is deliberately no environment/TestConfig fallback: a stale fixture can never launch
+    /// another brand.
+    private static let identity: (displayName: String, appBundleID: String, appURLScheme: String) = {
+        let bundle = Bundle(for: BundleToken.self)
+        guard let testBundleID = bundle.bundleIdentifier else {
+            fatalError("Missing UI test bundle identifier")
         }
-        switch (appBundleID, scheme) {
-        case ("io.woowtech.odoo", "woowodoo"),
-             ("com.apporo.odoo.dev", "apporoodoo-dev"),
-             ("com.apporo.odoo", "apporoodoo"):
-            return scheme
+
+        let expected: (displayName: String, appBundleID: String, appURLScheme: String)
+        switch testBundleID {
+        case "io.woowtech.odooUITests":
+            expected = ("woowtech platform", "io.woowtech.odoo", "woowodoo")
+        case "com.apporo.odoo.dev.odooUITests":
+            expected = ("Apporo platform", "com.apporo.odoo.dev", "apporoodoo-dev")
+        case "com.apporo.odoo.odooUITests":
+            expected = ("Apporo platform", "com.apporo.odoo", "apporoodoo")
         default:
-            fatalError("Inconsistent test target URL scheme configuration")
+            fatalError("Unsupported UI test bundle identifier: \(testBundleID)")
         }
+
+        // If a future Xcode version starts emitting these custom keys, they may confirm but never
+        // override the identity selected by the test target's signed bundle identifier.
+        let configured = (
+            bundle.object(forInfoDictionaryKey: "TestAppDisplayName") as? String,
+            bundle.object(forInfoDictionaryKey: "TestAppBundleID") as? String,
+            bundle.object(forInfoDictionaryKey: "TestAppURLScheme") as? String
+        )
+        if let displayName = configured.0, let appBundleID = configured.1, let appURLScheme = configured.2,
+           (displayName, appBundleID, appURLScheme) != expected {
+            fatalError("Inconsistent UI test target brand configuration")
+        }
+        return expected
     }()
+
+    static let appDisplayName = identity.displayName
+    static let appBundleID = identity.appBundleID
+    static let appURLScheme = identity.appURLScheme
 
     static let serverURL = ProcessInfo.processInfo.environment["TEST_SERVER_URL"]
         ?? plist["ServerURL"] as? String

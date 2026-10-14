@@ -104,6 +104,7 @@ jobs:
             -resultBundlePath "TestResults/${{ matrix.brand }}.xcresult"
 
       - name: Launch the real branded app with XCUITest
+        timeout-minutes: 10
         env:
           SCHEME: ${{ matrix.scheme }}
           SIMULATOR_UDID: ${{ steps.simulator.outputs.udid }}
@@ -112,7 +113,7 @@ jobs:
           if ! xcrun simctl uninstall "$SIMULATOR_UDID" "$BUNDLE_ID"; then
             echo "No prior app installation to remove"
           fi
-          xcodebuild test \
+          xcodebuild test-without-building \
             -project odoo.xcodeproj \
             -scheme "$SCHEME" \
             -testPlan BrandLaunchSmoke \

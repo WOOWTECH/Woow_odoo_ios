@@ -125,9 +125,13 @@ class BrandVerificationTests(unittest.TestCase):
             self.assertEqual(settings["INFOPLIST_KEY_TestAppURLScheme"], IDENTITIES[config["name"]][3])
             self.assertEqual(settings["INFOPLIST_KEY_TestAppBundleID"], IDENTITIES[config["name"]][2])
         shared = text("odooUITests/SharedTestConfig.swift")
+        self.assertIn("Bundle(for: BundleToken.self)", shared)
+        self.assertIn("bundle.bundleIdentifier", shared)
+        for runner_id in ["io.woowtech.odooUITests", "com.apporo.odoo.dev.odooUITests",
+                          "com.apporo.odoo.odooUITests"]:
+            self.assertIn(f'case "{runner_id}":', shared)
         self.assertIn('object(forInfoDictionaryKey: "TestAppURLScheme")', shared)
-        self.assertIn('switch (appBundleID, scheme)', shared)
-        self.assertIn('fatalError("Inconsistent test target URL scheme configuration")', shared)
+        self.assertIn('fatalError("Inconsistent UI test target brand configuration")', shared)
 
     def test_six_validator_entries_use_selected_scheme_and_unit_rejects_other_brand(self):
         for priority, expected in [("High", 2), ("Medium", 4)]:
