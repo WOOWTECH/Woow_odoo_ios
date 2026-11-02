@@ -20,10 +20,14 @@ initially used the development-signed Release app from the uploaded archive.
 The subsequent TestFlight installation is independently confirmed as Apple
 TestFlight Beta Distribution with production APNs entitlements. Its Facility
 Desk create/refresh/relaunch flow passed, creating independently verified task
-#8. Actual production push delivery and notification taps are still pending
-test-sender administrator login in Chrome. The review tenant's old push module
-lacks get_push_capabilities; the separate apporo-push-test tenant returns
-contract 2. Neither fact proves delivery. See
+#8. Actual production push now passed on the separate apporo-push-test tenant:
+background delivery/tap, terminated-app delivery/cold start, foreground banners,
+and notification-driven switching from the review account to Push Tester A.
+Normal OdooBot replies in the existing private test conversation provided the
+sender; administrator login is no longer needed for these completed tests.
+The review tenant still lacks get_push_capabilities, and the push test tenant's
+websocket handshake returns HTTP 500. Those backend issues remain unresolved;
+Linux maintenance access is still unavailable. See
 `docs/2026-11-02-Apporo-TestFlight-and-Push-Verification.md`,
 `docs/2026-11-02-Apporo-Physical-iPad-Verification.md` and
 `docs/2026-11-02-Apporo-4.3-Investigation.md` for current evidence and release
