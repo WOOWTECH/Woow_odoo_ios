@@ -14,7 +14,11 @@ ApporoUnit: 762 tests, 761 pass, one existing skip, zero failures. The corrected
 Release simulator binary passes hook and coverage audits. The dedicated
 `demo111` review tenant now has Project installed; the actual review account
 has completed a create/refresh/relaunch/readback workflow on iPhone simulator.
-Physical iPad testing remains dependent on its connection. See
+The connected physical iPad 9 / iPadOS 26.6.1 has now passed the build 6
+Facility Desk workflow, creating and independently verifying task #7. This
+uses the development-signed Release app from the uploaded archive, not a
+TestFlight installation; production push delivery is not covered. See
+`docs/2026-11-02-Apporo-Physical-iPad-Verification.md` and
 `docs/2026-11-02-Apporo-4.3-Investigation.md` for current evidence and release
 status. October 30 archives are stale and must not be uploaded as this fix.
 
