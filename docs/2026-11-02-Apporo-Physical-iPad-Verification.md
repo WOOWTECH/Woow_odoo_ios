@@ -2,6 +2,8 @@
 
 2026-11-02，台北時間。使用者接回 iPad 後，已實際完成本輪設施工作台的硬體驗證。測得的登入、讀取、建立及生命週期流程均通過，沒有發現需要修改送審 binary 的阻斷問題。
 
+後續已補做真正的 TestFlight 安裝，從裝置核對 Apple Beta 簽章與 production APNs entitlement，完成新增任務 #8 及重開讀回；正式推播尚待發送端登入。見 [TestFlight 與正式推播實測](2026-11-02-Apporo-TestFlight-and-Push-Verification.md)。下文保留第一階段開發簽章實測的原始範圍。
+
 ## 裝置與版本
 
 - 實體 iPad（第 9 代，iPad12,1），iPadOS 26.6.1（23G83），USB 配對且開發者模式啟用。

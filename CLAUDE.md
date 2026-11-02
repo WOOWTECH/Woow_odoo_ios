@@ -16,8 +16,15 @@ Release simulator binary passes hook and coverage audits. The dedicated
 has completed a create/refresh/relaunch/readback workflow on iPhone simulator.
 The connected physical iPad 9 / iPadOS 26.6.1 has now passed the build 6
 Facility Desk workflow, creating and independently verifying task #7. This
-uses the development-signed Release app from the uploaded archive, not a
-TestFlight installation; production push delivery is not covered. See
+initially used the development-signed Release app from the uploaded archive.
+The subsequent TestFlight installation is independently confirmed as Apple
+TestFlight Beta Distribution with production APNs entitlements. Its Facility
+Desk create/refresh/relaunch flow passed, creating independently verified task
+#8. Actual production push delivery and notification taps are still pending
+test-sender administrator login in Chrome. The review tenant's old push module
+lacks get_push_capabilities; the separate apporo-push-test tenant returns
+contract 2. Neither fact proves delivery. See
+`docs/2026-11-02-Apporo-TestFlight-and-Push-Verification.md`,
 `docs/2026-11-02-Apporo-Physical-iPad-Verification.md` and
 `docs/2026-11-02-Apporo-4.3-Investigation.md` for current evidence and release
 status. October 30 archives are stale and must not be uploaded as this fix.
