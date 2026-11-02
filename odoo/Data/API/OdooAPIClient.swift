@@ -170,6 +170,30 @@ actor OdooAPIClient {
                                 args: args, kwargs: kwargs, pushSessionId: nil)
     }
 
+    /// Calls an Odoo model method with the active account's pinned session cookie.
+    /// This avoids using the shared URLSession cookie jar, which may belong to another
+    /// account when two databases share the same host.
+    func callKwInSession(
+        serverUrl: String,
+        sessionId: String,
+        model: String,
+        method: String,
+        args: [Any] = [],
+        kwargs: [String: Any] = [:]
+    ) async throws -> Any? {
+        guard Self.isSecureSessionRequest(serverUrl: serverUrl, sessionId: sessionId) else {
+            throw OdooAPIError.invalidUrl
+        }
+        return try await executeCallKw(
+            serverUrl: Self.trimmedServerUrl(serverUrl),
+            model: model,
+            method: method,
+            args: args,
+            kwargs: kwargs,
+            pushSessionId: sessionId
+        )
+    }
+
     /// Push registration for both brands uses this pinned, account-owned SID so a shared cookie
     /// jar can never authorize a write for a same-host sibling account.
     func callKwWithPushSession(
@@ -186,6 +210,17 @@ actor OdooAPIClient {
         !value.isEmpty && value.unicodeScalars.allSatisfy {
             $0.value >= 0x21 && $0.value <= 0x7E && ![0x22, 0x2C, 0x3B, 0x5C].contains($0.value)
         }
+    }
+
+    private static func isSecureSessionRequest(serverUrl: String, sessionId: String) -> Bool {
+        guard let components = URLComponents(string: serverUrl),
+              components.scheme?.lowercased() == "https",
+              components.host != nil,
+              components.user == nil,
+              components.password == nil,
+              components.query == nil,
+              components.fragment == nil else { return false }
+        return isValidPushSessionId(sessionId)
     }
 
     private func executeCallKw(
@@ -249,6 +284,39 @@ actor OdooAPIClient {
             throw OdooAPIError.invalidResponse
         }
 
+        return records
+    }
+
+    /// Reads Odoo records using only the supplied account's session cookie.
+    /// Use this for account-scoped native screens instead of the shared cookie jar.
+    func searchReadInSession(
+        serverUrl: String,
+        sessionId: String,
+        model: String,
+        fields: [String],
+        domain: [[Any]] = [],
+        offset: Int = 0,
+        limit: Int = 80,
+        sort: String = ""
+    ) async throws -> [[String: Any]] {
+        // Odoo 18 exposes search_read as a model method through call_kw, not the
+        // removed /web/dataset/search_read controller. Its result is a record array.
+        let result = try await callKwInSession(
+            serverUrl: serverUrl,
+            sessionId: sessionId,
+            model: model,
+            method: "search_read",
+            kwargs: [
+                "domain": domain,
+                "fields": fields,
+                "offset": offset,
+                "limit": limit,
+                "order": sort
+            ]
+        )
+        guard let records = result as? [[String: Any]] else {
+            throw OdooAPIError.invalidResponse
+        }
         return records
     }
 

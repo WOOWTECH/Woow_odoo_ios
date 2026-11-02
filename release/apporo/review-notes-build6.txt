@@ -1,0 +1,21 @@
+APPORO PLATFORM — VERSION 1.0, BUILD 6
+This build adds the native Facility Desk described below. It replaces the previously rejected build 5. The shared Odoo client foundation remains; we ask that the added workflow be assessed in this actual build rather than treating the company/region explanation alone as product differentiation.
+
+FACILITY DESK: WHAT TO TEST
+1. Sign in using the Sign-In Information account below. On the first screen enter server demo111-odoo.woowtech.io (https:// is already displayed) and database demo111; tap Next, enter the supplied username and password, then Login. No OTP is required.
+2. Dismiss any optional iOS password-saving prompt. Tap the building icon at the top right to open Facility Desk (設施工作台).
+3. Select “Apporo Facility Review – Alpha Site”. The dedicated review server has Odoo Projects installed and the review account has Project user access. Sample work includes an HVAC alert, elevator maintenance and a completed fire-panel inspection, with New, In Progress and Done stages.
+4. Tap + / New facility request. Enter a title and description and choose Standard or High priority. Tap Submit. The success confirmation appears, and the request is saved as a task in the selected site project.
+5. Tap Done and Refresh. The new task and its priority appear in Recent work. Close/reopen Facility Desk to read the persisted record. You may create additional demonstration requests during review.
+The workflow is native SwiftUI and uses the signed-in account’s Odoo permissions. It does not require navigating the Odoo web menus. It reads project/task data and creates requests; it does not claim asset telemetry, automated dispatch or a separate backend service. Other Odoo screens remain available via the organization’s web interface. The review server stays available over HTTPS.
+
+PROVIDER AND PUBLISHER / 4.3 AND 4.2.6
+APPORO UNION INC. is the Apporo brand and service provider, serving building, facility and building-automation customers in North America and Southeast Asia. WOOW TECH CO., LTD. is the contracted software development, maintenance and publishing partner, and the seller for this separate Apporo app. The companies operate distinct services; shared underlying client code is acknowledged. We are not relying on branding, territory or another app’s prior approval as an exemption. Please assess the submitted workflow and let us know whether an independent 4.2.6 concern remains and which specific facts require clarification. No company-stamped documents are attached.
+
+ACCOUNT, PRIVACY AND OPTIONAL FEATURES
+Accounts are issued by each organization’s Odoo administrator. There is no in-app sign-up, trial purchase, subscription or in-app purchase. Any organization with a compatible Odoo 18 Community server can use the client; this is not restricted to a single employer. Project access requires the Project module and appropriate permissions.
+Settings > Delete Account opens https://www.apporo.ai/odoo-account-deletion-en with self-service and email request instructions. Business data and requests are sent to the organization’s server. Location is requested only for attendance, not background tracking. App Lock, photo/file pickers and appearance settings remain available. Notifications are optional and not required for Facility Desk; the review tenant does not send Apporo push notifications for this version.
+
+CONTACT
+Developer: WOOW TECH CO., LTD., +886 2-2651-9677, woowtech@designsmart.com.tw.
+Apporo service: info@apporo.ai.

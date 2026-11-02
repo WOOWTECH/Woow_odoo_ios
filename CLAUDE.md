@@ -1,5 +1,27 @@
 # AI Instructions — Woow Odoo iOS App
 
+## Apporo Facility Desk release continuation — 2026-11-02
+
+The owner has explicitly authorized live review-tenant testing, Xcode builds,
+archive/upload and continued App Store submission for `com.apporo.odoo` under
+WOOW TECH (`W4UWZ8NP2P`). This supersedes the September draft-only / heavy-build
+deferral below for this Apporo release task. Do not upload company-stamped
+documents or substitute the separate Apporo smart Firebase configuration.
+
+The candidate is version 1.0 (6), with the native Facility Desk. Odoo 18 reads
+use account-scoped `call_kw/search_read`; superseded project loads are ignored.
+ApporoUnit: 762 tests, 761 pass, one existing skip, zero failures. The corrected
+Release simulator binary passes hook and coverage audits. The dedicated
+`demo111` review tenant now has Project installed; the actual review account
+has completed a create/refresh/relaunch/readback workflow on iPhone simulator.
+Physical iPad testing remains dependent on its connection. See
+`docs/2026-11-02-Apporo-4.3-Investigation.md` for current evidence and release
+status. October 30 archives are stale and must not be uploaded as this fix.
+
+Use all three command-line flags for Release build/archive actions:
+`CLANG_COVERAGE_MAPPING=NO ENABLE_CODE_COVERAGE=NO CLANG_ENABLE_CODE_COVERAGE=NO`.
+Keep the source and binary audits enabled; never disable them to pass a build.
+
 ## Apporo local brand layer — 2026-09-24 (NOT release-ready)
 
 Stage 2 adds build-selected Apporo identity while retaining target/module `odoo` and WOOW Debug/Release/scheme at 1.0 (3). `apporoodoo` uses ApporoDebug / ApporoRelease, 1.0 (1). `AppBrand` is the only UI identity provider. See `BrandResources/README.md` and `docs/2026-09-24-Apporo-Brand-Layer_{Implementation,Test}_Plan.md`.

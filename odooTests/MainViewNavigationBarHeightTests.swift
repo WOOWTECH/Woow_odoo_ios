@@ -34,10 +34,26 @@ final class MainViewNavigationBarHeightTests: XCTestCase {
         defer { window.isHidden = true; window.rootViewController = nil }
 
         var bars: [UINavigationBar] = []
+        var previousHeight: CGFloat?
+        var previousMode: UINavigationItem.LargeTitleDisplayMode?
+        var stableSamples = 0
         for _ in 0..<50 {
             window.layoutIfNeeded()
             bars = navigationBars(in: window)
-            if let bar = bars.first, bar.frame.height > 0 { break }
+            if let bar = bars.first, bar.frame.height > 0 {
+                // iOS 27 initially lays out 106 pt, then applies the inline item
+                // on the following render pass (observed 106 -> 54 pt). Wait for
+                // stable geometry, regardless of its height; a persistent large
+                // bar still fails the original assertions below.
+                if previousHeight == bar.frame.height, previousMode == bar.topItem?.largeTitleDisplayMode {
+                    stableSamples += 1
+                } else {
+                    stableSamples = 0
+                }
+                previousHeight = bar.frame.height
+                previousMode = bar.topItem?.largeTitleDisplayMode
+                if stableSamples >= 3 { break }
+            }
             try await Task.sleep(nanoseconds: 20_000_000)
         }
         let bar = try XCTUnwrap(bars.first, "MainView must host a navigation bar")

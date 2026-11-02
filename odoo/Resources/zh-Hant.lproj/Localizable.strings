@@ -166,3 +166,36 @@
 "offline_title" = "無法連線";
 "offline_message" = "請檢查網路連線後再試一次。";
 "offline_retry" = "重試";
+
+/* Apporo Facility Desk */
+"Done" = "完成";
+"OK" = "好";
+"facility_desk_title" = "設施工作台";
+"facility_desk_intro" = "查看場域近期工作，並向 Odoo 專案提出服務請求。";
+"facility_loading" = "正在載入設施工作⋯";
+"facility_session_required" = "需要登入";
+"facility_session_required_detail" = "請重新登入 Odoo 帳號以使用設施工作台。";
+"facility_session_expired" = "Odoo 工作階段已過期，請重新登入後繼續。";
+"facility_no_projects" = "找不到設施專案";
+"facility_no_projects_detail" = "請 Odoo 管理員安裝「專案」應用程式，並授予你設施專案的存取權。";
+"facility_site_project" = "場域專案";
+"facility_recent_work" = "近期工作";
+"facility_refresh" = "重新整理";
+"facility_load_failed" = "無法載入設施工作。請檢查網路連線及 Odoo 專案存取權。";
+"facility_no_work" = "目前沒有近期工作";
+"facility_no_work_detail" = "建立設施服務請求，將第一項工作加入此專案。";
+"facility_high_priority" = "高優先級";
+"facility_new_request" = "新增設施請求";
+"facility_request_project_help" = "所選 Odoo 專案將作為此請求的場域工作區。";
+"facility_request_details" = "請求內容";
+"facility_request_title" = "請求標題";
+"facility_request_description" = "請描述問題";
+"facility_request_priority" = "優先級";
+"facility_standard_priority" = "一般";
+"facility_submit_request" = "送出";
+"facility_submit_failed_title" = "請求未送出";
+"facility_submit_failed" = "無法將請求新增至 Odoo。請檢查專案存取權後再試一次。";
+"facility_submit_success_title" = "請求已送出";
+"facility_submit_success" = "設施服務請求已新增至所選 Odoo 專案。";
+"facility_data_notice" = "請求及專案資料會傳送並儲存在貴組織的 Odoo 伺服器。";
+"facility_request_prefix" = "設施請求";

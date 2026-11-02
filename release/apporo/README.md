@@ -17,7 +17,7 @@
 ```sh
 xcodebuild archive -project odoo.xcodeproj -scheme apporoodoo -configuration ApporoRelease \
   -destination 'generic/platform=iOS' -archivePath build/apporo/ApporoPlatform.xcarchive \
-  CLANG_COVERAGE_MAPPING=NO
+  CLANG_COVERAGE_MAPPING=NO ENABLE_CODE_COVERAGE=NO CLANG_ENABLE_CODE_COVERAGE=NO
 xcodebuild -exportArchive -archivePath build/apporo/ApporoPlatform.xcarchive \
   -exportOptionsPlist release/apporo/ExportOptions-AppStore.plist -exportPath build/apporo/export
 # 實機驗收：既有 xcarchive 用 ExportOptions-AdHoc.plist 重匯出即可，不要改開發簽章
@@ -28,4 +28,4 @@ xcodebuild -exportArchive -archivePath build/apporo/ApporoPlatform.xcarchive \
 scheme 的預設測試計畫 ApporoUnit 會收集覆蓋率，Xcode 因此對經 scheme 的建置注入 `CLANG_COVERAGE_MAPPING=YES`，而且優先序高於 xcconfig。
 `Config/*Release.xcconfig` 已關掉 app 目標本身的插樁（`0eaa51c`），但 Swift package（Firebase 等）不讀 app 的 xcconfig，只有命令列覆寫能套到所有目標。
 `scripts/audit_release_archive.sh`（`9b79e9d`）會在 Release binary 帶插樁時讓建置失敗，所以忘了帶這個參數會直接擋下，不會出貨帶插樁的版本。
-archive 動作是否也會注入尚未實證（首次 archive 時確認；若稽核 PASS 仍建議保留此參數）。
+2026-11-02：以 ApporoRelease 模擬器建置實證，必須一併關閉 `ENABLE_CODE_COVERAGE` 與 `CLANG_ENABLE_CODE_COVERAGE`，才能涵蓋 Swift package 相依目標。正式 archive 也保留上述三個旗標與二進位稽核。

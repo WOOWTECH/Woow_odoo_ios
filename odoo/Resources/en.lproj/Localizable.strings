@@ -166,3 +166,36 @@
 "offline_title" = "Unable to connect";
 "offline_message" = "Check your network connection and try again.";
 "offline_retry" = "Try Again";
+
+/* Apporo Facility Desk */
+"Done" = "Done";
+"OK" = "OK";
+"facility_desk_title" = "Facility Desk";
+"facility_desk_intro" = "Review recent site work and send a service request to your Odoo project.";
+"facility_loading" = "Loading facility work…";
+"facility_session_required" = "Sign in required";
+"facility_session_required_detail" = "Sign in to your Odoo account again to use Facility Desk.";
+"facility_session_expired" = "Your Odoo session expired. Sign in again to continue.";
+"facility_no_projects" = "No facility projects found";
+"facility_no_projects_detail" = "Ask your Odoo administrator to install Projects and grant you access to a facility project.";
+"facility_site_project" = "Site project";
+"facility_recent_work" = "Recent work";
+"facility_refresh" = "Refresh";
+"facility_load_failed" = "Couldn't load facility work. Check your connection and Odoo Projects access.";
+"facility_no_work" = "No recent work";
+"facility_no_work_detail" = "Create a facility request to add the first item to this project.";
+"facility_high_priority" = "High priority";
+"facility_new_request" = "New facility request";
+"facility_request_project_help" = "The selected Odoo project is the site workspace for this request.";
+"facility_request_details" = "Request details";
+"facility_request_title" = "Request title";
+"facility_request_description" = "Describe the issue";
+"facility_request_priority" = "Priority";
+"facility_standard_priority" = "Standard";
+"facility_submit_request" = "Submit";
+"facility_submit_failed_title" = "Request not submitted";
+"facility_submit_failed" = "Couldn't add the request to Odoo. Check your project access and try again.";
+"facility_submit_success_title" = "Request submitted";
+"facility_submit_success" = "Your facility request was added to the selected Odoo project.";
+"facility_data_notice" = "Requests and project details are sent to and stored on your organization's Odoo server.";
+"facility_request_prefix" = "Facility request";

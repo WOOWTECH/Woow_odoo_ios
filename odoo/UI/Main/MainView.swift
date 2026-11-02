@@ -14,6 +14,7 @@ struct MainView: View {
     let onSessionExpired: () -> Void
 
     @State private var isLoading = true
+    @State private var isShowingFacilityDesk = false
     /// W2-4 L1: the app's own offline screen over the WebView, driven by its coordinator.
     @StateObject private var offlineState = WebViewOfflineState()
     /// Controls the one-shot location-denied snackbar. Dismissed after the user taps
@@ -82,6 +83,16 @@ struct MainView: View {
                         Image(systemName: "line.3.horizontal")
                     }
                 }
+                if AppBrand.current.code == .apporo {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button {
+                            isShowingFacilityDesk = true
+                        } label: {
+                            Image(systemName: "building.2")
+                        }
+                        .accessibilityLabel(String(localized: "facility_desk_title"))
+                    }
+                }
             }
             .toolbarBackground(theme.primaryColor, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
@@ -101,6 +112,15 @@ struct MainView: View {
         ) { _ in
             withAnimation {
                 showLocationDeniedBanner = true
+            }
+        }
+        .sheet(isPresented: $isShowingFacilityDesk) {
+            if let account = viewModel.activeAccount {
+                FacilityDeskView(
+                    serverUrl: account.fullServerUrl,
+                    sessionId: viewModel.sessionId,
+                    onSessionExpired: onSessionExpired
+                )
             }
         }
     }

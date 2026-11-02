@@ -107,6 +107,7 @@ $(SRCROOT)/odoo/UI/Login/LoginView.swift
 $(SRCROOT)/odoo/UI/Login/LoginViewModel.swift
 $(SRCROOT)/odoo/UI/Login/ServerUrlInput.swift
 $(SRCROOT)/odoo/UI/Main
+$(SRCROOT)/odoo/UI/Main/FacilityDeskView.swift
 $(SRCROOT)/odoo/UI/Main/MainView.swift
 $(SRCROOT)/odoo/UI/Main/MainViewModel.swift
 $(SRCROOT)/odoo/UI/Main/OdooWebView.swift
