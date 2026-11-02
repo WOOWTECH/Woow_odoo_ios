@@ -25,9 +25,15 @@ background delivery/tap, terminated-app delivery/cold start, foreground banners,
 and notification-driven switching from the review account to Push Tester A.
 Normal OdooBot replies in the existing private test conversation provided the
 sender; administrator login is no longer needed for these completed tests.
-The review tenant still lacks get_push_capabilities, and the push test tenant's
-websocket handshake returns HTTP 500. Those backend issues remain unresolved;
-Linux maintenance access is still unavailable. See
+Both backend issues were repaired and deployed on November 2: the review tenant
+now runs push module 18.0.1.3.0 with a dedicated Apporo sidecar/PVC/enrollment,
+while preserving its WOOW route. Both brands obtained valid sender credentials.
+The iPad registered review UID 10 and passed real notification delivery while
+backgrounded and terminated, plus notification-driven cold start to the correct
+review account/chat. All 8 tasks and 9 original WOOW device rows were preserved.
+The test tenant tunnel now enters Nginx on 8080: both public WebSockets return
+101 and the iPad chat updates live. Authorized Linux maintenance access works.
+See `docs/2026-11-02-Apporo-Backend-Repair-and-Verification.md` and
 `docs/2026-11-02-Apporo-TestFlight-and-Push-Verification.md`,
 `docs/2026-11-02-Apporo-Physical-iPad-Verification.md` and
 `docs/2026-11-02-Apporo-4.3-Investigation.md` for current evidence and release

@@ -1,6 +1,6 @@
 # Apporo platform build 6：TestFlight 與正式推播實測
 
-2026-11-02，台北時間，17:28 更新。**TestFlight 安裝、設施工作台、正式推播的背景／前景／冷啟動送達與通知點擊均已通過；另已驗證通知點擊自動切換到正確帳號。** 審查站推播模組相容性與獨立測試站即時連線問題仍待修復。本輪沒有修改產品程式、重新上傳 binary 或取消審查。
+2026-11-02，台北時間，18:49 更新。**TestFlight 安裝、設施工作台與正式推播已通過；審查站推播及測試站 WebSocket 兩項後端問題也已修復並部署。** 審查站現已用同一台 iPad 驗證背景／終止後送達、通知冷啟動與正確帳號／對話。詳見 [後端修復與實機驗證](2026-11-02-Apporo-Backend-Repair-and-Verification.md)。沒有修改或重新上傳 App binary，也沒有取消審查。下文保留先前測試事件的原始範圍。
 
 ## 已完成
 
@@ -45,15 +45,11 @@
 
 保留的工具限制：第 26 批首次點擊只展開通知，第 27 批因此無法取得背景 App 的 accessibility tree；第 28 批重新讀取實際通知位置，第 29–30 批才確認成功開啟。前景 help 指令成功建立 #48，但回應沒有 result 欄位，舊腳本出現 KeyError；已用獨立讀回及橫幅截圖確認，沒有重送該指令。現行 App 前景呈現選項包含 banner、sound、badge，未包含 list；因此 #48 橫幅消失後不在通知中心，第 39 批改直接點擊下一則前景橫幅，成功完成驗證。上述情況均未被掩蓋或當成單憑腳本執行成功的產品通過證據。
 
-## 尚待處理的後端問題
+## 後端問題已修復
 
-審查站 `demo111-odoo.woowtech.io` 仍使用不支援 Apporo 合約的舊推播模組。以審查帳號呼叫 `woow.fcm.device.get_push_capabilities`，實際得到 `AttributeError`：方法不存在。App 執行紀錄亦出現 `push_status_not_configured`。因此不能把審查站的工作台成功當成該站推播成功。
+17:27 的審查站 `get_push_capabilities` AttributeError 及測試站 WebSocket HTTP 500 是修復前的實測結果。18:27 審查站完成模組 1.3.0 升級與專屬 Apporo 推播配置，能力介面回傳 contract 2、woowtech/apporo；UID 10 已註冊有效 iOS 裝置並收到正常 OdooBot 遠端通知。兩個站點的公開 WebSocket 均通過 HTTP 101 與訂閱回應，iPad 即時聊天已恢復。
 
-17:27 再次實際查詢仍得到相同 AttributeError。需要在審查站升級／配置相容的推播後端，再用審查帳號完成送達驗證；不能以獨立測試站通過宣稱該站已修復。
-
-獨立測試站 `apporo-push-test.woowtech.io`／`apporopushtest` 的能力介面回傳 contract 2、支援 woowtech 與 apporo，並已完成上述正式通知實測。但其聊天頁顯示 `Real-time connection lost...`；17:25 以同一測試 session 對 `/websocket?version=18.0-7` 發起握手，回傳 HTTP 500。這是仍存在的即時更新問題，確切原因尚需後端紀錄，不能由通知成功推論聊天即時更新正常。
-
-後端維修仍需要可用的 Linux 維運／部署存取。既有 SSH 公鑰被拒及管理員未登入的情況尚未改變；一般接收帳號仍沒有裝置管理權限，沒有繞過權限或修改伺服器安全設定。
+後續維運透過擁有者授權的 Linux shell 完成，不再受原 SSH 金鑰問題阻塞。備份、資料比對、發送紀錄、通知點擊冷啟動及工具失敗的完整說明見 [後端修復與實機驗證](2026-11-02-Apporo-Backend-Repair-and-Verification.md)。18:39 Apple 原提交仍為等待審查。
 
 ## 證據與上架狀態
 
@@ -71,6 +67,6 @@
 - `backend-capabilities.json`、`review-push-capabilities-latest.json`、`websocket-diagnostic.json`、`receipt.json`：介面核對、未解決問題與測試總收據。
 - `review-status-latest.json`、`review-status-latest.png`：17:22 重新載入 App Store Connect，確認 **1.0 (6) 仍為等待審查**，尚未核准上架。
 
-完整通知中心截圖含其他 App 的私人通知，只保留於本機收據，未上傳至 Git 或 Apple。iPad 最後保留 TestFlight 1.0 (6)、Push Tester A 與已驗證的 OdooBot 對話。
+完整通知中心截圖含其他 App 的私人通知，只保留於本機收據，未上傳至 Git 或 Apple。先前階段結束時保留 Push Tester A；本輪後端修復驗證後，iPad 已恢復 TestFlight 1.0 (6) 的林雅婷審查帳號與設施工作台。
 
 先前開發簽章實機測試的收據保持原始範圍；本文件補上其 TestFlight 缺口。相機附件、定位打卡、生物辨識與網路中斷不在本輪已完成結果內。
