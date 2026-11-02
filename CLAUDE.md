@@ -18,6 +18,12 @@ Physical iPad testing remains dependent on its connection. See
 `docs/2026-11-02-Apporo-4.3-Investigation.md` for current evidence and release
 status. October 30 archives are stale and must not be uploaded as this fix.
 
+Build 6 has since completed the corrected device archive/export/upload and
+Apple processing, and was resubmitted successfully: App Store Connect shows
+1.0 (6), Waiting for Review. Manual release remains selected. The build source
+is commit `f9ee2071dc40063a40ff9a1b9dda2f9188aae78f`, tag `ios-apporo-1.0-b6`.
+Do not upload the same build number again or repeat the completed submission.
+
 Use all three command-line flags for Release build/archive actions:
 `CLANG_COVERAGE_MAPPING=NO ENABLE_CODE_COVERAGE=NO CLANG_ENABLE_CODE_COVERAGE=NO`.
 Keep the source and binary audits enabled; never disable them to pass a build.

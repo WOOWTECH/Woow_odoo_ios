@@ -2,6 +2,14 @@
 
 Date: 2026-10-30
 
+## November 2 completed release follow-through
+
+Source commit `f9ee2071dc40063a40ff9a1b9dda2f9188aae78f` and tag `ios-apporo-1.0-b6` are pushed. Corrected device archive, App Store export, signature and binary audits passed. Build 6 uploaded successfully at 14:19 Asia/Taipei, finished processing, and replaced build 5 in the review submission. App Store Connect now shows **1.0 (6), Waiting for Review** under submission `68131640-29ec-475c-a350-ca0ce45b691c`. Manual release is retained; no company-stamped documents were uploaded.
+
+The review tenant now has Project and demonstration tasks. iPhone and iPad Release simulator flows created real tasks #5 (high priority) and #6 (standard), verified independently against Odoo under reviewer UID 10. English/Traditional Chinese forms, cancellation, refresh, relaunch, notification-denied iPad operation, dark appearance and stable landscape were checked. Full unit results remain 761 passed, one existing skip, zero failures. Physical iPad is still disconnected; no physical/TestFlight installation success is claimed.
+
+Both listing languages and review notes were saved and verified; actual Facility Desk/request screenshots lead the iPhone large and iPad sets, with new English medium-iPhone assets. Evidence and exact remaining limits are in `docs/2026-11-02-Apporo-4.3-Investigation.md` and `receipts/apporo-platform-validation-1102/`. Earlier dated status below is historical.
+
 ## November 2 validation and correction plan
 
 Execution update: the Odoo 18 transport and stale-project-response fixes are implemented. Eight new focused tests pass. The final signed-simulator ApporoUnit run completed with 762 tests (761 passed, one existing skip, zero failures), exit 0. A navigation-layout test was stabilized after observing its initial 106-to-54-point transition; its original height and inline assertions are preserved. Source test-hook audit passes. The second Apple response was sent at 12:31 Asia/Taipei, message count is four, and the exact text was verified after reload. No company-stamped documents were attached. See `docs/2026-11-02-Apporo-4.3-Investigation.md` for the evidence and remaining tenant/real-device work. The October 30 IPA predates these fixes and must not be uploaded as the corrected candidate.
