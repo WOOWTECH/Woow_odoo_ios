@@ -133,9 +133,10 @@ class BrandLayerTests(unittest.TestCase):
             ("ApporoDebug", "apporo", "com.apporo.odoo.dev", "apporoodoo-dev", "1", "ApporoAppIcon"),
             # ApporoRelease build 1 = App Store Connect 2026-09-27 (b902ff47), build 2 = 8c03e44
             # (TestFlight 2026-09-29), build 3 = b80fa88 (TestFlight 2026-10-03), build 4 = the
-            # 2026-10-08 W2-4 + contrast bump; build 5 carries repeated-push event identity.
-            # Uploaded numbers can never be reused.
-            ("ApporoRelease", "apporo", "com.apporo.odoo", "apporoodoo", "6", "ApporoAppIcon"),
+            # 2026-10-08 W2-4 + contrast bump; build 5 carries repeated-push event identity;
+            # build 6 = f9ee207 facility desk (App Store review 2026-11-02); build 7 adds the
+            # clock-in location fix. Uploaded numbers can never be reused.
+            ("ApporoRelease", "apporo", "com.apporo.odoo", "apporoodoo", "7", "ApporoAppIcon"),
         ]
         for name, brand, bundle, scheme, version, icon in matrix:
             with self.subTest(name=name):
@@ -149,7 +150,7 @@ class BrandLayerTests(unittest.TestCase):
         # Guard against re-using the already-published WOOW build 4.
         self.assertGreaterEqual(int(config("WoowRelease")["CURRENT_PROJECT_VERSION"]), 5)
         # Guard against re-using an uploaded ApporoRelease build number.
-        self.assertGreaterEqual(int(config("ApporoRelease")["CURRENT_PROJECT_VERSION"]), 6)
+        self.assertGreaterEqual(int(config("ApporoRelease")["CURRENT_PROJECT_VERSION"]), 7)
 
     def test_project_and_three_targets_have_matching_configurations(self):
         lists = [v for v in self.objects.values() if v.get("isa") == "XCConfigurationList"]
