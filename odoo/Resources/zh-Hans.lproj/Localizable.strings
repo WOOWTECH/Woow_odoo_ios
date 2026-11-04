@@ -166,3 +166,5 @@
 "offline_title" = "无法连接";
 "offline_message" = "请检查网络连接后再试一次。";
 "offline_retry" = "重试";
+
+"location_waiting" = "正在获取位置…";

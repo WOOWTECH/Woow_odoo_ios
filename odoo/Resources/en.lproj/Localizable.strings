@@ -166,3 +166,5 @@
 "offline_title" = "Unable to connect";
 "offline_message" = "Check your network connection and try again.";
 "offline_retry" = "Try Again";
+
+"location_waiting" = "Getting your location…";

@@ -732,6 +732,156 @@ final class LocationBridgeSecurityTests: XCTestCase {
         XCTAssertTrue(world.webView.evaluatedJavaScript.first?.contains("os-denied") == true)
     }
 
+    /// T24-g2 — production wiring: the gate and the authorization callback read one manager.
+    /// A first-time clock-in must get its fix as soon as the user allows, not stay pending
+    /// until a later tap delivers it (which turned one tap into an extra attendance toggle).
+    func test_didChangeAuthorization_givenSharedManagerAllowed_requestsFixAndResolvesOnce() {
+        let settingsBox = GeoBridgeSettingsBox(locationEnabled: true)
+        let manager = GeoBridgeFakeLocationManager()
+        let webView = GeoBridgeSpyWebView()
+        let coordinator = LocationCoordinator(
+            activeAccountHost: { GeoBridgeFixture.accountHost },
+            settingsProvider: { settingsBox.settings },
+            locationManager: manager,
+            requestingOrigin: GeoBridgeFakeScriptMessage.trustedFrameOrigin
+        )
+        coordinator.handleMessage(
+            GeoBridgeFakeScriptMessage(
+                requestId: GeoBridgeFixture.validRequestId,
+                origin: GeoBridgeFixture.trustedOrigin,
+                frameOrigin: GeoBridgeFixture.trustedOrigin,
+                webView: webView
+            )
+        )
+        XCTAssertEqual(manager.requestWhenInUseAuthorizationCallCount, 1)
+
+        manager.stubbedAuthorizationStatus = .authorizedWhenInUse
+        coordinator.locationManagerDidChangeAuthorization(manager)
+        XCTAssertEqual(manager.requestLocationCallCount, 1,
+                       "Allowing at the prompt must request the fix for the waiting clock-in")
+
+        coordinator.locationManager(manager, didUpdateLocations: [GeoBridgeFixture.syntheticLocation()])
+        XCTAssertEqual(webView.evaluatedJavaScript.count, 1)
+        XCTAssertTrue(webView.evaluatedJavaScript.first?.hasPrefix("__woowResolveGeo(") == true)
+
+        // A second fix must find nothing left over from the first tap.
+        coordinator.locationManager(manager, didUpdateLocations: [GeoBridgeFixture.syntheticLocation()])
+        XCTAssertEqual(webView.evaluatedJavaScript.count, 1)
+    }
+
+    /// T24-g2b — the host is told to block the page for the whole wait, including the prompt,
+    /// so a second clock-in tap cannot become a second attendance toggle.
+    func test_onWaitingChanged_givenPromptThenFix_reportsWaitingUntilAnswered() {
+        let settingsBox = GeoBridgeSettingsBox(locationEnabled: true)
+        let manager = GeoBridgeFakeLocationManager()
+        let webView = GeoBridgeSpyWebView()
+        let coordinator = LocationCoordinator(
+            activeAccountHost: { GeoBridgeFixture.accountHost },
+            settingsProvider: { settingsBox.settings },
+            locationManager: manager,
+            requestingOrigin: GeoBridgeFakeScriptMessage.trustedFrameOrigin
+        )
+        var changes: [Bool] = []
+        coordinator.onWaitingChanged = { changes.append($0) }
+
+        coordinator.handleMessage(
+            GeoBridgeFakeScriptMessage(
+                requestId: GeoBridgeFixture.validRequestId,
+                origin: GeoBridgeFixture.trustedOrigin,
+                frameOrigin: GeoBridgeFixture.trustedOrigin,
+                webView: webView
+            )
+        )
+        XCTAssertEqual(changes, [true])
+
+        manager.stubbedAuthorizationStatus = .authorizedWhenInUse
+        coordinator.locationManagerDidChangeAuthorization(manager)
+        XCTAssertEqual(changes, [true], "The wait continues between the prompt and the fix")
+
+        coordinator.locationManager(manager, didUpdateLocations: [GeoBridgeFixture.syntheticLocation()])
+        XCTAssertEqual(changes, [true, false])
+    }
+
+    /// T24-g2c — every way a wait can end must release the page, or it stays blocked for good.
+    func test_onWaitingChanged_givenFailureOrDocumentChange_releasesPage() {
+        let settingsBox = GeoBridgeSettingsBox(locationEnabled: true)
+        let manager = GeoBridgeFakeLocationManager()
+        manager.stubbedAuthorizationStatus = .authorizedWhenInUse
+        let webView = GeoBridgeSpyWebView()
+        let coordinator = LocationCoordinator(
+            activeAccountHost: { GeoBridgeFixture.accountHost },
+            settingsProvider: { settingsBox.settings },
+            locationManager: manager,
+            requestingOrigin: GeoBridgeFakeScriptMessage.trustedFrameOrigin
+        )
+        var changes: [Bool] = []
+        coordinator.onWaitingChanged = { changes.append($0) }
+        let request = {
+            coordinator.handleMessage(
+                GeoBridgeFakeScriptMessage(
+                    requestId: GeoBridgeFixture.validRequestId,
+                    origin: GeoBridgeFixture.trustedOrigin,
+                    frameOrigin: GeoBridgeFixture.trustedOrigin,
+                    webView: webView
+                )
+            )
+        }
+
+        request()
+        coordinator.locationManager(manager, didFailWithError: CLError(.locationUnknown))
+        XCTAssertEqual(changes, [true, false])
+
+        request()
+        coordinator.invalidateActiveDocument()
+        XCTAssertEqual(changes, [true, false, true, false])
+    }
+
+    /// T24-g2d — the overlay must actually take touches while waiting, and none afterwards.
+    func test_locationWaitOverlay_givenWaitingState_blocksTouchesOnlyWhileWaiting() {
+        let overlay = LocationWaitOverlayView(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+        let center = CGPoint(x: 50, y: 50)
+        XCTAssertNil(overlay.hitTest(center, with: nil))
+
+        overlay.setWaiting(true)
+        XCTAssertNotNil(overlay.hitTest(center, with: nil))
+
+        overlay.setWaiting(false)
+        XCTAssertNil(overlay.hitTest(center, with: nil))
+    }
+
+    /// T24-g3 — production wiring: denying at the prompt answers the waiting request once,
+    /// so nothing stays pending to be delivered if permission is granted later.
+    func test_didChangeAuthorization_givenSharedManagerDenied_rejectsOnceWithNothingPending() {
+        let settingsBox = GeoBridgeSettingsBox(locationEnabled: true)
+        let manager = GeoBridgeFakeLocationManager()
+        let webView = GeoBridgeSpyWebView()
+        let coordinator = LocationCoordinator(
+            activeAccountHost: { GeoBridgeFixture.accountHost },
+            settingsProvider: { settingsBox.settings },
+            locationManager: manager,
+            requestingOrigin: GeoBridgeFakeScriptMessage.trustedFrameOrigin
+        )
+        coordinator.handleMessage(
+            GeoBridgeFakeScriptMessage(
+                requestId: GeoBridgeFixture.validRequestId,
+                origin: GeoBridgeFixture.trustedOrigin,
+                frameOrigin: GeoBridgeFixture.trustedOrigin,
+                webView: webView
+            )
+        )
+
+        manager.stubbedAuthorizationStatus = .denied
+        coordinator.locationManagerDidChangeAuthorization(manager)
+        XCTAssertEqual(webView.evaluatedJavaScript.count, 1)
+        XCTAssertTrue(webView.evaluatedJavaScript.first?.contains("os-denied") == true)
+
+        manager.stubbedAuthorizationStatus = .authorizedWhenInUse
+        coordinator.locationManagerDidChangeAuthorization(manager)
+        coordinator.locationManager(manager, didUpdateLocations: [GeoBridgeFixture.syntheticLocation()])
+        XCTAssertEqual(manager.requestLocationCallCount, 0)
+        XCTAssertEqual(webView.evaluatedJavaScript.count, 1)
+    }
+
     /// T24-h — EP-06F F2, deferred path. A frame that is really third-party but claims the
     /// account origin while the OS status is `.notDetermined` must not raise the OS prompt,
     /// and must obtain no fix when the user later authorises. (Before the fix, the forged
