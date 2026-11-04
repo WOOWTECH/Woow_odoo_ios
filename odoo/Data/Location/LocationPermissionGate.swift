@@ -46,14 +46,15 @@ final class LocationPermissionGate {
     /// Creates a gate with injectable dependencies for testability.
     ///
     /// - Parameters:
-    ///   - statusProvider: Provides the current CLAuthorizationStatus. Defaults to a real CLLocationManager.
+    ///   - statusProvider: Provides the current CLAuthorizationStatus. In production this must be the
+    ///     same CLLocationManager that receives the authorization callback: a second instance can
+    ///     still report `.notDetermined` when the callback fires, which strands the pending request.
     ///   - settingsProvider: Returns the current AppSettings on each call (avoids stale snapshots).
     init(
-        statusProvider: LocationManagerStatusProvider? = nil,
+        statusProvider: LocationManagerStatusProvider,
         settingsProvider: @escaping () -> AppSettings = { SecureStorage.shared.getSettings() }
     ) {
-        // CLLocationManager() must be allocated on the main thread.
-        self.statusProvider = statusProvider ?? CLLocationManager()
+        self.statusProvider = statusProvider
         self.settingsProvider = settingsProvider
     }
 

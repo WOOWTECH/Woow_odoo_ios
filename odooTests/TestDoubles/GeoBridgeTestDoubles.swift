@@ -137,6 +137,13 @@ final class GeoBridgeFakeLocationManager: CLLocationManager {
     override var accuracyAuthorization: CLAccuracyAuthorization {
         stubbedAccuracyAuthorization
     }
+
+    /// The status this manager reports, for tests where the gate reads this manager directly.
+    var stubbedAuthorizationStatus: CLAuthorizationStatus = .notDetermined
+
+    override var authorizationStatus: CLAuthorizationStatus {
+        stubbedAuthorizationStatus
+    }
 }
 
 // MARK: - Mutable status provider
