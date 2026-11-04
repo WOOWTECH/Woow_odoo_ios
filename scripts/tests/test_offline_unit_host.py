@@ -176,6 +176,7 @@ def allow_audited_offline_retry_apply(text):
 
 
 AUDITED_SESSION_PROTOCOLS = {
+    "FacilityDeskTests.swift": ("FacilityTransport",),
     # Baseline 0930b: ("SwitchURLProtocol",). Current 1001 (demo111 defect 1): a second, equally
     # offline SwitchURLProtocol session for the heal-then-switch reuse test.
     "ApporoSwitchSessionReuseTests.swift": ("SwitchURLProtocol", "SwitchURLProtocol"),

@@ -75,7 +75,22 @@ final class LocationCoordinator: NSObject, CLLocationManagerDelegate {
     /// caller-supplied request id. Any frame in the page can post to the message handler
     /// (the shim and handler are installed with `forMainFrameOnly: false`), so a caller-
     /// supplied key lets one frame silently overwrite another frame's pending request.
-    private var pendingRequests: [UUID: PendingRequest] = [:]
+    private var pendingRequests: [UUID: PendingRequest] = [:] {
+        didSet {
+            let waiting = !pendingRequests.isEmpty
+            guard waiting != isWaitingForLocation else { return }
+            isWaitingForLocation = waiting
+            onWaitingChanged?(waiting)
+        }
+    }
+
+    private var isWaitingForLocation = false
+
+    /// Called when the first request starts waiting and when the last one is answered.
+    ///
+    /// Odoo's clock-in sends one attendance toggle per geolocation callback, success or error,
+    /// so a second tap during the wait cannot be undone here. The host blocks the page instead.
+    var onWaitingChanged: ((Bool) -> Void)?
 
     /// Incremented every time the hosting WebView starts loading a new document or is rebuilt
     /// for a different account. Requests stamped with an older generation are discarded.
@@ -108,6 +123,31 @@ final class LocationCoordinator: NSObject, CLLocationManagerDelegate {
         super.init()
         self.locationManager.delegate = self
         self.locationManager.desiredAccuracy = kCLLocationAccuracyBest
+    }
+
+    /// Creates a coordinator whose gate reads its status from `locationManager` itself, so the
+    /// status the gate sees can never lag behind the authorization callback that manager delivers.
+    ///
+    /// - Parameters:
+    ///   - activeAccountHost: A closure returning the current active account's hostname.
+    ///   - activeAccountPort: A closure returning the active account's explicit port, or nil.
+    ///   - settingsProvider: Returns the current AppSettings on each gate resolution.
+    ///   - locationManager: The `CLLocationManager` instance (injectable for testing).
+    ///   - requestingOrigin: Resolves the WebKit-attested origin of a message's frame.
+    convenience init(
+        activeAccountHost: @escaping () -> String?,
+        activeAccountPort: @escaping () -> Int? = { nil },
+        settingsProvider: @escaping () -> AppSettings = { SecureStorage.shared.getSettings() },
+        locationManager: CLLocationManager = CLLocationManager(),
+        requestingOrigin: @escaping @MainActor (WKScriptMessage) -> URL? = LocationCoordinator.frameSecurityOrigin(of:)
+    ) {
+        self.init(
+            gate: LocationPermissionGate(statusProvider: locationManager, settingsProvider: settingsProvider),
+            activeAccountHost: activeAccountHost,
+            activeAccountPort: activeAccountPort,
+            locationManager: locationManager,
+            requestingOrigin: requestingOrigin
+        )
     }
 
     // MARK: - WKScriptMessageHandler entry (registered via MessageHandlerProxy)

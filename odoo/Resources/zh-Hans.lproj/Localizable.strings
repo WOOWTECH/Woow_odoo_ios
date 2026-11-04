@@ -199,3 +199,5 @@
 "facility_submit_success" = "设施服务请求已添加到所选 Odoo 项目。";
 "facility_data_notice" = "请求和项目数据会发送并存储在贵组织的 Odoo 服务器上。";
 "facility_request_prefix" = "设施请求";
+
+"location_waiting" = "正在获取位置…";

@@ -72,13 +72,14 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     /// `lazy` so its `activeAccountHost` closure can capture `self` and always report the
     /// current account's host after a switch (avoids the Android stale-closure bug).
     private(set) lazy var locationCoordinator: LocationCoordinator = LocationCoordinator(
-        gate: LocationPermissionGate(),
         activeAccountHost: { [weak self] in self?.currentServerHost },
         activeAccountPort: { [weak self] in self?.currentServerPort }
     )
 
     /// Stable host container; the per-account child WebView is swapped inside it.
     private weak var container: UIView?
+    /// Blocks the page while a clock-in waits for its location; see `onWaitingChanged`.
+    private let locationWaitOverlay = LocationWaitOverlayView()
     /// The child WebView for the current account, or nil before the first `apply`.
     private(set) var webView: WKWebView?
 
@@ -202,6 +203,17 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
     /// Records the stable container view the child WebViews are hosted inside.
     func attach(to container: UIView) {
         self.container = container
+        locationWaitOverlay.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(locationWaitOverlay)
+        NSLayoutConstraint.activate([
+            locationWaitOverlay.topAnchor.constraint(equalTo: container.topAnchor),
+            locationWaitOverlay.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            locationWaitOverlay.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            locationWaitOverlay.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+        ])
+        locationCoordinator.onWaitingChanged = { [weak self] waiting in
+            self?.locationWaitOverlay.setWaiting(waiting)
+        }
     }
 
     // MARK: - Single mutation entry point
@@ -291,6 +303,7 @@ final class OdooWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate
                 newWebView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
                 newWebView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             ])
+            container.bringSubviewToFront(locationWaitOverlay)
         }
 
         // Inject the target account's session cookie into ITS OWN data store before loading,

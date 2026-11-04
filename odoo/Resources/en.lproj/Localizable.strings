@@ -199,3 +199,5 @@
 "facility_submit_success" = "Your facility request was added to the selected Odoo project.";
 "facility_data_notice" = "Requests and project details are sent to and stored on your organization's Odoo server.";
 "facility_request_prefix" = "Facility request";
+
+"location_waiting" = "Getting your location…";

@@ -199,3 +199,5 @@
 "facility_submit_success" = "設施服務請求已新增至所選 Odoo 專案。";
 "facility_data_notice" = "請求及專案資料會傳送並儲存在貴組織的 Odoo 伺服器。";
 "facility_request_prefix" = "設施請求";
+
+"location_waiting" = "正在取得位置…";
